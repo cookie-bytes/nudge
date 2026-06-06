@@ -114,8 +114,7 @@ Nudge outputs optimized diagrams and execution specs in the `.nudge/` directory:
 │   ├── cli.js              # CLI entry point and orchestration loop
 │   ├── critic.js           # Geometric evaluation and LLM API connector
 │   ├── mermaid_parser.js   # Parse Mermaid C4 diagram structures
-│   ├── render.html         # ELKjs rendering template loaded in Playwright
-│   └── test_coords.js      # Internal coordinate helpers
+│   └── render.html         # ELKjs rendering template loaded in Playwright
 ├── LICENSE                 # MIT License
 └── package.json            # Node project configuration
 ```

@@ -123,7 +123,7 @@ export function parseMermaidC4(mermaidString) {
         type: mappedType,
         description,
         width: 160,
-        height: 80
+        height: mappedType === 'database' ? 230 : 80
       };
 
       if (activeBoundaries.length > 0) {

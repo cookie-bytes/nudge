@@ -57,6 +57,20 @@
       fill: #334155; /* Slate 700 */
       stroke: #64748b;
     }
+    .node-database {
+      fill: #312e81; /* Indigo 900 body */
+      stroke: #818cf8; /* Indigo 400 */
+    }
+    .db-cap {
+      fill: #818cf8; /* Indigo 400 — clearly lighter than body so lid reads as a solid filled ellipse */
+      stroke: none;
+    }
+    .db-rim {
+      fill: none;
+      stroke: #e0e7ff; /* Indigo 100 — bright */
+      stroke-width: 2.5px;
+      stroke-linecap: round;
+    }
     /* Edge and Connector lines */
     .edge-line {
       fill: none;
@@ -855,6 +869,67 @@
             // Render component/person node
             const nodesLayer = document.getElementById("nodes-layer");
 
+            if (node.type === 'database') {
+              // Canonical stacked-disc database cylinder.
+              const eRy = Math.max(22, Math.round(node.width * 0.22));
+              const eRx = node.width / 2;
+              const cxDb = absX + eRx;
+              const W = node.width, H = node.height;
+              const textStartTop = 2 * eRy + 10;
+ 
+               // Body: left side, bottom arc (sweep=1 curves DOWN), right side.
+               // Open path (no Z): SVG fills the implied closed area but draws no top stroke,
+               // so the top ellipse cap provides the only visible top edge.
+               const bodyPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+               bodyPath.setAttribute("d", [
+                 `M ${absX} ${absY + eRy}`,
+                 `L ${absX} ${absY + H - eRy}`,
+                 `A ${eRx} ${eRy} 0 0 0 ${absX + W} ${absY + H - eRy}`,
+                 `L ${absX + W} ${absY + eRy}`
+               ].join(' '));
+               bodyPath.setAttribute("class", `node node-database`);
+               nodesLayer.appendChild(bodyPath);
+ 
+               // Top ellipse cap — distinct lighter fill so the lid reads as solid
+               const topEllipse = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
+               topEllipse.setAttribute("cx", cxDb);
+               topEllipse.setAttribute("cy", absY + eRy);
+               topEllipse.setAttribute("rx", eRx);
+               topEllipse.setAttribute("ry", eRy);
+               topEllipse.setAttribute("class", "db-cap");
+               nodesLayer.appendChild(topEllipse);
+ 
+               // Text content confined to the straight-sides area below the top cap
+               const fo = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
+               fo.setAttribute("x", absX);
+               fo.setAttribute("y", absY + textStartTop);
+               fo.setAttribute("width", W);
+               fo.setAttribute("height", H - textStartTop - eRy);
+
+              const wrapper = document.createElement("div");
+              wrapper.className = "node-content-wrapper";
+
+              const title = document.createElement("div");
+              title.className = "node-title";
+              title.textContent = node.label;
+              wrapper.appendChild(title);
+
+              const typeLabel = document.createElement("div");
+              typeLabel.className = "node-type";
+              typeLabel.textContent = `[Database]`;
+              wrapper.appendChild(typeLabel);
+
+              if (node.description) {
+                const desc = document.createElement("div");
+                desc.className = "node-desc";
+                desc.textContent = node.description;
+                wrapper.appendChild(desc);
+              }
+
+              fo.appendChild(wrapper);
+              nodesLayer.appendChild(fo);
+
+            } else {
             // Outer rectangular container
             const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
             rect.setAttribute("x", absX);
@@ -893,6 +968,7 @@
 
             fo.appendChild(wrapper);
             nodesLayer.appendChild(fo);
+            } // end else (non-database)
           }
         }
 
