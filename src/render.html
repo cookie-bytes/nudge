@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Nudge Diagram Renderer</title>
+  <!-- Load ELKjs bundled from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js"></script>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #0f172a; /* Slate 900 */
+      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      overflow: hidden;
+    }
+    #diagram-container {
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    svg {
+      width: 100%;
+      height: 100%;
+      user-select: none;
+    }
+    /* SVG Styling */
+    .boundary {
+      fill: #1e293b;
+      stroke: #475569;
+      stroke-width: 2px;
+      stroke-dasharray: 6, 6;
+      rx: 8;
+    }
+    .boundary-label {
+      fill: #94a3b8;
+      font-size: 14px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .node {
+      filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.3));
+      stroke-width: 2px;
+      rx: 6;
+    }
+    .node-person {
+      fill: #0284c7; /* Sky 600 */
+      stroke: #0ea5e9;
+    }
+    .node-container {
+      fill: #1e3a8a; /* Blue 900 */
+      stroke: #3b82f6;
+    }
+    .node-external {
+      fill: #334155; /* Slate 700 */
+      stroke: #64748b;
+    }
+    /* Edge and Connector lines */
+    .edge-line {
+      fill: none;
+      stroke: #94a3b8;
+      stroke-width: 2.5px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      transition: stroke 0.2s;
+    }
+    .edge-label-bg {
+      fill: #0f172a; /* Same as background to mask line */
+      rx: 4;
+    }
+    .edge-label-text {
+      fill: #cbd5e1;
+      font-size: 11px;
+      font-weight: 500;
+      text-anchor: middle;
+    }
+    .diagram-title-text {
+      fill: #f8fafc;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.025em;
+    }
+    /* Node HTML content via foreignObject */
+    .node-content-wrapper {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 4px 8px;
+      box-sizing: border-box;
+      color: #f8fafc;
+      text-align: center;
+    }
+    .node-title {
+      font-size: 13px;
+      font-weight: bold;
+      margin-bottom: 2px;
+      line-height: 1.2;
+    }
+    .node-type {
+      font-size: 8px;
+      font-weight: 600;
+      text-transform: uppercase;
+      opacity: 0.7;
+      margin-bottom: 4px;
+      letter-spacing: 0.05em;
+      line-height: 1.2;
+    }
+    .node-desc {
+      font-size: 9.5px;
+      opacity: 0.85;
+      line-height: 1.2;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  </style>
+</head>
+<body>
+  <div id="diagram-container">
+    <svg id="svg-root">
+      <defs>
+        <!-- Arrowhead markers -->
+        <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#94a3b8" />
+        </marker>
+      </defs>
+      <g id="title-layer"></g>
+      <g id="boundaries-layer"></g>
+      <g id="edges-layer"></g>
+      <g id="nodes-layer"></g>
+      <g id="edge-labels-layer"></g>
+    </svg>
+  </div>
+  <script>
+    const elk = new ELK();
+    let ranks = {};
+
+    // Main layout and rendering entrypoint called by Playwright
+    window.renderDiagram = async function (diagramData) {
+      try {
+        console.log("Ingesting diagram data:", diagramData);
+
+        // Convert the input structure to ELK-compliant JSON format
+        const elkGraph = transformToElkGraph(diagramData);
+        
+        console.log("Transformed ELK graph configuration:", JSON.stringify(elkGraph, null, 2));
+        
+        // Execute the ELK layout algorithm
+        let laidOutGraph = await elk.layout(elkGraph);
+        console.log("Pass 1 laid out graph coordinates:", laidOutGraph);
+
+        // Pass 2: Refine port side connections based on actual Pass 1 coordinates
+        let needsSecondPass = false;
+        
+        function findNodeInGraph(graphNode, id) {
+          if (graphNode.id === id) return graphNode;
+          if (graphNode.children) {
+            for (const child of graphNode.children) {
+              const found = findNodeInGraph(child, id);
+              if (found) return found;
+            }
+          }
+          return null;
+        }
+
+        function updatePortSide(nodeId, portId, side) {
+          const node = findNodeInGraph(elkGraph, nodeId);
+          if (node) {
+            if (!node.ports) node.ports = [];
+            let port = node.ports.find(p => p.id === portId);
+            if (port) {
+              if (!port.properties) port.properties = {};
+              port.properties["port.side"] = side;
+              port.properties["org.eclipse.elk.port.side"] = side;
+              if (!port.layoutOptions) port.layoutOptions = {};
+              port.layoutOptions["port.side"] = side;
+              port.layoutOptions["org.eclipse.elk.port.side"] = side;
+            } else {
+              node.ports.push({
+                id: portId,
+                width: 1,
+                height: 1,
+                properties: {
+                  "port.side": side,
+                  "org.eclipse.elk.port.side": side
+                },
+                layoutOptions: {
+                  "port.side": side,
+                  "org.eclipse.elk.port.side": side
+                }
+              });
+            }
+            node.layoutOptions["elk.portConstraints"] = "FIXED_SIDE";
+            node.layoutOptions["portConstraints"] = "FIXED_SIDE";
+            node.layoutOptions["org.eclipse.elk.portConstraints"] = "FIXED_SIDE";
+            needsSecondPass = true;
+          }
+        }
+
+        const direction = diagramData.layoutOptions && diagramData.layoutOptions["elk.direction"] || "DOWN";
+        if (direction === "DOWN" && diagramData.edges) {
+          const flatEdgesList = flattenEdges(laidOutGraph);
+          const flatNodesList = flattenNodes(laidOutGraph, 0, 0);
+
+          diagramData.edges.forEach((e, idx) => {
+            const edgeId = `edge_${idx}`;
+            const flatEdge = flatEdgesList.find(fe => fe.id === edgeId);
+            
+            if (flatEdge && flatEdge.sections && flatEdge.sections.length > 0) {
+              const section = flatEdge.sections[0];
+              const flatSrc = flatNodesList.find(fn => fn.id === e.from);
+              const flatTgt = flatNodesList.find(fn => fn.id === e.to);
+              
+              if (flatSrc && flatTgt) {
+                const rankSrc = ranks[e.from] !== undefined ? ranks[e.from] : 0;
+                const rankTgt = ranks[e.to] !== undefined ? ranks[e.to] : 0;
+                const isUpward = rankSrc > rankTgt;
+                const isBypassing = Math.abs(rankSrc - rankTgt) > 1;
+                
+                if (isUpward) {
+                  const tgtLeft = flatTgt.x;
+                  const tgtRight = flatTgt.x + flatTgt.width;
+                  const srcCenter = flatSrc.x + flatSrc.width / 2;
+                  const targetPortId = `${e.to}_port_in_${idx}`;
+
+                  // Collect path points excluding the endpoint (which sits at the current port)
+                  const pathPoints = [{ x: section.startPoint.x, y: section.startPoint.y }];
+                  if (section.bendPoints) pathPoints.push(...section.bendPoints);
+                  const pathMaxX = Math.max(...pathPoints.map(p => p.x));
+                  const pathMinX = Math.min(...pathPoints.map(p => p.x));
+
+                  // If the source OR the routing path extends to the right/left of the target, connect on that side
+                  if (srcCenter > tgtRight || pathMaxX > tgtRight) {
+                    updatePortSide(e.to, targetPortId, "EAST");
+                  } else if (srcCenter < tgtLeft || pathMinX < tgtLeft) {
+                    updatePortSide(e.to, targetPortId, "WEST");
+                  }
+                }
+              }
+            }
+          });
+        }
+
+        if (needsSecondPass) {
+          console.log("Refining layout with side port constraints in Pass 2...");
+          laidOutGraph = await elk.layout(elkGraph);
+          console.log("Pass 2 laid out graph coordinates:", laidOutGraph);
+        }
+
+        // Render the graph using SVG (with 50px vertical offset for title)
+        drawGraph(laidOutGraph, diagramData);
+
+        // Return coordinates and bounds back to Playwright for analysis
+        const displayType = diagramData && diagramData.diagramType === "C4Container" ? "C4 Container Diagram" : "C4 Context Diagram";
+        const titleText = `${displayType} : ${(diagramData && diagramData.title) || "Untitled"}`;
+        const titleWidth = measureTextWidth(titleText, 16, true) + 60;
+        const finalWidth = Math.max(laidOutGraph.width, titleWidth);
+
+        return {
+          success: true,
+          width: finalWidth,
+          height: laidOutGraph.height + 50,
+          nodes: flattenNodes(laidOutGraph, 0, 50),
+          edges: flattenEdges(laidOutGraph, 0, 50)
+        };
+      } catch (err) {
+        console.error("Rendering failed:", err);
+        return { success: false, error: err.message };
+      }
+    };
+
+    // Transform raw nodes/edges/layoutOptions from YAML into ELK schema
+    function transformToElkGraph(diagramData) {
+      const options = diagramData.layoutOptions || {};
+      
+      const graph = {
+        id: "root",
+        layoutOptions: {
+          "elk.algorithm": options["elk.algorithm"] || "layered",
+          "elk.direction": options["elk.direction"] || "DOWN",
+          "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+          "elk.spacing.nodeNode": String(options["elk.spacing.nodeNode"] || 80),
+          "elk.layered.spacing.nodeNodeBetweenLayers": String(options["elk.layered.spacing.nodeNodeBetweenLayers"] || 80),
+          "elk.spacing.edgeNode": String(options["elk.spacing.edgeNode"] || 40),
+          "elk.spacing.edgeEdge": String(options["elk.spacing.edgeEdge"] || 30),
+          "elk.padding": options["elk.padding"] || "[top=30,left=30,bottom=30,right=30]",
+          // Enforce model order constraints on the layout engine
+          "elk.layered.crossingMinimization.semiInteractive": "true",
+          "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+          "elk.layered.crossingMinimization.forceNodeModelOrder": "true",
+          // Align nodes to favor straight edges
+          "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+          "elk.layered.nodePlacement.favorStraightEdges": "true",
+          "elk.portConstraints": "FREE",
+          "elk.layered.allowNonFlowPortsToSwitchSides": "true"
+        },
+        children: [],
+        edges: []
+      };
+      // Helper map to quickly find parent nodes
+      const nodeMap = new Map();
+
+      // --- LAYOUT CONSTRAINTS SOLVER ---
+      const rules = diagramData.rules || [];
+      ranks = {};
+
+      // --- DIAGRAM-SPECIFIC LAYOUT POLICIES ---
+      const DIAGRAM_LAYOUT_POLICIES = {
+        C4Context: {
+          getDefaultRank(type) {
+            if (type === "person") return 0;
+            if (type === "container" || type === "system") return 1;
+            if (type === "external" || type === "database") return 2;
+            return 0;
+          },
+          applyLayerConstraints(node, rankVal) {
+            if (node.type === "person") {
+              node.layoutOptions["elk.layered.layering.layerConstraint"] = "FIRST";
+            } else if (node.type === "external" && rankVal >= 2) {
+              node.layoutOptions["elk.layered.layering.layerConstraint"] = "LAST";
+            }
+          },
+          applySensibleDefaults(nodes, edges, ranks) {
+            if (!edges) return;
+            for (const edge of edges) {
+              const srcNode = findNodeById(edge.from);
+              const tgtNode = findNodeById(edge.to);
+              if (srcNode && tgtNode) {
+                if (srcNode.type === "external" && ranks[tgtNode.id] === 0) {
+                  ranks[srcNode.id] = 0;
+                }
+              }
+            }
+          }
+        },
+
+        C4Container: {
+          getDefaultRank(type) {
+            if (type === "person") return 0;
+            if (type === "container" || type === "system") return 1;
+            if (type === "database") return 2;
+            if (type === "external") return 3;
+            return 0;
+          },
+          applyLayerConstraints(node, rankVal) {
+            if (node.type === "person") {
+              node.layoutOptions["elk.layered.layering.layerConstraint"] = "FIRST";
+            } else if (node.type === "external" && rankVal >= 3) {
+              node.layoutOptions["elk.layered.layering.layerConstraint"] = "LAST";
+            }
+          },
+          applySensibleDefaults(nodes, edges, ranks) {
+            if (!edges) return;
+            for (const edge of edges) {
+              const srcNode = findNodeById(edge.from);
+              const tgtNode = findNodeById(edge.to);
+              if (srcNode && tgtNode) {
+                if (srcNode.type === "external" && ranks[tgtNode.id] === 0) {
+                  ranks[srcNode.id] = 0;
+                }
+              }
+            }
+          }
+        }
+      };
+
+      const policyType = diagramData.diagramType || "C4Context";
+      const policy = DIAGRAM_LAYOUT_POLICIES[policyType] || DIAGRAM_LAYOUT_POLICIES["C4Context"];
+
+      // Helper to find nodes by ID or Type
+      function findNodesMatching(selector) {
+        const matches = [];
+        function traverse(nodeList) {
+          for (const n of nodeList) {
+            if (n.id === selector || n.type === selector) {
+              matches.push(n);
+            }
+            if (n.children) traverse(n.children);
+          }
+        }
+        traverse(diagramData.nodes || []);
+        return matches;
+      }
+
+      // Helper to find a specific node by ID
+      function findNodeById(id) {
+        const matches = findNodesMatching(id);
+        return matches.length > 0 ? matches[0] : null;
+      }
+
+      // 1. Initialize ranks based on C4 defaults
+      function initRanks(nodeList) {
+        for (const n of nodeList) {
+          ranks[n.id] = policy.getDefaultRank(n.type);
+          if (n.children) initRanks(n.children);
+        }
+      }
+      initRanks(diagramData.nodes || []);
+
+      // Apply symmetrical flow adjustments for external nodes that point directly to people
+      policy.applySensibleDefaults(diagramData.nodes, diagramData.edges, ranks);
+
+      // 2. Resolve custom rules using Bellman-Ford style relaxation
+      if (rules.length > 0) {
+        console.log("Resolving layout priority rules:", JSON.stringify(rules));
+        for (let iter = 0; iter < 5; iter++) {
+          for (const rule of rules) {
+            const sources = findNodesMatching(rule.source);
+            const targets = findNodesMatching(rule.target);
+
+            for (const srcNode of sources) {
+              for (const tgtNode of targets) {
+                const srcVal = ranks[srcNode.id] !== undefined ? ranks[srcNode.id] : 0;
+                const tgtVal = ranks[tgtNode.id] !== undefined ? ranks[tgtNode.id] : 0;
+
+                if (rule.relation === 'above') {
+                  if (srcVal >= tgtVal) {
+                    ranks[tgtNode.id] = srcVal + 1;
+                  }
+                } else if (rule.relation === 'below') {
+                  if (srcVal <= tgtVal) {
+                    ranks[srcNode.id] = tgtVal + 1;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // First pass: Process and register all nodes
+      function processNodes(nodeList, parentNode = null) {
+        // Sort nodeList using the resolved constraint ranks
+        const sortedNodeList = [...nodeList].sort((a, b) => {
+          const rankA = ranks[a.id] !== undefined ? ranks[a.id] : 0;
+          const rankB = ranks[b.id] !== undefined ? ranks[b.id] : 0;
+          return rankA - rankB;
+        });
+
+        const rankCounts = {};
+
+        for (const rawNode of sortedNodeList) {
+          const node = {
+            id: rawNode.id,
+            width: rawNode.width || 150,
+            height: rawNode.height || 80,
+            type: rawNode.type || "container",
+            label: rawNode.label || rawNode.id,
+            description: rawNode.description || "",
+            layoutOptions: {},
+            edges: []
+          };
+
+          // Apply Layout Placement Hints
+          const direction = options["elk.direction"] || "DOWN";
+          const rankVal = ranks[node.id] !== undefined ? ranks[node.id] : 0;
+          
+          // Set layer constraints
+          policy.applyLayerConstraints(node, rankVal);
+
+          // Track the number of nodes in the same rank to offset them
+          if (rankCounts[rankVal] === undefined) {
+            rankCounts[rankVal] = 0;
+          }
+          const offsetIndex = rankCounts[rankVal];
+          rankCounts[rankVal]++;
+
+          // Hint coordinates for semi-interactive layout
+          if (direction === "DOWN") {
+            node.x = offsetIndex * 180; // Separate horizontally within the same row/layer
+            node.y = rankVal * 200;
+          } else {
+            node.x = rankVal * 200;
+            node.y = offsetIndex * 150; // Separate vertically within the same column/layer
+          }
+
+          // If it's a boundary node, it's a container box for nested components
+          if (rawNode.type === "boundary") {
+            node.children = [];
+            // Remove width and height constraints so ELK autosizes it
+            delete node.width;
+            delete node.height;
+            
+            // Add padding options inside cluster
+            node.layoutOptions["elk.padding"] = "[top=40,left=25,bottom=25,right=25]";
+            // Propagate layout direction and alignment
+            node.layoutOptions["elk.algorithm"] = options["elk.algorithm"] || "layered";
+            node.layoutOptions["elk.direction"] = options["elk.direction"] || "DOWN";
+            // Propagate layout spacing options from root options
+            node.layoutOptions["elk.spacing.nodeNode"] = String(options["elk.spacing.nodeNode"] || 80);
+            node.layoutOptions["elk.layered.spacing.nodeNodeBetweenLayers"] = String(options["elk.layered.spacing.nodeNodeBetweenLayers"] || 80);
+            node.layoutOptions["elk.spacing.edgeNode"] = String(options["elk.spacing.edgeNode"] || 40);
+            node.layoutOptions["elk.spacing.edgeEdge"] = String(options["elk.spacing.edgeEdge"] || 30);
+            // Propagate crossing minimization & ordering constraints to boundaries
+            node.layoutOptions["elk.layered.crossingMinimization.semiInteractive"] = "true";
+            node.layoutOptions["elk.layered.considerModelOrder.strategy"] = "NODES_AND_EDGES";
+            node.layoutOptions["elk.layered.crossingMinimization.forceNodeModelOrder"] = "true";
+            // Align nodes to favor straight edges inside boundaries
+            node.layoutOptions["elk.layered.nodePlacement.strategy"] = "NETWORK_SIMPLEX";
+            node.layoutOptions["elk.layered.nodePlacement.favorStraightEdges"] = "true";
+            node.layoutOptions["elk.portConstraints"] = "FREE";
+            node.layoutOptions["portConstraints"] = "FREE";
+            node.layoutOptions["org.eclipse.elk.portConstraints"] = "FREE";
+            node.layoutOptions["elk.layered.allowNonFlowPortsToSwitchSides"] = "true";
+          }
+
+          nodeMap.set(rawNode.id, { node, parentId: parentNode ? parentNode.id : null });
+
+          if (rawNode.children && rawNode.children.length > 0) {
+            processNodes(rawNode.children, node);
+          }
+        }
+      }
+
+      processNodes(diagramData.nodes || []);
+
+      // Assemble hierarchy based on node parent relationships
+      for (const [id, record] of nodeMap.entries()) {
+        if (record.parentId) {
+          const parentRecord = nodeMap.get(record.parentId);
+          parentRecord.node.children.push(record.node);
+        } else {
+          graph.children.push(record.node);
+        }
+      }
+
+      // Helper to find ancestor path of a node ID
+      function getAncestors(id) {
+        const path = [];
+        let current = nodeMap.get(id);
+        while (current) {
+          path.push(current.node.id);
+          if (current.parentId) {
+            current = nodeMap.get(current.parentId);
+          } else {
+            break;
+          }
+        }
+        path.push("root");
+        return path;
+      }
+
+      // Find closest common ancestor node or graph object
+      function findClosestCommonAncestor(idA, idB) {
+        const pathA = getAncestors(idA);
+        const pathB = getAncestors(idB);
+
+        for (const parentA of pathA) {
+          if (pathB.includes(parentA)) {
+            return parentA;
+          }
+        }
+        return "root";
+      }
+
+      function addPortToNode(node, portId, side) {
+        if (!node.ports) {
+          node.ports = [];
+        }
+        if (!node.ports.find(p => p.id === portId)) {
+          node.ports.push({
+            id: portId,
+            width: 1,
+            height: 1,
+            properties: {
+              "port.side": side,
+              "org.eclipse.elk.port.side": side
+            },
+            layoutOptions: {
+              "port.side": side,
+              "org.eclipse.elk.port.side": side
+            }
+          });
+          console.log(`[Port] Added port ${portId} to side ${side} on node ${node.id}`);
+        }
+        node.layoutOptions["elk.portConstraints"] = "FIXED_SIDE";
+        node.layoutOptions["portConstraints"] = "FIXED_SIDE";
+        node.layoutOptions["org.eclipse.elk.portConstraints"] = "FIXED_SIDE";
+      }
+
+      // Add Edges at their closest common ancestor
+      if (diagramData.edges) {
+        diagramData.edges.forEach((e, idx) => {
+          const edge = {
+            id: `edge_${idx}`,
+            sources: [e.from],
+            targets: [e.to],
+            labels: e.label ? (() => {
+              const match = e.label.match(/^(.*?)\s*\[(.*?)\]$/);
+              if (match) {
+                const mainText = match[1].trim();
+                const techText = `[${match[2].trim()}]`;
+                const mainLines = wrapText(mainText, MAX_LABEL_WIDTH, 11);
+                const wrappedWidth = Math.max(...mainLines.map(l => measureTextWidth(l, 11)), measureTextWidth(techText, 11));
+                return [{ text: e.label, width: wrappedWidth, height: (mainLines.length + 1) * LINE_HEIGHT + 2 }];
+              } else {
+                const lines = wrapText(e.label, MAX_LABEL_WIDTH, 11);
+                const wrappedWidth = Math.max(...lines.map(l => measureTextWidth(l, 11)));
+                return [{ text: e.label, width: wrappedWidth, height: lines.length * LINE_HEIGHT + 2 }];
+              }
+            })() : [],
+            layoutOptions: {}
+          };
+
+          // Setup FIXED_SIDE ports based on layout direction and relative position rules
+          // Only apply port-based routing when both nodes are at the same hierarchy level,
+          // since cross-hierarchy edges with port references cause ELK resolution errors.
+          const srcRecord = nodeMap.get(e.from);
+          const tgtRecord = nodeMap.get(e.to);
+          const direction = options["elk.direction"] || "DOWN";
+          const sameParent = srcRecord && tgtRecord && srcRecord.parentId === tgtRecord.parentId;
+
+          if (srcRecord && tgtRecord && sameParent && direction === "DOWN") {
+            const rankSrc = ranks[e.from] !== undefined ? ranks[e.from] : 0;
+            const rankTgt = ranks[e.to] !== undefined ? ranks[e.to] : 0;
+            const xSrc = srcRecord.node.x || 0;
+            const xTgt = tgtRecord.node.x || 0;
+
+            const isUpward = rankSrc > rankTgt;
+            const isBypassing = Math.abs(rankSrc - rankTgt) > 1;
+
+            const sourcePortId = `${e.from}_port_out_${idx}`;
+            const targetPortId = `${e.to}_port_in_${idx}`;
+
+            let srcSide = "SOUTH";
+            let tgtSide = "NORTH";
+
+            if (isUpward) {
+              srcSide = "NORTH";
+              if (xSrc > xTgt) {
+                tgtSide = "EAST";
+              } else if (xSrc < xTgt) {
+                tgtSide = "WEST";
+              } else {
+                tgtSide = "SOUTH";
+              }
+            } else if (rankSrc === rankTgt) {
+              srcSide = xSrc < xTgt ? "EAST" : "WEST";
+              tgtSide = xSrc < xTgt ? "WEST" : "EAST";
+            }
+
+            addPortToNode(srcRecord.node, sourcePortId, srcSide);
+            addPortToNode(tgtRecord.node, targetPortId, tgtSide);
+
+            edge.sources = [sourcePortId];
+            edge.targets = [targetPortId];
+          }
+
+          // Find nodes to check types for edge priority
+          const srcNode = findNodeById(e.from);
+          const tgtNode = findNodeById(e.to);
+          if (srcNode && tgtNode) {
+            // Sensible default: keep the primary user -> core container connection aligned
+            if (srcNode.type === "person" && tgtNode.type === "container") {
+              edge.layoutOptions["elk.layered.priority.straightness"] = "100";
+            }
+          }
+
+          const ancestorId = findClosestCommonAncestor(e.from, e.to);
+          if (ancestorId === "root") {
+            graph.edges.push(edge);
+          } else {
+            const ancestorRecord = nodeMap.get(ancestorId);
+            if (ancestorRecord) {
+              ancestorRecord.node.edges.push(edge);
+            } else {
+              graph.edges.push(edge);
+            }
+          }
+        });
+      }
+
+      return graph;
+    }
+
+    // Rough text width estimation to supply ELKjs for label spacing
+    function measureTextWidth(text, fontSize, isBold = false) {
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      const weight = isBold ? "bold" : "normal";
+      ctx.font = `${weight} ${fontSize}px Outfit, sans-serif`;
+      let w = ctx.measureText(text).width;
+      if (isBold) {
+        w += text.length * fontSize * 0.025; // Account for letter-spacing: 0.025em
+      }
+      return Math.ceil(w);
+    }
+
+    const MAX_LABEL_WIDTH = 120;
+    const LINE_HEIGHT = 13;
+
+    function wrapText(text, maxWidth, fontSize) {
+      const words = text.split(' ');
+      const lines = [];
+      let current = '';
+      for (const word of words) {
+        const test = current ? current + ' ' + word : word;
+        if (measureTextWidth(test, fontSize) > maxWidth && current) {
+          lines.push(current);
+          current = word;
+        } else {
+          current = test;
+        }
+      }
+      if (current) lines.push(current);
+      return lines;
+    }
+
+    function pointToBoxDist(px, py, box) {
+      const dx = Math.max(box.x - px, 0, px - (box.x + box.width));
+      const dy = Math.max(box.y - py, 0, py - (box.y + box.height));
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    // Flatten nested children coordinates to absolute positions
+    function flattenNodes(graphNode, parentX = 0, parentY = 0) {
+      let flat = [];
+      const absoluteX = parentX + (graphNode.x || 0);
+      const absoluteY = parentY + (graphNode.y || 0);
+
+      if (graphNode.id !== "root") {
+        flat.push({
+          id: graphNode.id,
+          x: absoluteX,
+          y: absoluteY,
+          width: graphNode.width,
+          height: graphNode.height,
+          type: graphNode.type,
+          label: graphNode.label
+        });
+      }
+
+      if (graphNode.children) {
+        for (const child of graphNode.children) {
+          flat = flat.concat(flattenNodes(child, absoluteX, absoluteY));
+        }
+      }
+
+      return flat;
+    }
+
+    // Flatten nested edges and convert coordinates to absolute space
+    function flattenEdges(graphNode, parentX = 0, parentY = 0) {
+      let flat = [];
+      const absX = parentX + (graphNode.x || 0);
+      const absY = parentY + (graphNode.y || 0);
+
+      if (graphNode.edges) {
+        for (const edge of graphNode.edges) {
+          if (!edge.sections || edge.sections.length === 0) continue;
+          
+          const section = edge.sections[0];
+          const flatEdge = {
+            id: edge.id,
+            sources: edge.sources,
+            targets: edge.targets,
+            sections: [{
+              startPoint: { x: section.startPoint.x + absX, y: section.startPoint.y + absY },
+              endPoint: { x: section.endPoint.x + absX, y: section.endPoint.y + absY }
+            }],
+            labels: edge.labels ? edge.labels.map(l => ({
+              text: l.text,
+              width: l.width,
+              height: l.height
+            })) : []
+          };
+
+          if (section.bendPoints) {
+            flatEdge.sections[0].bendPoints = section.bendPoints.map(b => ({
+              x: b.x + absX,
+              y: b.y + absY
+            }));
+          }
+
+          flat.push(flatEdge);
+        }
+      }
+
+      if (graphNode.children) {
+        for (const child of graphNode.children) {
+          flat = flat.concat(flattenEdges(child, absX, absY));
+        }
+      }
+
+      return flat;
+    }
+
+    // Draw graph to SVG elements
+    function drawGraph(graph, diagramData) {
+      const svg = document.getElementById("svg-root");
+      
+      // Clear layers
+      const layers = ["title-layer", "boundaries-layer", "edges-layer", "nodes-layer", "edge-labels-layer"];
+      layers.forEach(l => {
+        const el = document.getElementById(l);
+        if (el) el.innerHTML = "";
+      });
+
+      // Render diagram title
+      const displayType = diagramData && diagramData.diagramType === "C4Container" ? "C4 Container Diagram" : "C4 Context Diagram";
+      const titleText = `${displayType} : ${(diagramData && diagramData.title) || "Untitled"}`;
+      const titleLayer = document.getElementById("title-layer");
+      if (titleLayer) {
+        const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        text.setAttribute("x", 30);
+        text.setAttribute("y", 35);
+        text.setAttribute("class", "diagram-title-text");
+        text.textContent = titleText;
+        titleLayer.appendChild(text);
+      }
+
+      const titleWidth = measureTextWidth(titleText, 16, true) + 60;
+      const finalWidth = Math.max(graph.width, titleWidth);
+
+      // Adjust viewport size dynamically (shifted vertically by +50px for title)
+      svg.setAttribute("viewBox", `0 0 ${finalWidth} ${graph.height + 50}`);
+      svg.style.width = `${finalWidth}px`;
+      svg.style.height = `${graph.height + 50}px`;
+
+      const allComponents = flattenNodes(graph, 0, 50).filter(n => n.type !== 'boundary');
+
+      // Helper to render nodes recursively
+      function renderNodeTree(node, absoluteParentX = 0, absoluteParentY = 0) {
+        const absX = absoluteParentX + (node.x || 0);
+        const absY = absoluteParentY + (node.y || 0);
+
+        if (node.id !== "root") {
+          if (node.type === "boundary") {
+            // Render boundary box
+            const boundaryLayer = document.getElementById("boundaries-layer");
+            
+            const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            rect.setAttribute("x", absX);
+            rect.setAttribute("y", absY);
+            rect.setAttribute("width", node.width);
+            rect.setAttribute("height", node.height);
+            rect.setAttribute("class", "boundary");
+            boundaryLayer.appendChild(rect);
+
+            const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+            text.setAttribute("x", absX + 15);
+            text.setAttribute("y", absY + 22);
+            text.setAttribute("class", "boundary-label");
+            text.textContent = node.label;
+            boundaryLayer.appendChild(text);
+
+          } else {
+            // Render component/person node
+            const nodesLayer = document.getElementById("nodes-layer");
+
+            // Outer rectangular container
+            const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            rect.setAttribute("x", absX);
+            rect.setAttribute("y", absY);
+            rect.setAttribute("width", node.width);
+            rect.setAttribute("height", node.height);
+            rect.setAttribute("class", `node node-${node.type}`);
+            nodesLayer.appendChild(rect);
+
+            // Inner text content using foreignObject for auto-wrapping
+            const fo = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
+            fo.setAttribute("x", absX);
+            fo.setAttribute("y", absY);
+            fo.setAttribute("width", node.width);
+            fo.setAttribute("height", node.height);
+            
+            const wrapper = document.createElement("div");
+            wrapper.className = "node-content-wrapper";
+
+            const title = document.createElement("div");
+            title.className = "node-title";
+            title.textContent = node.label;
+            wrapper.appendChild(title);
+
+            const typeLabel = document.createElement("div");
+            typeLabel.className = "node-type";
+            typeLabel.textContent = `[${node.type}]`;
+            wrapper.appendChild(typeLabel);
+
+            if (node.description) {
+              const desc = document.createElement("div");
+              desc.className = "node-desc";
+              desc.textContent = node.description;
+              wrapper.appendChild(desc);
+            }
+
+            fo.appendChild(wrapper);
+            nodesLayer.appendChild(fo);
+          }
+        }
+
+        if (node.children) {
+          node.children.forEach(c => renderNodeTree(c, absX, absY));
+        }
+      }
+
+      // Draw edges recursively with parent offset
+      function renderEdges(node, absoluteParentX = 0, absoluteParentY = 0) {
+        const absX = absoluteParentX + (node.x || 0);
+        const absY = absoluteParentY + (node.y || 0);
+
+        if (node.edges) {
+          const edgesLayer = document.getElementById("edges-layer");
+          const labelsLayer = document.getElementById("edge-labels-layer");
+
+          for (const edge of node.edges) {
+            if (!edge.sections || edge.sections.length === 0) continue;
+            
+            const section = edge.sections[0];
+            let pathD = `M ${section.startPoint.x + absX} ${section.startPoint.y + absY}`;
+
+            if (section.bendPoints) {
+              for (const bend of section.bendPoints) {
+                pathD += ` L ${bend.x + absX} ${bend.y + absY}`;
+              }
+            }
+            pathD += ` L ${section.endPoint.x + absX} ${section.endPoint.y + absY}`;
+
+            // Draw edge path
+            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            path.setAttribute("d", pathD);
+            path.setAttribute("class", "edge-line");
+            path.setAttribute("marker-end", "url(#arrow)");
+            edgesLayer.appendChild(path);
+
+            // Draw labels on the segment with the most clearance from nearby nodes
+            if (edge.labels && edge.labels.length > 0) {
+              const label = edge.labels[0];
+              const textWidth = label.width;
+              const textHeight = label.height;
+
+              // Extract all points along the edge line
+              const points = [{ x: section.startPoint.x + absX, y: section.startPoint.y + absY }];
+              if (section.bendPoints) {
+                points.push(...section.bendPoints.map(b => ({ x: b.x + absX, y: b.y + absY })));
+              }
+              points.push({ x: section.endPoint.x + absX, y: section.endPoint.y + absY });
+
+              // Pick the segment whose midpoint is farthest from all nodes (including source/target)
+              const nearbyNodes = allComponents;
+
+              let bestSeg = null;
+              let bestScore = -Infinity;
+              for (let i = 0; i < points.length - 1; i++) {
+                const p1 = points[i];
+                const p2 = points[i + 1];
+                const dx = p2.x - p1.x;
+                const dy = p2.y - p1.y;
+                const len = Math.sqrt(dx * dx + dy * dy);
+                const mx = (p1.x + p2.x) / 2;
+                const my = (p1.y + p2.y) / 2;
+                const clearance = nearbyNodes.length > 0
+                  ? Math.min(...nearbyNodes.map(n => pointToBoxDist(mx, my, n)))
+                  : Infinity;
+                const score = clearance * 10 + len;
+                if (score > bestScore) { bestScore = score; bestSeg = { p1, p2 }; }
+              }
+
+              const midX = (bestSeg.p1.x + bestSeg.p2.x) / 2;
+              const midY = (bestSeg.p1.y + bestSeg.p2.y) / 2;
+
+              const bgRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+              bgRect.setAttribute("x", midX - textWidth / 2 - 4);
+              bgRect.setAttribute("y", midY - textHeight / 2 - 2);
+              bgRect.setAttribute("width", textWidth + 8);
+              bgRect.setAttribute("height", textHeight + 4);
+              bgRect.setAttribute("class", "edge-label-bg");
+              labelsLayer.appendChild(bgRect);
+
+              const match = label.text.match(/^(.*?)\s*\[(.*?)\]$/);
+              if (match) {
+                const mainText = match[1].trim();
+                const techText = `[${match[2].trim()}]`;
+                const mainLines = wrapText(mainText, MAX_LABEL_WIDTH, 11);
+                const blockHeight = (mainLines.length + 1) * LINE_HEIGHT;
+                let lineY = midY - blockHeight / 2 + LINE_HEIGHT * 0.8;
+
+                for (const line of mainLines) {
+                  const textEl = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                  textEl.setAttribute("x", midX);
+                  textEl.setAttribute("y", lineY);
+                  textEl.setAttribute("class", "edge-label-text");
+                  textEl.textContent = line;
+                  labelsLayer.appendChild(textEl);
+                  lineY += LINE_HEIGHT;
+                }
+
+                const techEl = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                techEl.setAttribute("x", midX);
+                techEl.setAttribute("y", lineY);
+                techEl.setAttribute("class", "edge-label-text");
+                techEl.setAttribute("style", "opacity: 0.85; font-size: 10px;");
+                techEl.textContent = techText;
+                labelsLayer.appendChild(techEl);
+              } else {
+                const lines = wrapText(label.text, MAX_LABEL_WIDTH, 11);
+                const blockHeight = lines.length * LINE_HEIGHT;
+                let lineY = midY - blockHeight / 2 + LINE_HEIGHT * 0.8;
+
+                for (const line of lines) {
+                  const textEl = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                  textEl.setAttribute("x", midX);
+                  textEl.setAttribute("y", lineY);
+                  textEl.setAttribute("class", "edge-label-text");
+                  textEl.textContent = line;
+                  labelsLayer.appendChild(textEl);
+                  lineY += LINE_HEIGHT;
+                }
+              }
+            }
+          }
+        }
+
+        if (node.children) {
+          node.children.forEach(c => renderEdges(c, absX, absY));
+        }
+      }
+
+      // 1. Draw nodes and boundary boxes (with vertical offset of 50px)
+      renderNodeTree(graph, 0, 50);
+
+      // 2. Draw connector lines (edges) recursively (with vertical offset of 50px)
+      renderEdges(graph, 0, 50);
+    };
+  </script>
+</body>
+</html>

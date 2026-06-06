@@ -1,0 +1,77 @@
+title: Nudge E-Commerce System Context
+layoutOptions:
+  elk.algorithm: layered
+  elk.direction: RIGHT
+  elk.spacing.nodeNode: '30'
+  elk.layered.spacing.nodeNodeBetweenLayers: '30'
+  elk.spacing.edgeNode: '15'
+  elk.spacing.edgeEdge: '15'
+  elk.padding: '[top=20,left=20,bottom=20,right=20]'
+nodes:
+  - id: user
+    label: Customer
+    type: person
+    description: Wants to buy items online
+    width: 160
+    height: 80
+  - id: gateway
+    label: API Gateway
+    type: container
+    description: Routes requests, handles rate limiting
+    width: 180
+    height: 90
+  - id: auth_service
+    label: Auth Service
+    type: container
+    description: Manages user sessions & tokens
+    width: 160
+    height: 80
+  - id: order_service
+    label: Order Service
+    type: container
+    description: Processes checkouts and shopping carts
+    width: 160
+    height: 80
+  - id: payment_service
+    label: Payment Service
+    type: container
+    description: Interfaces with external processor
+    width: 160
+    height: 80
+  - id: database
+    label: Main Database
+    type: container
+    description: Stores user, order, and payment records
+    width: 160
+    height: 80
+  - id: stripe
+    label: Stripe API
+    type: external
+    description: Third-party payment gateway
+    width: 160
+    height: 80
+edges:
+  - from: user
+    to: gateway
+    label: Browses & buys products
+  - from: gateway
+    to: auth_service
+    label: Authenticates request
+  - from: gateway
+    to: order_service
+    label: Submits order
+  - from: order_service
+    to: payment_service
+    label: Initiates payment transaction
+  - from: payment_service
+    to: stripe
+    label: Charges credit card
+  - from: order_service
+    to: database
+    label: Saves orders
+  - from: auth_service
+    to: database
+    label: Reads credentials
+  - from: payment_service
+    to: database
+    label: Logs transactions

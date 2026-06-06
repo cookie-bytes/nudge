@@ -1,0 +1,41 @@
+{
+  "name": "@cookie-bytes/nudge",
+  "version": "1.0.0",
+  "description": "AI-driven layout optimizer for C4 Model architecture diagrams",
+  "main": "src/cli.js",
+  "bin": {
+    "nudge": "./src/cli.js"
+  },
+  "type": "module",
+  "scripts": {
+    "start": "node src/cli.js",
+    "test": "node test/run_tests.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cookie-bytes/nudge.git"
+  },
+  "keywords": [
+    "c4-model",
+    "mermaid",
+    "elkjs",
+    "layout-optimization",
+    "ai",
+    "llm",
+    "critic",
+    "architecture-diagrams"
+  ],
+  "author": "Cookie Bytes",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/cookie-bytes/nudge/issues"
+  },
+  "homepage": "https://github.com/cookie-bytes/nudge#readme",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "playwright": "^1.44.1"
+  }
+}

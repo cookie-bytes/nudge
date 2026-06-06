@@ -1,0 +1,14 @@
+C4Context
+    title E-Commerce System Context
+    %% Rule: Person above System
+    %% Rule: System above System_Ext
+
+    Person(customer, "E-Commerce Customer", "Wants to browse and purchase items.")
+    System(ecommerce, "E-Commerce Platform", "Allows customer to view catalog and place orders.")
+    System_Ext(stripe, "Payment Gateway", "Stripe API for credit card processing.")
+    System_Ext(shipping, "Shipping System", "Logistics API for delivery tracking.")
+
+    Rel(customer, ecommerce, "Places orders using", "HTTPS")
+    Rel(ecommerce, stripe, "Processes payments via", "JSON/HTTPS")
+    Rel(ecommerce, shipping, "Schedules delivery using", "JSON/HTTPS")
+    Rel(shipping, customer, "Sends delivery tracking notification to", "SMS")

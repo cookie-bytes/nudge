@@ -1,0 +1,12 @@
+C4Context
+    title Library Book Rental Context
+    %% Rule: Person above System
+    %% Rule: System above System_Ext
+
+    Person(patron, "Library Patron", "Borrows books from the library.")
+    System(librarySystem, "Library Catalog System", "Manages book inventory and rental states.")
+    System_Ext(notifications, "Notification Service", "External email and SMS notification system.")
+
+    Rel(patron, librarySystem, "Searches and reserves books using", "Web App")
+    Rel(librarySystem, notifications, "Sends reservation alerts using", "SMTP")
+    Rel(notifications, patron, "Notifies patron of book availability via", "Email/SMS")
