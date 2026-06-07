@@ -29,8 +29,8 @@ C4Container
     Rel(search_lambda, cart_service, "makes API calls to", "HTTPS")
     Rel(search_lambda, integration_service, "makes API calls to", "HTTPS")
     Rel(search_lambda, promotion_service, "makes API calls to", "HTTPS")
-    Rel(search_lambda, aws_eventbridge, "performs search requests via events and publishes search completed events", "")
+    Rel(search_lambda, aws_eventbridge, "makes API calls to", "HTTPS")
 
     Rel(partner_sync_lambda, database, "reads from and writes to", "TCP")
     Rel(partner_sync_lambda, partner_service_api, "makes API calls to", "HTTPS")
-    Rel(partner_sync_lambda, aws_eventbridge, "consumes Partner sync reference data events from", "")
+    Rel(aws_eventbridge, partner_sync_lambda, "sends Partner sync reference data events to", "")
