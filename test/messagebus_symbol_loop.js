@@ -1,8 +1,8 @@
-// Single-database visual-match harness.
-// Renders one ContainerDb node, then asks a local vision LLM whether the
-// resulting shape matches the canonical DB_symbol.png reference.
+// Single-message-bus visual-match harness.
+// Renders one message_bus node, then asks a local vision LLM whether the
+// resulting shape matches the canonical MessageBus_Symbol.png reference.
 //
-// Usage:  node test/db_symbol_loop.js
+// Usage:  node test/messagebus_symbol_loop.js
 // Exits 0 on MATCH verdict, 1 on NO_MATCH. Prints structured feedback either way.
 
 import { chromium } from 'playwright';
@@ -15,14 +15,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '..');
 const OUTPUT_DIR = path.join(ROOT, 'test_outputs');
-const RENDERED_PATH = path.join(OUTPUT_DIR, 'db_only.png');
-const REFERENCE_PATH = path.join(ROOT, 'test/fixtures/DB_Symbol.png');
+const RENDERED_PATH = path.join(OUTPUT_DIR, 'messagebus_only.png');
+const REFERENCE_PATH = path.join(ROOT, 'test/fixtures/MessageBus_Symbol.png');
 const TEMPLATE_PATH = path.join(ROOT, 'src/render.html');
 const LM_STUDIO_API = process.env.NUDGE_LLM_API || 'http://localhost:1234';
 
-// Minimal diagram: one database node, nothing else.
+// Minimal diagram: one message bus node, nothing else.
 const diagramModel = {
-  title: 'DB Shape Test',
+  title: 'Message Bus Shape Test',
   diagramType: 'C4Container',
   layoutOptions: {
     'elk.algorithm': 'layered',
@@ -31,19 +31,19 @@ const diagramModel = {
   },
   nodes: [
     {
-      id: 'db1',
-      label: 'Database',
-      type: 'database',
-      description: 'Stores customer accounts.',
+      id: 'bus1',
+      label: 'Message Bus',
+      type: 'message_bus',
+      description: 'Handles incoming events.',
       width: 160,
-      height: 140
+      height: 80
     }
   ],
   edges: [],
   rules: []
 };
 
-async function renderSingleDb() {
+async function renderSingleBus() {
   if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
   const browser = await chromium.launch({ headless: true });
   try {
@@ -59,7 +59,7 @@ async function renderSingleDb() {
     const svgElement = await page.$('#svg-root');
     await svgElement.screenshot({ path: RENDERED_PATH, omitBackground: false });
     const svgMarkup = await page.locator('#svg-root').innerHTML();
-    fs.writeFileSync(path.join(OUTPUT_DIR, 'db_only.svg'),
+    fs.writeFileSync(path.join(OUTPUT_DIR, 'messagebus_only.svg'),
       `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${result.width} ${result.height}">${svgMarkup}</svg>`);
     return { width: result.width, height: result.height };
   } finally {
@@ -96,10 +96,10 @@ async function compareWithLLM() {
 
   const systemPrompt = `You are a strict visual shape critic for technical diagram symbols.
 You will be shown two images:
-  IMAGE A: a CANONICAL database symbol (the target shape).
+  IMAGE A: a CANONICAL message bus symbol (the target shape).
   IMAGE B: a CANDIDATE rendering.
 
-You are verifying that the CANDIDATE has the same core CYLINDER SHAPE as the canonical symbol so it can be used in architecture diagrams.
+You are verifying that the CANDIDATE has the same core HORIZONTAL CYLINDER / TUBE / QUEUE shape as the canonical symbol so it can be used in architecture diagrams.
 
 IGNORE ALL OF THE FOLLOWING — they do NOT affect the verdict:
 - Colour, fill colour, stroke colour, gradient, opacity
@@ -109,7 +109,7 @@ IGNORE ALL OF THE FOLLOWING — they do NOT affect the verdict:
 - Decorative rim/disc lines inside the body
 - Stroke styling (solid, dashed, etc.)
 
-Judge ONLY the structural cylinder silhouette: TOP, MIDDLE, BOTTOM.
+Judge ONLY the structural horizontal cylinder silhouette: LEFT, MIDDLE, RIGHT.
 
 CRITICAL OUTPUT RULES:
 - Do NOT think out loud, plan, or explain.
@@ -120,16 +120,16 @@ CRITICAL OUTPUT RULES:
 JSON schema:
 {
   "verdict": "MATCH" | "NO_MATCH",
-  "top":           { "ok": true|false, "note": "..." },
+  "left":          { "ok": true|false, "note": "..." },
   "middle":        { "ok": true|false, "note": "..." },
-  "bottom":        { "ok": true|false, "note": "..." },
+  "right":         { "ok": true|false, "note": "..." },
   "summary": "one sentence describing the biggest shape difference, or 'matches canonical shape' if MATCH"
 }
 
 Rules for MATCH (only these three things matter):
-- TOP: there is a visible cap on top — an ellipse/oval shape (filled or outlined, any colour).
-- MIDDLE: the body has straight vertical left and right sides.
-- BOTTOM: the bottom edge curves DOWNWARD (a convex curve, like the front half of an ellipse seen from the side).
+- LEFT: there is a visible cap on the left — an ellipse/oval shape (filled or outlined, any colour).
+- MIDDLE: the body has straight horizontal top and bottom sides.
+- RIGHT: the right edge curves RIGHTWARD/OUTWARD (a convex curve, like the right half of an ellipse seen from the side).
 If ANY of the above three structural checks is wrong, verdict = NO_MATCH. Otherwise MATCH.
 Colour differences alone MUST NEVER cause a NO_MATCH.`;
 
@@ -180,8 +180,8 @@ Colour differences alone MUST NEVER cause a NO_MATCH.`;
 }
 
 async function main() {
-  console.log('[render] Rendering single database to', RENDERED_PATH);
-  const dims = await renderSingleDb();
+  console.log('[render] Rendering single message bus to', RENDERED_PATH);
+  const dims = await renderSingleBus();
   console.log(`[render] Done (${dims.width}×${dims.height}px viewport).`);
 
   console.log('[compare] Asking LLM to compare against', REFERENCE_PATH);
@@ -194,7 +194,7 @@ async function main() {
   console.log('\n=== VERDICT ===');
   console.log(JSON.stringify(verdict, null, 2));
   if (verdict.verdict === 'MATCH') {
-    console.log('\n✅ MATCH — canonical database shape achieved.');
+    console.log('\n✅ MATCH — canonical message bus shape achieved.');
     process.exit(0);
   } else {
     console.log('\n❌ NO_MATCH — shape needs adjustment.');

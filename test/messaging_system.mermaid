@@ -1,0 +1,9 @@
+C4Container
+    title Messaging System Diagram
+    
+    Person(customer, "Sender", "Sends messages to the queue.")
+    ContainerQueue(messageBus, "Event Bus", "RabbitMQ", "Ingests events from producers and routes them.")
+    Container(processor, "Consumer Service", "Node.js", "Processes incoming queue events.")
+
+    Rel(customer, messageBus, "Publishes events to", "AMQP")
+    Rel(messageBus, processor, "Delivers events to", "AMQP")

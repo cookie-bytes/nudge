@@ -7,9 +7,9 @@ export function parseMermaidC4(mermaidString) {
     layoutOptions: {
       "elk.algorithm": "layered",
       "elk.direction": "DOWN",
-      "elk.spacing.nodeNode": "70",
-      "elk.layered.spacing.nodeNodeBetweenLayers": "70",
-      "elk.spacing.edgeNode": "45",
+      "elk.spacing.nodeNode": "140",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "110",
+      "elk.spacing.edgeNode": "80",
       "elk.spacing.edgeEdge": "20",
       "elk.padding": "[top=30,left=30,bottom=30,right=30]"
     },
@@ -23,9 +23,9 @@ export function parseMermaidC4(mermaidString) {
 
   // Regular expression patterns
   const titleRegex = /^\s*title\s+(.+)$/i;
-  const boundaryRegex = /^\s*(Enterprise|System)_Boundary\((\w+),\s*"([^"]+)"\)\s*\{/i;
-  const nodeRegex = /^\s*(Person|System|System_Ext|Container|ContainerDb|Container_Ext)\((\w+),\s*"([^"]+)"(?:,\s*"([^"]+)")?(?:,\s*"([^"]+)")?\)/i;
-  const relRegex = /^\s*Rel\((\w+),\s*(\w+),\s*"([^"]+)"(?:,\s*"([^"]+)")?\)/i;
+  const boundaryRegex = /^\s*(?:(Enterprise|System|Container)_)?Boundary\((\w+),\s*"([^"]+)"\)\s*\{/i;
+  const nodeRegex = /^\s*(Person|System|System_Ext|Container|ContainerDb|Container_Ext|ContainerQueue)\((\w+),\s*"([^"]+)"(?:,\s*"([^"]*)")?(?:,\s*"([^"]*)")?\)/i;
+  const relRegex = /^\s*Rel\((\w+),\s*(\w+),\s*"([^"]+)"(?:,\s*"([^"]*)")?\)/i;
   const ruleRegex = /^\s*%%\s*Rule:\s*(\w+)\s+(above|below)\s+(\w+)/i;
 
   for (let line of lines) {
@@ -105,6 +105,8 @@ export function parseMermaidC4(mermaidString) {
         mappedType = 'external';
       } else if (typeLower === 'containerdb') {
         mappedType = 'database';
+      } else if (typeLower === 'containerqueue') {
+        mappedType = 'message_bus';
       }
 
       // Container(id, "Label", "Tech", "Description") — 4 args where tech is 2nd desc is 3rd
@@ -123,7 +125,7 @@ export function parseMermaidC4(mermaidString) {
         type: mappedType,
         description,
         width: 160,
-        height: mappedType === 'database' ? 230 : 80
+        height: (mappedType === 'database' || mappedType === 'person') ? 140 : 80
       };
 
       if (activeBoundaries.length > 0) {
@@ -164,5 +166,6 @@ function normalizeTypeName(name) {
   if (lower === 'system' || lower === 'container') return 'container';
   if (lower === 'system_ext' || lower === 'container_ext') return 'external';
   if (lower === 'database' || lower === 'containerdb') return 'database';
+  if (lower === 'message_bus' || lower === 'containerqueue' || lower === 'messagebus') return 'message_bus';
   return trimmed; // Preserve case for custom node IDs!
 }

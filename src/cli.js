@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import yaml from 'js-yaml';
 import { chromium } from 'playwright';
-import { analyzeLayout, getLLMOptimizationPatch } from './critic.js';
+import { analyzeLayout, getLLMOptimizationPatch, getLLMZoneVerification, getLLMRoutingVerification } from './critic.js';
 import { parseMermaidC4 } from './mermaid_parser.js';
 
 const LM_STUDIO_API = process.env.NUDGE_LLM_API || 'http://localhost:1234';
@@ -52,12 +52,58 @@ async function main() {
     viewport: { width: 1280, height: 800 }
   });
   const page = await context.newPage();
+  
+  page.on('console', msg => {
+    console.log(`[Browser Console] ${msg.type().toUpperCase()}: ${msg.text()}`);
+  });
+  page.on('pageerror', err => {
+    console.error('[Browser PageError]:', err.stack || err.message);
+  });
 
   // Load the render template HTML
   const templatePath = path.resolve('src/render.html');
   const fileUrl = `file://${templatePath}`;
   console.log(`[Playwright] Opening diagram canvas: ${fileUrl}`);
   await page.goto(fileUrl);
+
+  // For container diagrams (those with a boundary): run LM verification checkpoints
+  // before the main optimization loop to pre-correct zone/ordering issues.
+  const hasBoundary = (diagramModel.nodes || []).some(n => n.type === 'boundary');
+  if (hasBoundary) {
+    console.log("\n[Checkpoint] Container diagram — running pre-render LM zone verification...");
+    const initialPlan = await page.evaluate((data) => window.computeContainerPlan(data), diagramModel);
+    if (initialPlan) {
+      const overrides = {};
+
+      // Checkpoint 1: zone assignment correctness
+      const zoneResult = await getLLMZoneVerification(LM_STUDIO_API, initialPlan);
+      if (zoneResult) {
+        if (zoneResult.zoneOverrides && Object.keys(zoneResult.zoneOverrides).length > 0) {
+          overrides.zoneOverrides = zoneResult.zoneOverrides;
+        }
+        if (zoneResult.swapCommands && zoneResult.swapCommands.length > 0) {
+          overrides.swapCommands = [...(zoneResult.swapCommands)];
+        }
+      }
+
+      // Checkpoint 2: node ordering within zones (use updated plan if overrides changed zones)
+      const planForRouting = Object.keys(overrides).length > 0
+        ? await page.evaluate((data) => window.computeContainerPlan(data),
+            { ...diagramModel, _layoutOverrides: overrides })
+        : initialPlan;
+      const routeResult = await getLLMRoutingVerification(LM_STUDIO_API, planForRouting);
+      if (routeResult && routeResult.swapCommands && routeResult.swapCommands.length > 0) {
+        overrides.swapCommands = [...(overrides.swapCommands || []), ...routeResult.swapCommands];
+      }
+
+      if (Object.keys(overrides).length > 0) {
+        console.log("[Checkpoint] Applying LM layout overrides:", JSON.stringify(overrides, null, 2));
+        diagramModel._layoutOverrides = overrides;
+      } else {
+        console.log("[Checkpoint] LM verified layout — no overrides needed.");
+      }
+    }
+  }
 
   let currentOptions = { ...diagramModel.layoutOptions };
   let iteration = 1;

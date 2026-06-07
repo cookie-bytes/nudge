@@ -1,8 +1,8 @@
-// Single-database visual-match harness.
-// Renders one ContainerDb node, then asks a local vision LLM whether the
-// resulting shape matches the canonical DB_symbol.png reference.
+// Single-person visual-match harness.
+// Renders one Person node, then asks a local vision LLM whether the
+// resulting shape matches the canonical Person_Symbol.png reference.
 //
-// Usage:  node test/db_symbol_loop.js
+// Usage:  node test/person_symbol_loop.js
 // Exits 0 on MATCH verdict, 1 on NO_MATCH. Prints structured feedback either way.
 
 import { chromium } from 'playwright';
@@ -15,14 +15,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '..');
 const OUTPUT_DIR = path.join(ROOT, 'test_outputs');
-const RENDERED_PATH = path.join(OUTPUT_DIR, 'db_only.png');
-const REFERENCE_PATH = path.join(ROOT, 'test/fixtures/DB_Symbol.png');
+const RENDERED_PATH = path.join(OUTPUT_DIR, 'person_only.png');
+const REFERENCE_PATH = path.join(ROOT, 'test/fixtures/Person_symbol_new.png');
 const TEMPLATE_PATH = path.join(ROOT, 'src/render.html');
 const LM_STUDIO_API = process.env.NUDGE_LLM_API || 'http://localhost:1234';
 
-// Minimal diagram: one database node, nothing else.
+// Minimal diagram: one person node, nothing else.
 const diagramModel = {
-  title: 'DB Shape Test',
+  title: 'Person Shape Test',
   diagramType: 'C4Container',
   layoutOptions: {
     'elk.algorithm': 'layered',
@@ -31,10 +31,10 @@ const diagramModel = {
   },
   nodes: [
     {
-      id: 'db1',
-      label: 'Database',
-      type: 'database',
-      description: 'Stores customer accounts.',
+      id: 'person1',
+      label: 'Person',
+      type: 'person',
+      description: 'A system user with personal bank accounts and access to the dashboard.',
       width: 160,
       height: 140
     }
@@ -43,7 +43,7 @@ const diagramModel = {
   rules: []
 };
 
-async function renderSingleDb() {
+async function renderSinglePerson() {
   if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
   const browser = await chromium.launch({ headless: true });
   try {
@@ -59,7 +59,7 @@ async function renderSingleDb() {
     const svgElement = await page.$('#svg-root');
     await svgElement.screenshot({ path: RENDERED_PATH, omitBackground: false });
     const svgMarkup = await page.locator('#svg-root').innerHTML();
-    fs.writeFileSync(path.join(OUTPUT_DIR, 'db_only.svg'),
+    fs.writeFileSync(path.join(OUTPUT_DIR, 'person_only.svg'),
       `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${result.width} ${result.height}">${svgMarkup}</svg>`);
     return { width: result.width, height: result.height };
   } finally {
@@ -96,10 +96,10 @@ async function compareWithLLM() {
 
   const systemPrompt = `You are a strict visual shape critic for technical diagram symbols.
 You will be shown two images:
-  IMAGE A: a CANONICAL database symbol (the target shape).
+  IMAGE A: a CANONICAL person symbol (the target shape).
   IMAGE B: a CANDIDATE rendering.
 
-You are verifying that the CANDIDATE has the same core CYLINDER SHAPE as the canonical symbol so it can be used in architecture diagrams.
+You are verifying that the CANDIDATE has the same core PERSON SILHOUETTE shape as the canonical symbol so it can be used in architecture diagrams.
 
 IGNORE ALL OF THE FOLLOWING — they do NOT affect the verdict:
 - Colour, fill colour, stroke colour, gradient, opacity
@@ -109,7 +109,7 @@ IGNORE ALL OF THE FOLLOWING — they do NOT affect the verdict:
 - Decorative rim/disc lines inside the body
 - Stroke styling (solid, dashed, etc.)
 
-Judge ONLY the structural cylinder silhouette: TOP, MIDDLE, BOTTOM.
+Judge ONLY the structural person silhouette: HEAD, SHOULDERS.
 
 CRITICAL OUTPUT RULES:
 - Do NOT think out loud, plan, or explain.
@@ -120,17 +120,21 @@ CRITICAL OUTPUT RULES:
 JSON schema:
 {
   "verdict": "MATCH" | "NO_MATCH",
-  "top":           { "ok": true|false, "note": "..." },
-  "middle":        { "ok": true|false, "note": "..." },
+  "head":          { "ok": true|false, "note": "..." },
+  "neckline":      { "ok": true|false, "note": "..." },
+  "shoulders":     { "ok": true|false, "note": "..." },
+  "sides":         { "ok": true|false, "note": "..." },
   "bottom":        { "ok": true|false, "note": "..." },
   "summary": "one sentence describing the biggest shape difference, or 'matches canonical shape' if MATCH"
 }
 
-Rules for MATCH (only these three things matter):
-- TOP: there is a visible cap on top — an ellipse/oval shape (filled or outlined, any colour).
-- MIDDLE: the body has straight vertical left and right sides.
-- BOTTOM: the bottom edge curves DOWNWARD (a convex curve, like the front half of an ellipse seen from the side).
-If ANY of the above three structural checks is wrong, verdict = NO_MATCH. Otherwise MATCH.
+Rules for MATCH (these structural features must be present):
+- HEAD: there is a distinct circular/oval head at the top center of the shape.
+- NECKLINE: there is a deep, rounded U-shaped neck dip in the center of the shoulder line. The bottom of the head circle sits lower than the left and right shoulder peaks, nesting inside this U-shaped dip.
+- SHOULDER PEAKS: the left and right shoulders are highly rounded, distinct convex peaks on either side of the neckline.
+- BODY SIDES: the body sides flare outward from the shoulders to the base with a smooth, outward-bulging (convex) curve.
+- BOTTOM EDGE: the bottom edge of the torso block curves downward (convex curve) and is not a flat horizontal line.
+If ANY of the above checks is wrong, verdict = NO_MATCH. Otherwise MATCH.
 Colour differences alone MUST NEVER cause a NO_MATCH.`;
 
   const userContent = [
@@ -180,8 +184,8 @@ Colour differences alone MUST NEVER cause a NO_MATCH.`;
 }
 
 async function main() {
-  console.log('[render] Rendering single database to', RENDERED_PATH);
-  const dims = await renderSingleDb();
+  console.log('[render] Rendering single person to', RENDERED_PATH);
+  const dims = await renderSinglePerson();
   console.log(`[render] Done (${dims.width}×${dims.height}px viewport).`);
 
   console.log('[compare] Asking LLM to compare against', REFERENCE_PATH);
@@ -194,7 +198,7 @@ async function main() {
   console.log('\n=== VERDICT ===');
   console.log(JSON.stringify(verdict, null, 2));
   if (verdict.verdict === 'MATCH') {
-    console.log('\n✅ MATCH — canonical database shape achieved.');
+    console.log('\n✅ MATCH — canonical person shape achieved.');
     process.exit(0);
   } else {
     console.log('\n❌ NO_MATCH — shape needs adjustment.');
