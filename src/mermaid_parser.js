@@ -7,9 +7,9 @@ export function parseMermaidC4(mermaidString) {
     layoutOptions: {
       "elk.algorithm": "layered",
       "elk.direction": "DOWN",
-      "elk.spacing.nodeNode": "140",
-      "elk.layered.spacing.nodeNodeBetweenLayers": "110",
-      "elk.spacing.edgeNode": "80",
+      "elk.spacing.nodeNode": "70",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "70",
+      "elk.spacing.edgeNode": "45",
       "elk.spacing.edgeEdge": "20",
       "elk.padding": "[top=30,left=30,bottom=30,right=30]"
     },
@@ -23,9 +23,9 @@ export function parseMermaidC4(mermaidString) {
 
   // Regular expression patterns
   const titleRegex = /^\s*title\s+(.+)$/i;
-  const boundaryRegex = /^\s*(?:(Enterprise|System|Container)_)?Boundary\((\w+),\s*"([^"]+)"\)\s*\{/i;
-  const nodeRegex = /^\s*(Person|System|System_Ext|Container|ContainerDb|Container_Ext|ContainerQueue)\((\w+),\s*"([^"]+)"(?:,\s*"([^"]*)")?(?:,\s*"([^"]*)")?\)/i;
-  const relRegex = /^\s*Rel\((\w+),\s*(\w+),\s*"([^"]+)"(?:,\s*"([^"]*)")?\)/i;
+  const boundaryRegex = /^\s*(Enterprise|System)_Boundary\((\w+),\s*"([^"]+)"\)\s*\{/i;
+  const nodeRegex = /^\s*(Person|System|System_Ext|Container|ContainerDb|Container_Ext|ContainerQueue)\((\w+),\s*"([^"]+)"(?:,\s*"([^"]+)")?(?:,\s*"([^"]+)")?\)/i;
+  const relRegex = /^\s*Rel\((\w+),\s*(\w+),\s*"([^"]+)"(?:,\s*"([^"]+)")?\)/i;
   const ruleRegex = /^\s*%%\s*Rule:\s*(\w+)\s+(above|below)\s+(\w+)/i;
 
   for (let line of lines) {

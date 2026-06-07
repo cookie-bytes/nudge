@@ -148,137 +148,29 @@ export function analyzeLayout(layoutData) {
     }
     points.push({ x: section.endPoint.x, y: section.endPoint.y });
 
-    const nearbyComps = components.filter(n => n.id !== sourceId && n.id !== targetId);
+    const nearbyComps = components;
 
-    // Calculate total length and segment lengths
-    let totalLen = 0;
-    const segLens = [];
+    let bestSeg = null;
+    let bestScore = -Infinity;
     for (let i = 0; i < points.length - 1; i++) {
-      const dx = points[i+1].x - points[i].x;
-      const dy = points[i+1].y - points[i].y;
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
       const len = Math.sqrt(dx * dx + dy * dy);
-      totalLen += len;
-      segLens.push(len);
+      const mx = (p1.x + p2.x) / 2;
+      const my = (p1.y + p2.y) / 2;
+      const clearance = nearbyComps.length > 0
+        ? Math.min(...nearbyComps.map(n => pointToBoxDist(mx, my, n)))
+        : Infinity;
+      const score = clearance * 10 + len;
+      if (score > bestScore) { bestScore = score; bestSeg = { p1, p2 }; }
     }
 
-    function getPointAtFraction(fraction) {
-      if (totalLen === 0) return { x: points[0].x, y: points[0].y, segment: { p1: points[0], p2: points[0] } };
-      const targetDist = totalLen * fraction;
-      let accumulated = 0;
-      for (let i = 0; i < points.length - 1; i++) {
-        const len = segLens[i];
-        if (accumulated + len >= targetDist - 1e-5) {
-          const remaining = targetDist - accumulated;
-          const p1 = points[i];
-          const p2 = points[i+1];
-          const t = len > 0 ? remaining / len : 0;
-          return {
-            x: p1.x + t * (p2.x - p1.x),
-            y: p1.y + t * (p2.y - p1.y),
-            segment: { p1, p2 }
-          };
-        }
-        accumulated += len;
-      }
-      const lastIdx = points.length - 1;
-      return {
-        x: points[lastIdx].x,
-        y: points[lastIdx].y,
-        segment: { p1: points[lastIdx - 1], p2: points[lastIdx] }
-      };
-    }
+    if (!bestSeg) continue;
 
-    function checkLabelCollision(cx, cy, w, h, nodesList) {
-      const labelBox = {
-        x: cx - w / 2 - 4,
-        y: cy - h / 2 - 2,
-        width: w + 8,
-        height: h + 4
-      };
-      for (const comp of nodesList) {
-        const compBox = {
-          x: comp.x,
-          y: comp.y,
-          width: comp.width,
-          height: comp.height
-        };
-        if (boxesOverlap(labelBox, compBox)) {
-          return true;
-        }
-      }
-      return false;
-    }
-
-    const anchorDist = 45;
-    let midX, midY;
-    let placed = false;
-
-    // Rule 1: Try Target Anchor (anchorDist from target)
-    if (totalLen >= 2 * anchorDist) {
-      const targetFraction = (totalLen - anchorDist) / totalLen;
-      const candA = getPointAtFraction(targetFraction);
-      if (!checkLabelCollision(candA.x, candA.y, label.width, label.height, components)) {
-        midX = candA.x;
-        midY = candA.y;
-        placed = true;
-      }
-    }
-
-    // Rule 2: Try Source Anchor (anchorDist from source)
-    if (!placed && totalLen >= 2 * anchorDist) {
-      const sourceFraction = anchorDist / totalLen;
-      const candB = getPointAtFraction(sourceFraction);
-      if (!checkLabelCollision(candB.x, candB.y, label.width, label.height, components)) {
-        midX = candB.x;
-        midY = candB.y;
-        placed = true;
-      }
-    }
-
-    // Rule 3: Fallback to Middle Gutter Clearance
-    if (!placed) {
-      let bestSeg = null;
-      let bestScore = -Infinity;
-      for (let i = 0; i < points.length - 1; i++) {
-        const p1 = points[i];
-        const p2 = points[i + 1];
-        const dx = p2.x - p1.x;
-        const dy = p2.y - p1.y;
-        const len = Math.sqrt(dx * dx + dy * dy);
-        const mx = (p1.x + p2.x) / 2;
-        const my = (p1.y + p2.y) / 2;
-        const clearance = nearbyComps.length > 0
-          ? Math.min(...nearbyComps.map(n => pointToBoxDist(mx, my, n)))
-          : Infinity;
-        const score = clearance * 10 + len;
-        if (score > bestScore) { bestScore = score; bestSeg = { p1, p2 }; }
-      }
-
-      if (bestSeg) {
-        midX = (bestSeg.p1.x + bestSeg.p2.x) / 2;
-        const isHorizontal = Math.abs(bestSeg.p1.y - bestSeg.p2.y) < 2;
-        if (isHorizontal) {
-          midY = bestSeg.p1.y;
-        } else {
-          const LABEL_TARGET_BIAS = 0.85;
-          const edgeStart = points[0];
-          const edgeEnd   = points[points.length - 1];
-          const biasedY = edgeStart.y + LABEL_TARGET_BIAS * (edgeEnd.y - edgeStart.y);
-          const segMinY = Math.min(bestSeg.p1.y, bestSeg.p2.y);
-          const segMaxY = Math.max(bestSeg.p1.y, bestSeg.p2.y);
-          const halfH = (label.height + 4) / 2;
-          const clampLo = segMinY + 10 + halfH;
-          const clampHi = segMaxY - 10 - halfH;
-          midY = clampLo <= clampHi
-            ? Math.max(clampLo, Math.min(clampHi, biasedY))
-            : (segMinY + segMaxY) / 2;
-        }
-      } else {
-        midX = (points[0].x + points[points.length - 1].x) / 2;
-        midY = (points[0].y + points[points.length - 1].y) / 2;
-      }
-    }
-
+    const midX = (bestSeg.p1.x + bestSeg.p2.x) / 2;
+    const midY = (bestSeg.p1.y + bestSeg.p2.y) / 2;
 
     const labelBox = {
       x: midX - label.width / 2 - 4,
@@ -324,153 +216,20 @@ export function analyzeLayout(layoutData) {
   return report;
 }
 
-// Query LM to verify zone assignments after Phase 2 classification
-export async function getLLMZoneVerification(apiUrl, plan) {
-  const activeModel = await getActiveModel(apiUrl);
-  console.log(`[Checkpoint 1] Querying LLM (${activeModel}) for zone verification...`);
-
-  const systemPrompt = `You are Nudge, an expert C4 architecture diagram layout optimizer.
-
-You will receive a layout plan for a container diagram with:
-- zones: which external nodes are placed ABOVE, BELOW, LEFT, or RIGHT of the boundary
-- boundary.layers: internal components in top-to-bottom data flow order
-- crossZoneEdges: directed edges showing which zone sends to which
-- zoneDensity: how many nodes occupy each zone
-
-Zone correctness rules:
-- ABOVE: pure callers whose cross-boundary edges target exclusively the first internal layer (Layer 0)
-- BELOW: pure callees whose cross-boundary edges originate exclusively from the deepest internal layer
-- LEFT: pure callers that connect to middle or lower internal layers (utility/admin nodes, e.g. CLI tools, sync lambdas)
-- RIGHT: bidirectional nodes, or pure callees that receive from middle/lower layers (async/stream nodes, e.g. event brokers, webhooks)
-- Unconnected nodes default to ABOVE unless they share an inter-external edge with a node in another zone
-
-If any node is in the wrong zone, output RE_ASSIGN instructions as zoneOverrides.
-If nodes within a zone would benefit from reordering, output SWAP_NODE_ORDER commands.
-
-Behavioral constraints:
-- Do not issue reciprocal SWAP_NODE_ORDER operations that undo ordering changes made in previous layout passes.
-- Prioritize placing external nodes that have direct relationships with each other (e.g. a real-time event client and a front-end UI) into adjacent coordinate slots within the same zone to minimize long, boundary-wrapping lines.
-
-Output ONLY valid JSON:
-{
-  "zoneOverrides": { "nodeId": "above|below|left|right" },
-  "swapCommands": [{ "type": "SWAP_NODE_ORDER", "nodeA": "id1", "nodeB": "id2" }],
-  "rationale": "brief explanation"
-}
-If the layout is already correct: { "zoneOverrides": {}, "swapCommands": [], "rationale": "Assignments correct." }`;
-
-  const userPrompt = `### Layout Plan:\n${JSON.stringify(plan, null, 2)}\n\nVerify zone assignments and output your JSON response.`;
-
-  try {
-    const response = await fetchWithTimeout(`${apiUrl}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: activeModel,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        temperature: 0.1,
-        max_tokens: 1024
-      }),
-      timeout: 30000
-    });
-    const result = await response.json();
-    if (!result.choices || result.choices.length === 0) return null;
-    const choice = result.choices[0];
-    const text = (choice.message.content || choice.message.reasoning_content || '').trim();
-    if (!text) return null;
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) { console.warn('[Checkpoint 1] No JSON in response.'); return null; }
-    const patch = JSON.parse(jsonMatch[0]);
-    console.log(`[Checkpoint 1] Rationale: ${patch.rationale || '(none)'}`);
-    return patch;
-  } catch (err) {
-    console.error('[Checkpoint 1] Failed:', err.message);
-    return null;
-  }
-}
-
-// Query LM to verify node ordering within zones (post edge-routing)
-export async function getLLMRoutingVerification(apiUrl, plan) {
-  const activeModel = await getActiveModel(apiUrl);
-  console.log(`[Checkpoint 2] Querying LLM (${activeModel}) for routing verification...`);
-
-  const systemPrompt = `You are Nudge, an expert C4 architecture diagram layout optimizer.
-
-You will receive a layout plan showing the final zone assignments and cross-zone edges.
-Your task: check if the left-to-right ordering of nodes within each zone minimises edge crossings.
-
-For example, if node A connects to a boundary entry point on the left side and node B connects to one on the right,
-then A should appear to the left of B in the ABOVE zone to keep edges uncrossed.
-
-You may output SWAP_NODE_ORDER commands to reorder within a zone, or SHIFT_ZONE to relocate a node entirely.
-
-Behavioral constraints:
-- Do not issue reciprocal SWAP_NODE_ORDER operations that undo ordering changes made in previous layout passes.
-- Prioritize placing external nodes that have direct relationships with each other (e.g. a real-time event client and a front-end UI) into adjacent coordinate slots within the same zone to minimize long, boundary-wrapping lines.
-
-Output ONLY valid JSON:
-{
-  "swapCommands": [
-    { "type": "SWAP_NODE_ORDER", "nodeA": "id1", "nodeB": "id2" },
-    { "type": "SHIFT_ZONE", "nodeId": "id", "from": "above", "to": "left" }
-  ],
-  "rationale": "brief explanation"
-}
-If no changes are needed: { "swapCommands": [], "rationale": "Ordering is optimal." }`;
-
-  const userPrompt = `### Layout Plan:\n${JSON.stringify(plan, null, 2)}\n\nCheck node ordering and output your JSON response.`;
-
-  try {
-    const response = await fetchWithTimeout(`${apiUrl}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: activeModel,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        temperature: 0.1,
-        max_tokens: 1024
-      }),
-      timeout: 30000
-    });
-    const result = await response.json();
-    if (!result.choices || result.choices.length === 0) return null;
-    const choice = result.choices[0];
-    const text = (choice.message.content || choice.message.reasoning_content || '').trim();
-    if (!text) return null;
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) { console.warn('[Checkpoint 2] No JSON in response.'); return null; }
-    const patch = JSON.parse(jsonMatch[0]);
-    console.log(`[Checkpoint 2] Rationale: ${patch.rationale || '(none)'}`);
-    return patch;
-  } catch (err) {
-    console.error('[Checkpoint 2] Failed:', err.message);
-    return null;
-  }
-}
-
-const PREFERRED_MODEL = "google/gemma-4-12b";
-
-// Retrieve active model from LM Studio, preferring PREFERRED_MODEL if available
+// Retrieve active model from LM Studio
 async function getActiveModel(apiUrl) {
   try {
     const res = await fetchWithTimeout(`${apiUrl}/v1/models`, { timeout: 3000 });
     const data = await res.json();
     if (data && data.data && data.data.length > 0) {
-      const preferred = data.data.find(m => m.id.includes('gemma-4-12b'));
-      if (preferred) return preferred.id;
-      const nonEmbed = data.data.find(m => !m.id.includes('embed'));
-      return nonEmbed ? nonEmbed.id : data.data[0].id;
+      // Find the first non-embedding model
+      const active = data.data.find(m => !m.id.includes('embed'));
+      return active ? active.id : data.data[0].id;
     }
   } catch (err) {
-    console.warn("Could not retrieve model list from LM Studio, falling back to", PREFERRED_MODEL, err.message);
+    console.warn("Could not retrieve model list from LM Studio, falling back to google/gemma-4-12b", err.message);
   }
-  return PREFERRED_MODEL;
+  return "google/gemma-4-12b";
 }
 
 // Query the LLM to get layout options patch
