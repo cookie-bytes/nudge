@@ -6,46 +6,79 @@
 
 **AI-Driven Architecture Diagram Layout Optimizer**
 
-Nudge is a command-line tool that automatically optimizes the layout parameters of C4 Model architecture diagrams using a local Large Language Model (LLM) feedback loop. It analyzes diagram layouts for geometric defects—such as overlapping components, edge-to-node crossings, and tight spacing—and iteratively queries an LLM to find the optimal ELKjs (Eclipse Layout Kernel) properties.
+Nudge is a command-line tool that automatically produces clean, publication-ready C4 Model architecture diagrams. It combines a deterministic custom layout engine for container diagrams with an iterative LLM feedback loop that detects and fixes geometric defects—overlapping components, edge-to-node crossings, and tight spacing—using locally-running AI.
 
 ---
 
 ## Example Output
 
-![Example optimized C4 diagram](docs/example_output.png)
+![Search Service Container Diagram](docs/search_service_container.png)
 
 ---
 
 ## How It Works
 
-Nudge uses a **Critic-Loop** architecture:
+Nudge runs on a **Critic-Loop** architecture:
 
 ```mermaid
 graph TD
     A[Input YAML or Mermaid] --> B[Parse Diagram Model]
-    B --> C[Render Diagram with ELKjs & Playwright]
-    C --> D[Geometric Critique Analyzer]
-    D -->|Defects Detected?| E[Query LLM with Report & Options]
-    E -->|JSON Layout Patch| F[Apply Parameters]
-    F --> C
-    D -->|No Defects or Max Iterations Met| G[Save Final Diagram & Specs]
+    B --> C[LM Checkpoint Pipeline\ncontainer diagrams only]
+    C --> D[Render Diagram in Playwright]
+    D --> E[Geometric Critique Analyzer]
+    E -->|Defects Detected?| F[Query LLM with Report & Options]
+    F -->|JSON Layout Patch| G[Apply Parameters]
+    G --> D
+    E -->|No Defects or Max Iterations Met| H[Save Final Diagram & Specs]
 ```
 
-1. **Ingestion**: Parses C4Context Mermaid diagrams or YAML-defined system models.
-2. **Rendering**: Uses Playwright to render the diagram layout dynamically via ELKjs.
-3. **Criticism**: Measures bounding boxes to calculate overlaps, edge-node crossings, edge-label collisions, and aspect ratio.
-4. **Correction**: Feeds the geometric report to a local LLM, requesting updated ELKjs properties (e.g., `elk.spacing.nodeNode`, `elk.layered.spacing.nodeNodeBetweenLayers`).
-5. **Iteration**: Repeats up to 4 times or until a clean layout is produced.
+1. **Ingestion**: Parses C4 Context or C4 Container diagrams from `.mermaid` or `.yaml` specifications.
+2. **LM Checkpoint Pipeline** *(container diagrams only)*: Before the optimization loop, two LLM checkpoints verify and correct zone assignments and node ordering within zones — ensuring callers are above the boundary, callees below, and external nodes are ordered to minimise edge crossings.
+3. **Rendering**: Playwright loads the diagram template and executes the layout pipeline:
+   - **Flat diagrams (C4Context)**: Arranged dynamically via **ELKjs** (layered algorithm).
+   - **Nested diagrams (C4Container)**: Arranged via a custom, deterministic **Container Layout Engine** (see below).
+4. **Criticism**: Measures DOM bounding boxes to calculate geometric defects (overlaps, edge-node crossings, edge-label collisions, aspect ratio).
+5. **Correction**: Feeds the critique report to a local LLM, requesting layout property adjustments or ordering swap overrides.
+6. **Iteration**: Repeats up to 4 times or until a clean layout is produced.
+
+---
+
+## Layout Engines & Algorithms
+
+Nudge uses two distinct engines depending on the C4 model type:
+
+### 1. Flat C4 Context Layout (ELKjs)
+Flat context diagrams are laid out using the **Eclipse Layout Kernel (ELKjs)** with a layered algorithm. The critic loop iteratively tunes layout properties like spacing, node distances, and routing directions by prompting the LLM.
+
+### 2. Nested C4 Container Layout (Custom Engine)
+Container diagrams containing boundary blocks bypass ELKjs entirely and use a custom deterministic layout pipeline:
+
+- **Phase 1: Kahn Layering (Boundary Interior)**: Children of the boundary are sorted into horizontal layers using a modified Kahn's topological sort. Nodes receiving cross-boundary edges are automatically seeded as entry nodes in the top row (Layer 0); unconnected utility nodes are pushed down to minimise clutter. Cycles are silently broken by appending remaining nodes to a final layer.
+- **Phase 2: Zone Classification & Connectivity Sorting**: External nodes are classified into layout zones — callers go **above**, callees go **below**, and overflow nodes spill into **left** and **right** columns. Each zone is then automatically sorted by the average layer/column index of the internal nodes it connects to, so external nodes align visually with their counterparts inside the boundary with minimal edge crossings. LLM override commands (`zoneOverrides`, `SWAP_NODE_ORDER`, `SHIFT_ZONE`) from the checkpoint pipeline are applied on top of the automatic sort.
+- **Phase 3: Orthogonal Edge Routing**: Every cross-boundary edge is routed by spatial relationship — straight vertical lines for vertically-aligned endpoints, L-shapes for targets directly above or below, and U-shape arcs for the fallback case. Bend points are post-processed into SVG quadratic bezier curves with a 10 px corner radius.
+- **Phase 4: Rule-Based Edge Label Placement**: Relationship labels are placed along the edge using four strategies evaluated in order: (0) straight-line midpoint, (1) target-anchored, (2) source-anchored, (3) gutter-clearance segment scoring. Every strategy checks for collision against both node bounding boxes **and previously-placed labels**, so duplicate-text labels on co-terminal edges are always separated. Long labels wrap automatically; technology notes (e.g. `[HTTPS]`) are rendered in a smaller, semi-transparent style beneath the main text.
+
+### LM Checkpoint Pipeline (Container diagrams)
+Before the 4-iteration optimization loop runs, two LLM checkpoints fire once:
+
+- **Checkpoint 1 — Zone Verification**: The LLM reviews the computed zone plan and may issue `zoneOverrides` (move a node to a different zone) or `SWAP_NODE_ORDER` commands.
+- **Checkpoint 2 — Ordering Verification**: If Checkpoint 1 changed any zones, the plan is recomputed first. The LLM then checks whether the left-to-right ordering within each zone minimises edge crossings, and may issue further `SWAP_NODE_ORDER` or `SHIFT_ZONE` commands.
+
+All override commands are written to `diagramModel._layoutOverrides` and applied on every subsequent render pass.
 
 ---
 
 ## Features
 
-- 🎯 **Automatic Detection**: Finds overlapping components, intersecting arrows, edge-label collisions, and cramped nodes.
-- 🔄 **Critic Loop**: Continuous optimization loop that improves layout quality iteratively.
-- 🎨 **Supports Mermaid & YAML**: Seamless support for C4Context `.mermaid`/`.mmd` files and structured `.yaml` system specifications.
-- 🏷️ **Smart Label Placement**: Edge labels are placed on the segment with the most clearance from nearby nodes, and long labels wrap to multiple lines automatically.
-- 🔌 **Side-Port Routing**: Backward and side-routed edges connect on the correct left/right port even when source and target nodes are vertically aligned.
+- 🎯 **Automatic Defect Detection**: Finds overlapping components, intersecting arrows, edge-label collisions, and poor aspect ratios.
+- 🔄 **Critic Loop**: Continuous optimization loop that improves layout quality iteratively (up to 4 passes).
+- 🤖 **LM Checkpoint Pipeline**: Two pre-render LLM checkpoints verify and correct zone assignments and node ordering for container diagrams before the main loop begins.
+- 🎨 **Supports Mermaid & YAML**: Seamless support for C4 diagrams in `.mermaid`/`.mmd` syntax and structured `.yaml` specifications.
+- 📏 **Standardized Sizing & Grid**: All nodes are standardized to a width of `200px` (heights `140px` for database, person, container, and external systems; `80px` for others), ensuring consistent alignment and a clean grid.
+- 💬 **3-Line Descriptions**: Node descriptions support a 3-line clamp, providing space for detailed technical notes without clipping.
+- 🏷️ **Collision-Aware Label Placement**: Edge labels check four strategies sequentially — straight-middle, target-anchored, source-anchored, and gutter-clearance segment scoring. Each strategy checks for collision against both node boxes and already-placed labels, preventing co-terminal edges from stacking their labels on top of each other.
+- 🔌 **Orthogonal Edge Routing**: Cross-boundary edges route via L-shape, straight-line, or U-shape paths; corners are smoothed with quadratic bezier curves.
+- 🌐 **Connectivity-Based Zone Sorting**: External nodes are auto-sorted to align with the internal layer or column they connect to, reducing edge crossings without LLM intervention.
 - 🏠 **100% Local**: Runs fully on your machine using Playwright and a local LLM backend (like LM Studio).
 
 ---
@@ -97,24 +130,34 @@ Provide the path to your diagram file as an argument:
 node src/cli.js examples/internet_banking.mermaid
 ```
 
+### Run the test suite
+```bash
+npm test
+```
+Renders all diagrams in `test/` and grades them. If a local LLM is unavailable, grading falls back to a math-based scorer automatically — no test is skipped.
+
 ### Outputs
-Nudge outputs optimized diagrams and execution specs in the `.nudge/` directory:
-- **`layout_iteration_X.png`**: Rendering screenshot at each optimization pass.
-- **`optimized_diagram.png`**: The final optimized layout diagram.
-- **`layout_options.json`**: The final optimized ELKjs options patch.
+Nudge writes all outputs to the `.nudge/` directory:
+- **`iteration_N.png`**: Screenshot at each optimization pass.
+- **`optimized.png`**: Final optimized layout as a PNG.
+- **`optimized.svg`**: Final optimized layout as a scalable SVG.
+- **`layout.cache.json`**: The final ELKjs options patch (flat C4 Context diagrams).
 
 ---
 
 ## Folder Structure
 
 ```
-├── .nudge/                 # Output directory for rendered iterations
+├── .nudge/                 # Output directory for rendered iterations and final exports
+├── docs/                   # Documentation and example images
 ├── examples/               # Example C4 model YAML and Mermaid diagrams
 ├── src/
-│   ├── cli.js              # CLI entry point and orchestration loop
+│   ├── cli.js              # CLI entry point, LM checkpoint pipeline, and optimization loop
 │   ├── critic.js           # Geometric evaluation and LLM API connector
 │   ├── mermaid_parser.js   # Parse Mermaid C4 diagram structures
-│   └── render.html         # ELKjs rendering template loaded in Playwright
+│   └── render.html         # Layout engine and SVG rendering template (loaded by Playwright)
+├── test/                   # Test diagrams (.mermaid) and test runner
+├── test_outputs/           # Rendered PNGs, SVGs, and test result summary from npm test
 ├── LICENSE                 # MIT License
 └── package.json            # Node project configuration
 ```

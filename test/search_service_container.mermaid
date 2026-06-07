@@ -1,0 +1,39 @@
+C4Container
+    title Search Service
+    caption Last modified: 2025-01-10
+
+    %% --- Custom Style Hints ---
+    %% Applies a neutral charcoal look exclusively to external/shared systems
+    UpdateElementStyle("external_system", "#4A5568", "#FFFFFF", "#2D3748")
+
+    %% External Systems / Applications outside the main boundary
+    System(white_label, "FE White Label", "Front End Web Application", "Provides search and book capabilities to White Label users")
+    System(public_api_gateway, "Public API Gateway", "Software System", "Provides Public API to 3rd party API partners")
+    System(cart_service, "Cart Service", "Software System", "Provides cart management capabilities. Create cart, add item to cart, remove item to cart and validate cart.")
+    System(integration_service, "Integration Service", "Software System", "Performs searches and bookings with 3rd party API providers.")
+    System(promotion_service, "Promotion Service", "Software System", "Provides promotion management capabilities and applies promotion offers on search results")
+    System_Ext(aws_eventbridge, "AWS EventBridge", "Software System", "AWS EventBridge serverless event bus that enables applications to communicate with each other using events.")
+    System(partner_service_api, "Partner Service", "Software System", "Manages Partner configuration and management")
+
+    %% Search Service Boundary
+    System_Boundary(search_service, "Search Service") {
+        Container(search_api_gateway, "Search Service API Gateway", "AWS API Gateway", "Exposes Search Service APIs through API Gateway for external/internal consumers")
+        Container(search_lambda, "Search Service Lambda", ".NET 10", "Handles search requests")
+        ContainerDb(database, "Database", "AWS DynamoDB", "Stores search and availability results")
+        Container(partner_sync_lambda, "Partner Sync Lambda", "NodeJS Lambda Function", "Handles partner data sync in search service")
+    }
+
+    %% Relationships
+    Rel(white_label, search_api_gateway, "make API calls to", "HTTPS")
+    Rel(public_api_gateway, search_api_gateway, "make API calls to", "HTTPS")
+    
+    Rel(search_api_gateway, search_lambda, "makes API calls to", "HTTPS")
+    
+    Rel(search_lambda, database, "reads from and writes to", "TCP")
+    Rel(search_lambda, cart_service, "makes API calls to", "HTTPS")
+    Rel(search_lambda, integration_service, "makes API calls to", "HTTPS")
+    Rel(search_lambda, promotion_service, "makes API calls to", "HTTPS")
+
+    Rel(partner_sync_lambda, database, "reads from and writes to", "TCP")
+    Rel(partner_sync_lambda, partner_service_api, "makes API calls to", "HTTPS")
+    Rel(aws_eventbridge, partner_sync_lambda, "sends Partner sync reference data events to", "")

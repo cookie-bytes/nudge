@@ -7,9 +7,9 @@ export function parseMermaidC4(mermaidString) {
     layoutOptions: {
       "elk.algorithm": "layered",
       "elk.direction": "DOWN",
-      "elk.spacing.nodeNode": "70",
-      "elk.layered.spacing.nodeNodeBetweenLayers": "70",
-      "elk.spacing.edgeNode": "45",
+      "elk.spacing.nodeNode": "140",
+      "elk.layered.spacing.nodeNodeBetweenLayers": "110",
+      "elk.spacing.edgeNode": "80",
       "elk.spacing.edgeEdge": "20",
       "elk.padding": "[top=30,left=30,bottom=30,right=30]"
     },
@@ -23,9 +23,9 @@ export function parseMermaidC4(mermaidString) {
 
   // Regular expression patterns
   const titleRegex = /^\s*title\s+(.+)$/i;
-  const boundaryRegex = /^\s*(Enterprise|System)_Boundary\((\w+),\s*"([^"]+)"\)\s*\{/i;
-  const nodeRegex = /^\s*(Person|System|System_Ext|Container|ContainerDb|Container_Ext|ContainerQueue)\((\w+),\s*"([^"]+)"(?:,\s*"([^"]+)")?(?:,\s*"([^"]+)")?\)/i;
-  const relRegex = /^\s*Rel\((\w+),\s*(\w+),\s*"([^"]+)"(?:,\s*"([^"]+)")?\)/i;
+  const boundaryRegex = /^\s*(?:(Enterprise|System|Container)_)?Boundary\((\w+),\s*"([^"]+)"\)\s*\{/i;
+  const nodeRegex = /^\s*(Person|System|System_Ext|Container|ContainerDb|Container_Ext|ContainerQueue)\((\w+),\s*"([^"]+)"(?:,\s*"([^"]*)")?(?:,\s*"([^"]*)")?\)/i;
+  const relRegex = /^\s*Rel\((\w+),\s*(\w+),\s*"([^"]+)"(?:,\s*"([^"]*)")?\)/i;
   const ruleRegex = /^\s*%%\s*Rule:\s*(\w+)\s+(above|below)\s+(\w+)/i;
 
   for (let line of lines) {
@@ -109,12 +109,13 @@ export function parseMermaidC4(mermaidString) {
         mappedType = 'message_bus';
       }
 
-      // Container(id, "Label", "Tech", "Description") — 4 args where tech is 2nd desc is 3rd
-      // System(id, "Label", "Description") — 3 args where description is 2nd
+      // Support optional technology parameter: if 4 arguments are provided, the 3rd is technology and 4th is description.
+      // Otherwise, the 3rd is description.
+      let tech = '';
       let description = '';
-      if (typeLower.startsWith('container')) {
-        // Container syntax: Container(id, "Label", "Tech", "Description")
-        description = descAfterTech || descOrTech || '';
+      if (descAfterTech !== undefined) {
+        tech = descOrTech || '';
+        description = descAfterTech || '';
       } else {
         description = descOrTech || '';
       }
@@ -123,9 +124,10 @@ export function parseMermaidC4(mermaidString) {
         id,
         label,
         type: mappedType,
+        tech,
         description,
-        width: 160,
-        height: (mappedType === 'database' || mappedType === 'person') ? 140 : 80
+        width: 200,
+        height: (mappedType === 'database' || mappedType === 'person' || mappedType === 'container' || mappedType === 'external') ? 140 : 80
       };
 
       if (activeBoundaries.length > 0) {

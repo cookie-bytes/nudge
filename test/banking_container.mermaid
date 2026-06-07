@@ -3,10 +3,13 @@ C4Container
     %% Rule: Person above Container
     %% Rule: Container above ContainerDb
 
+
     Person(customer, "Banking Customer", "A customer of the bank with personal bank accounts.")
-    Container(webApp, "Web Application", "React/Javascript", "Delivers the static content and the internet banking SPA.")
-    Container(apiApp, "API Application", "Java/Spring Boot", "Provides internet banking functionality via a JSON/HTTPS API.")
-    ContainerDb(database, "Database", "Oracle DB", "Stores customer accounts, transactions, and credentials.")
+    System_Boundary(c1, "Internet Banking System") {
+        Container(webApp, "Web Application", "React/Javascript", "Delivers the static content and the internet banking SPA.")
+        Container(apiApp, "API Application", "Java/Spring Boot", "Provides internet banking functionality via a JSON/HTTPS API.")
+        ContainerDb(database, "Database", "Oracle DB", "Stores customer accounts, transactions, and credentials.")
+    }
 
     Rel(customer, webApp, "Visits", "HTTPS")
     Rel(webApp, apiApp, "Makes API calls to", "JSON/HTTPS")

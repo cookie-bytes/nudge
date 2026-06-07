@@ -34,7 +34,7 @@ const diagramModel = {
       id: 'db1',
       label: 'Database',
       type: 'database',
-      description: 'Stores customer accounts.',
+      description: 'Stores customer accounts, transactions, history, and credentials.',
       width: 160,
       height: 140
     }
