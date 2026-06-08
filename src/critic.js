@@ -465,7 +465,7 @@ If no changes are needed: { "swapCommands": [], "rationale": "Ordering is optima
   }
 }
 
-const PREFERRED_MODEL = "google/gemma-4-12b";
+const PREFERRED_MODEL = process.env.NUDGE_LLM_MODEL || "google/gemma-4-12b";
 
 // Retrieve active model from LM Studio, preferring PREFERRED_MODEL if available
 export async function getActiveModel(apiUrl, { signal } = {}) {
@@ -473,7 +473,8 @@ export async function getActiveModel(apiUrl, { signal } = {}) {
     const res = await fetchWithTimeout(`${apiUrl}/v1/models`, { timeout: 3000, signal });
     const data = await res.json();
     if (data && data.data && data.data.length > 0) {
-      const preferred = data.data.find(m => m.id.includes(PREFERRED_MODEL.split('/')[1]));
+      const modelSearch = PREFERRED_MODEL.includes('/') ? PREFERRED_MODEL.split('/')[1] : PREFERRED_MODEL;
+      const preferred = data.data.find(m => m.id.toLowerCase().includes(modelSearch.toLowerCase()));
       if (preferred) return preferred.id;
       const nonEmbed = data.data.find(m => !m.id.includes('embed'));
       return nonEmbed ? nonEmbed.id : data.data[0].id;

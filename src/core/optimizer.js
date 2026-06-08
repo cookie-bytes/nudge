@@ -23,7 +23,7 @@ async function captureSvg(page, width, height) {
 export async function optimizeDiagram({
   diagramModel,
   outputDir,
-  apiUrl = process.env.NUDGE_LLM_API || 'http://localhost:1234',
+  apiUrl = process.env.NUDGE_LLM_API || 'http://127.0.0.1:1234',
   maxIterations = 4,
   onLog = (msg) => process.stderr.write(msg + '\n'),
   signal = null,

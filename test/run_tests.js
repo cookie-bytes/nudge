@@ -5,7 +5,7 @@ import { parseMermaidC4 } from '../src/mermaid_parser.js';
 import { analyzeLayout, getActiveModel } from '../src/critic.js';
 import { fetchWithTimeout } from '../src/utils.js';
 
-const LM_STUDIO_API = process.env.NUDGE_LLM_API || 'http://localhost:1234';
+const LM_STUDIO_API = process.env.NUDGE_LLM_API || 'http://127.0.0.1:1234';
 const TEST_DIR = path.resolve('test');
 const OUTPUT_DIR = path.resolve('test_outputs');
 
