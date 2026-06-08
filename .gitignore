@@ -16,8 +16,6 @@ yarn-error.log*
 # Generated test artefacts
 test_outputs/
 
-# AI assistant context
-CLAUDE.md
 
 # OS metadata
 .DS_Store
