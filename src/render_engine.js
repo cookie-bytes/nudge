@@ -1,5 +1,6 @@
-    const elk = new ELK();
+const elk = new ELK();
     let ranks = {};
+    const DIAGRAM_H_PAD = 80;
 
     // Main layout and rendering entrypoint called by Playwright
     window.renderDiagram = async function (diagramData) {
@@ -99,14 +100,14 @@
         const displayType = diagramData && diagramData.diagramType === "C4Container" ? "C4 Container Diagram" : "C4 Context Diagram";
         const titleText = `${displayType} : ${(diagramData && diagramData.title) || "Untitled"}`;
         const titleWidth = measureTextWidth(titleText, 16, true) + 60;
-        const finalWidth = Math.max(laidOutGraph.width, titleWidth);
+        const finalWidth = Math.max(laidOutGraph.width + DIAGRAM_H_PAD * 2, titleWidth);
 
         return {
           success: true,
           width: finalWidth,
           height: laidOutGraph.height + 50,
-          nodes: flattenNodes(laidOutGraph, 0, 50),
-          edges: flattenEdges(laidOutGraph, 0, 50)
+          nodes: flattenNodes(laidOutGraph, DIAGRAM_H_PAD, 50),
+          edges: flattenEdges(laidOutGraph, DIAGRAM_H_PAD, 50)
         };
       } catch (err) {
         console.error("Rendering failed:", err);
@@ -1208,7 +1209,7 @@
       const titleLayer = document.getElementById("title-layer");
       if (titleLayer) {
         const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-        text.setAttribute("x", 30);
+        text.setAttribute("x", DIAGRAM_H_PAD);
         text.setAttribute("y", 35);
         text.setAttribute("class", "diagram-title-text");
         text.textContent = titleText;
@@ -1216,14 +1217,14 @@
       }
 
       const titleWidth = measureTextWidth(titleText, 16, true) + 60;
-      const finalWidth = Math.max(graph.width, titleWidth);
+      const finalWidth = Math.max(graph.width + DIAGRAM_H_PAD * 2, titleWidth);
 
       // Adjust viewport size dynamically (shifted vertically by +50px for title)
       svg.setAttribute("viewBox", `0 0 ${finalWidth} ${graph.height + 50}`);
       svg.style.width = `${finalWidth}px`;
       svg.style.height = `${graph.height + 50}px`;
 
-      const allComponents = flattenNodes(graph, 0, 50).filter(n => n.type !== 'boundary');
+      const allComponents = flattenNodes(graph, DIAGRAM_H_PAD, 50).filter(n => n.type !== 'boundary');
       const placedLabels = [];
 
       // Helper to generate capitalized node type label, appending technology if present
@@ -1780,8 +1781,8 @@
       }
 
       // 1. Draw nodes and boundary boxes (with vertical offset of 50px)
-      renderNodeTree(graph, 0, 50);
+      renderNodeTree(graph, DIAGRAM_H_PAD, 50);
 
       // 2. Draw connector lines (edges) recursively (with vertical offset of 50px)
-      renderEdges(graph, 0, 50);
+      renderEdges(graph, DIAGRAM_H_PAD, 50);
     };
