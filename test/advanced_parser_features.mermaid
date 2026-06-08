@@ -1,0 +1,15 @@
+C4Container
+    title Advanced Parser Feature Test Diagram
+
+    Person_Ext(customer, "External Customer", "An external banking client.")
+    System_Boundary(c1, "Internal Core") {
+        SystemDb(coreDb, "Core DB", "Oracle", "Stores user profiles.")
+        SystemQueue(notificationQueue, "Notification Queue", "RabbitMQ", "Stores notification events.")
+        Container(apiGateway, "API Gateway", "Spring Cloud", "Routes API requests.")
+    }
+    ContainerDb_Ext(partnerDb, "Partner Database", "PostgreSQL", "Stores partner transactional sync data.")
+
+    BiRel(customer, apiGateway, "Interacts with", "HTTPS")
+    Rel_Back(coreDb, apiGateway, "Pulls configurations", "JDBC")
+    Rel_Down(apiGateway, notificationQueue, "Pushes event", "AMQP")
+    Rel_Back(notificationQueue, partnerDb, "Feeds external sync", "JDBC/SSL")

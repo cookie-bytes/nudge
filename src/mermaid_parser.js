@@ -24,8 +24,8 @@ export function parseMermaidC4(mermaidString) {
   // Regular expression patterns
   const titleRegex = /^\s*title\s+(.+)$/i;
   const boundaryRegex = /^\s*(?:(Enterprise|System|Container)_)?Boundary\((\w+),\s*"([^"]+)"\)\s*\{/i;
-  const nodeRegex = /^\s*(Person|System|System_Ext|Container|ContainerDb|Container_Ext|ContainerQueue)\((\w+),\s*"([^"]+)"(?:,\s*"([^"]*)")?(?:,\s*"([^"]*)")?\)/i;
-  const relRegex = /^\s*Rel\((\w+),\s*(\w+),\s*"([^"]+)"(?:,\s*"([^"]*)")?\)/i;
+  const nodeRegex = /^\s*(Person|Person_Ext|System|System_Ext|SystemDb|SystemDb_Ext|SystemQueue|SystemQueue_Ext|Container|Container_Ext|ContainerDb|ContainerDb_Ext|ContainerQueue|ContainerQueue_Ext|Component|ComponentDb|ComponentQueue)\((\w+),\s*"([^"]+)"(?:,\s*"([^"]*)")?(?:,\s*"([^"]*)")?\)/i;
+  const relRegex = /^\s*(?:Bi)?Rel(?:_[A-Za-z]+)?\((\w+),\s*(\w+),\s*"([^"]+)"(?:,\s*"([^"]*)")?\)/i;
   const ruleRegex = /^\s*%%\s*Rule:\s*(\w+)\s+(above|below)\s+(\w+)/i;
 
   for (let line of lines) {
@@ -99,14 +99,23 @@ export function parseMermaidC4(mermaidString) {
       const [_, type, id, label, descOrTech, descAfterTech] = nodeMatch;
       const typeLower = type.toLowerCase();
       let mappedType = 'container';
-      if (typeLower === 'person') {
-        mappedType = 'person';
-      } else if (typeLower === 'system_ext' || typeLower === 'container_ext') {
+      if (typeLower === 'person' || typeLower === 'person_ext') {
+        mappedType = typeLower === 'person' ? 'person' : 'external';
+      } else if (
+        typeLower === 'system_ext' ||
+        typeLower === 'container_ext' ||
+        typeLower === 'systemdb_ext' ||
+        typeLower === 'containerdb_ext' ||
+        typeLower === 'systemqueue_ext' ||
+        typeLower === 'containerqueue_ext'
+      ) {
         mappedType = 'external';
-      } else if (typeLower === 'containerdb') {
+      } else if (typeLower === 'containerdb' || typeLower === 'systemdb' || typeLower === 'componentdb') {
         mappedType = 'database';
-      } else if (typeLower === 'containerqueue') {
+      } else if (typeLower === 'containerqueue' || typeLower === 'systemqueue' || typeLower === 'componentqueue') {
         mappedType = 'message_bus';
+      } else if (typeLower === 'system' || typeLower === 'container' || typeLower === 'component') {
+        mappedType = 'container';
       }
 
       // Support optional technology parameter: if 4 arguments are provided, the 3rd is technology and 4th is description.
@@ -165,9 +174,17 @@ function normalizeTypeName(name) {
   const trimmed = name.trim();
   const lower = trimmed.toLowerCase();
   if (lower === 'person') return 'person';
-  if (lower === 'system' || lower === 'container') return 'container';
-  if (lower === 'system_ext' || lower === 'container_ext') return 'external';
-  if (lower === 'database' || lower === 'containerdb') return 'database';
-  if (lower === 'message_bus' || lower === 'containerqueue' || lower === 'messagebus') return 'message_bus';
+  if (lower === 'person_ext') return 'external';
+  if (lower === 'system' || lower === 'container' || lower === 'component') return 'container';
+  if (
+    lower === 'system_ext' ||
+    lower === 'container_ext' ||
+    lower === 'systemdb_ext' ||
+    lower === 'containerdb_ext' ||
+    lower === 'systemqueue_ext' ||
+    lower === 'containerqueue_ext'
+  ) return 'external';
+  if (lower === 'database' || lower === 'containerdb' || lower === 'systemdb' || lower === 'componentdb') return 'database';
+  if (lower === 'message_bus' || lower === 'containerqueue' || lower === 'messagebus' || lower === 'systemqueue' || lower === 'componentqueue') return 'message_bus';
   return trimmed; // Preserve case for custom node IDs!
 }
