@@ -111,138 +111,162 @@ Remember: output ONLY the JSON object.`;
   }
 }
 
-async function runIntegrationTest() {
-  console.log("\n=== Running Offline Deterministic Integration Test ===");
-  
-  const mockOutputDir = path.resolve('test_outputs/integration_test');
-  if (fs.existsSync(mockOutputDir)) {
-    fs.rmSync(mockOutputDir, { recursive: true, force: true });
-  }
+// Build a mock fetch that routes by user-message structural markers rather than
+// system-prompt prose. This means prompt wording can be tuned freely without
+// breaking the mock; only the deliberate API contract (the user-message headers)
+// needs to stay stable. Any call that doesn't match a known marker throws
+// immediately so regressions are caught loudly rather than silently swallowed.
+function buildMockFetch(callLog) {
+  return async (url, options) => {
+    callLog.total++;
+    const body = options?.body ? JSON.parse(options.body) : {};
 
-  // Sample C4Context diagram with potential tight spacing
-  const mermaidDiagram = `
-    C4Context
-      title Sample Context Diagram
-      Person(user, "User", "A user of the system")
-      System(system, "Software System", "The software system under test")
-      Rel(user, system, "Uses", "HTTPS")
-  `;
-  const model = parseMermaidC4(mermaidDiagram);
-  // Force a small spacing initially to cause a layout warning / critic trigger
-  model.layoutOptions["elk.spacing.nodeNode"] = "10";
-  model.layoutOptions["elk.layered.spacing.nodeNodeBetweenLayers"] = "10";
-
-  // Mock global fetch
-  const originalFetch = globalThis.fetch;
-  let fetchCallCount = 0;
-
-  globalThis.fetch = async (url, options) => {
-    fetchCallCount++;
-    const body = JSON.parse(options.body || '{}');
-    
-    // Determine which API call this is
     if (url.endsWith('/v1/models')) {
-      return {
-        ok: true,
-        json: async () => ({
-          data: [{ id: "mock-model" }]
-        })
-      };
+      callLog.modelList++;
+      return { ok: true, json: async () => ({ data: [{ id: "mock-model" }] }) };
     }
 
     if (url.endsWith('/v1/chat/completions')) {
-      const messages = body.messages || [];
-      const systemMessage = messages.find(m => m.role === 'system')?.content || '';
+      const userMessage = body.messages?.find(m => m.role === 'user')?.content ?? '';
 
-      if (systemMessage.includes("expert AI visual layout optimizer")) {
-        // Optimization patch request
+      if (userMessage.includes('### Current Layout Options:')) {
+        callLog.optimizationPatch++;
         return {
           ok: true,
           json: async () => ({
-            choices: [{
-              message: {
-                content: JSON.stringify({
-                  "elk.spacing.nodeNode": "150",
-                  "elk.layered.spacing.nodeNodeBetweenLayers": "120"
-                })
-              }
-            }]
-          })
-        };
-      }
-      
-      if (systemMessage.includes("zone verification")) {
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{
-              message: {
-                content: JSON.stringify({
-                  zoneOverrides: {},
-                  swapCommands: [],
-                  rationale: "Assignments correct."
-                })
-              }
-            }]
+            choices: [{ message: { content: JSON.stringify({
+              "elk.spacing.nodeNode": "150",
+              "elk.layered.spacing.nodeNodeBetweenLayers": "120"
+            }) } }]
           })
         };
       }
 
-      if (systemMessage.includes("routing verification")) {
+      if (userMessage.includes('Verify zone assignments')) {
+        callLog.zoneVerification++;
         return {
           ok: true,
           json: async () => ({
-            choices: [{
-              message: {
-                content: JSON.stringify({
-                  swapCommands: [],
-                  rationale: "Ordering is optimal."
-                })
-              }
-            }]
+            choices: [{ message: { content: JSON.stringify({
+              zoneOverrides: {},
+              swapCommands: [],
+              rationale: "Assignments correct."
+            }) } }]
           })
         };
       }
+
+      if (userMessage.includes('Check node ordering')) {
+        callLog.routingVerification++;
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({
+              swapCommands: [],
+              rationale: "Ordering is optimal."
+            }) } }]
+          })
+        };
+      }
+
+      // Unrecognised call — fail loudly so any prompt-contract change is caught immediately
+      throw new Error(`Mock fetch: unrecognised /v1/chat/completions call. User message prefix: "${userMessage.substring(0, 120)}"`);
     }
 
-    // Default fallback
-    return {
-      ok: true,
-      json: async () => ({})
-    };
+    throw new Error(`Mock fetch: unexpected URL ${url}`);
   };
+}
 
-  try {
-    const result = await optimizeDiagram({
-      diagramModel: model,
-      outputDir: mockOutputDir,
-      apiUrl: 'http://mock-api.local',
-      maxIterations: 3,
-      onLog: (msg) => console.log(`  [Integration Log] ${msg.trim()}`),
-    });
+async function runIntegrationTest() {
+  console.log("\n=== Running Offline Deterministic Integration Test ===");
 
-    console.log("Integration test finished. Success:", result.success);
-    console.log("Iterations run:", result.history.length);
-    console.log("Fetch call count:", fetchCallCount);
+  // --- C4Context sub-test ---
+  // Verifies the core critic loop: tight spacing → LLM patch → clean layout.
+  {
+    const outputDir = path.resolve('test_outputs/integration_test/context');
+    if (fs.existsSync(outputDir)) fs.rmSync(outputDir, { recursive: true, force: true });
 
-    if (!result.success) {
-      throw new Error("Integration test failed: optimization did not succeed.");
-    }
-    if (result.history.length < 2) {
-      throw new Error("Integration test failed: optimizer did not iterate to apply mock patch.");
-    }
-    if (!fs.existsSync(path.join(mockOutputDir, 'optimized.svg'))) {
-      throw new Error("Integration test failed: optimized.svg was not created.");
-    }
-    if (!fs.existsSync(path.join(mockOutputDir, 'optimized.png'))) {
-      throw new Error("Integration test failed: optimized.png was not created.");
-    }
+    const mermaidDiagram = `
+      C4Context
+        title Sample Context Diagram
+        Person(user, "User", "A user of the system")
+        System(system, "Software System", "The software system under test")
+        Rel(user, system, "Uses", "HTTPS")
+    `;
+    const model = parseMermaidC4(mermaidDiagram);
+    model.layoutOptions["elk.spacing.nodeNode"] = "10";
+    model.layoutOptions["elk.layered.spacing.nodeNodeBetweenLayers"] = "10";
 
-    console.log("✅ Integration test PASSED successfully!");
-    return true;
-  } finally {
-    globalThis.fetch = originalFetch;
+    const callLog = { total: 0, modelList: 0, optimizationPatch: 0, zoneVerification: 0, routingVerification: 0 };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = buildMockFetch(callLog);
+
+    try {
+      const result = await optimizeDiagram({
+        diagramModel: model,
+        outputDir,
+        apiUrl: 'http://mock-api.local',
+        maxIterations: 3,
+        onLog: (msg) => console.log(`  [Context] ${msg.trim()}`),
+      });
+
+      console.log(`  Context test: success=${result.success}, iterations=${result.history.length}, fetches=${callLog.total}`);
+
+      if (!result.success) throw new Error("C4Context integration test: optimization did not succeed.");
+      if (result.history.length < 2) throw new Error("C4Context integration test: optimizer did not iterate — mock patch was not applied.");
+      if (callLog.optimizationPatch === 0) throw new Error("C4Context integration test: optimization patch mock was never called — user-message contract may have changed.");
+      if (callLog.zoneVerification > 0 || callLog.routingVerification > 0) throw new Error("C4Context integration test: checkpoint mocks were called unexpectedly on a flat diagram.");
+      if (!fs.existsSync(path.join(outputDir, 'optimized.svg'))) throw new Error("C4Context integration test: optimized.svg was not created.");
+      if (!fs.existsSync(path.join(outputDir, 'optimized.png'))) throw new Error("C4Context integration test: optimized.png was not created.");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   }
+
+  // --- C4Container sub-test ---
+  // Verifies the LM checkpoint pipeline fires and both zone/routing mocks are hit.
+  {
+    const outputDir = path.resolve('test_outputs/integration_test/container');
+    if (fs.existsSync(outputDir)) fs.rmSync(outputDir, { recursive: true, force: true });
+
+    const mermaidDiagram = `
+      C4Container
+        title Sample Container Diagram
+        Person(user, "User", "A user of the system")
+        System_Boundary(b, "My Service") {
+          Container(api, "API", "Node.js", "Handles requests")
+          ContainerDb(db, "Database", "Postgres", "Stores data")
+        }
+        Rel(user, api, "Calls", "HTTPS")
+        Rel(api, db, "Reads/writes", "TCP")
+    `;
+    const model = parseMermaidC4(mermaidDiagram);
+
+    const callLog = { total: 0, modelList: 0, optimizationPatch: 0, zoneVerification: 0, routingVerification: 0 };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = buildMockFetch(callLog);
+
+    try {
+      const result = await optimizeDiagram({
+        diagramModel: model,
+        outputDir,
+        apiUrl: 'http://mock-api.local',
+        maxIterations: 2,
+        onLog: (msg) => console.log(`  [Container] ${msg.trim()}`),
+      });
+
+      console.log(`  Container test: success=${result.success}, iterations=${result.history.length}, fetches=${callLog.total}`);
+
+      if (callLog.zoneVerification === 0) throw new Error("C4Container integration test: zone verification mock was never called — user-message contract may have changed.");
+      if (callLog.routingVerification === 0) throw new Error("C4Container integration test: routing verification mock was never called — user-message contract may have changed.");
+      if (!fs.existsSync(path.join(outputDir, 'optimized.svg'))) throw new Error("C4Container integration test: optimized.svg was not created.");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  console.log("✅ Integration tests PASSED successfully!");
+  return true;
 }
 
 async function runTests() {
