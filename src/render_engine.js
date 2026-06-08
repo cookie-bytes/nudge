@@ -1605,12 +1605,15 @@ const elk = new ELK();
                 );
               }
 
+              const H_PAD = 10;
+              const V_PAD = 3;
+
               function checkLabelCollision(cx, cy, w, h, nodesList) {
                 const labelBox = {
-                  x: cx - w / 2 - 4,
-                  y: cy - h / 2 - 2,
-                  width: w + 8,
-                  height: h + 4
+                  x: cx - w / 2 - H_PAD,
+                  y: cy - h / 2 - V_PAD,
+                  width: w + 2 * H_PAD,
+                  height: h + 2 * V_PAD
                 };
                 for (const comp of nodesList) {
                   const compBox = {
@@ -1658,10 +1661,10 @@ const elk = new ELK();
 
               function checkLabelEdgeCollision(cx, cy, w, h) {
                 const labelBox = {
-                  x: cx - w / 2 - 4,
-                  y: cy - h / 2 - 2,
-                  width: w + 8,
-                  height: h + 4
+                  x: cx - w / 2 - H_PAD,
+                  y: cy - h / 2 - V_PAD,
+                  width: w + 2 * H_PAD,
+                  height: h + 2 * V_PAD
                 };
                 for (const otherEdge of allEdgesPoints) {
                   if (otherEdge.id === edge.id) continue;
@@ -1837,8 +1840,8 @@ const elk = new ELK();
               // Post-placement nudge: if final position overlaps an already-placed label
               // (Rule 3 / straight-middle don't check placedLabels during scoring), try vertical offsets.
               {
-                const labelH = textHeight + 4;
-                const labelW = textWidth + 8;
+                const labelH = textHeight + 2 * V_PAD;
+                const labelW = textWidth + 2 * H_PAD;
                 const proposedBox = () => ({ x: midX - labelW / 2, y: midY - labelH / 2, width: labelW, height: labelH });
                 if (placedLabels.some(pl => boxesOverlap(proposedBox(), pl))) {
                   const step = labelH + 4;
@@ -1855,10 +1858,10 @@ const elk = new ELK();
               }
 
               const bgRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-              bgRect.setAttribute("x", midX - textWidth / 2 - 4);
-              bgRect.setAttribute("y", midY - textHeight / 2 - 2);
-              bgRect.setAttribute("width", textWidth + 8);
-              bgRect.setAttribute("height", textHeight + 4);
+              bgRect.setAttribute("x", midX - textWidth / 2 - H_PAD);
+              bgRect.setAttribute("y", midY - textHeight / 2 - V_PAD);
+              bgRect.setAttribute("width", textWidth + 2 * H_PAD);
+              bgRect.setAttribute("height", textHeight + 2 * V_PAD);
               bgRect.setAttribute("class", "edge-label-bg");
               labelsLayer.appendChild(bgRect);
 
@@ -1904,10 +1907,10 @@ const elk = new ELK();
               }
 
               placedLabels.push({
-                x: midX - (textWidth + 8) / 2,
-                y: midY - (textHeight + 4) / 2,
-                width: textWidth + 8,
-                height: textHeight + 4
+                x: midX - (textWidth + 2 * H_PAD) / 2,
+                y: midY - (textHeight + 2 * V_PAD) / 2,
+                width: textWidth + 2 * H_PAD,
+                height: textHeight + 2 * V_PAD
               });
             }
           }

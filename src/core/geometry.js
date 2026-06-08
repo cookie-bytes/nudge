@@ -187,11 +187,13 @@ export function analyzeLayout(layoutData) {
     }
 
     function checkLabelCollision(cx, cy, w, h, nodesList) {
+      const H_PAD = 10;
+      const V_PAD = 3;
       const labelBox = {
-        x: cx - w / 2 - 4,
-        y: cy - h / 2 - 2,
-        width: w + 8,
-        height: h + 4
+        x: cx - w / 2 - H_PAD,
+        y: cy - h / 2 - V_PAD,
+        width: w + 2 * H_PAD,
+        height: h + 2 * V_PAD
       };
       for (const comp of nodesList) {
         const compBox = {
@@ -278,11 +280,13 @@ export function analyzeLayout(layoutData) {
     }
 
 
+    const H_PAD = 10;
+    const V_PAD = 3;
     const labelBox = {
-      x: midX - label.width / 2 - 4,
-      y: midY - label.height / 2 - 2,
-      width: label.width + 8,
-      height: label.height + 4
+      x: midX - label.width / 2 - H_PAD,
+      y: midY - label.height / 2 - V_PAD,
+      width: label.width + 2 * H_PAD,
+      height: label.height + 2 * V_PAD
     };
 
     for (const comp of components) {
