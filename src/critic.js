@@ -321,6 +321,15 @@ export function analyzeLayout(layoutData) {
     }
   }
 
+  // 4. Aspect Ratio check — flag layout if ratio is outside [1.0, 2.0]
+  const ratio = parseFloat(report.aspectRatio);
+  if (ratio < 1.0 || ratio > 2.0) {
+    report.collisions.push({
+      type: 'poor_aspect_ratio',
+      details: `The layout aspect ratio is ${report.aspectRatio}, which is outside the ideal range [1.0, 2.0]. Adjust vertical/horizontal spacing or layout direction to make it more balanced.`
+    });
+  }
+
   return report;
 }
 
@@ -505,6 +514,9 @@ ELKjs parameters you can optimize:
 Rules for optimization:
 - If node_overlap or tight_spacing are present, increase "elk.spacing.nodeNode" and "elk.layered.spacing.nodeNodeBetweenLayers" significantly (e.g., from 30 up to 80, 100, or 120).
 - If edge_node_crossing or edge_label_node_crossing is present, increase "elk.layered.spacing.nodeNodeBetweenLayers" and "elk.spacing.edgeNode" so connections and labels have room to route around components.
+- If poor_aspect_ratio is present:
+  * Too narrow/portrait (< 1.0): Increase horizontal node spacing ("elk.spacing.nodeNode") and/or decrease vertical node spacing ("elk.layered.spacing.nodeNodeBetweenLayers") to widen the layout, or change flow direction ("elk.direction") to "RIGHT" or "LEFT" if appropriate.
+  * Too wide/landscape (> 2.0): Decrease horizontal node spacing and/or increase vertical spacing.
 - Output a JSON object matching the exact key names of layoutOptions, e.g.:
 {
   "elk.spacing.nodeNode": "100",

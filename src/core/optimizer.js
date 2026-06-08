@@ -28,7 +28,7 @@ export async function optimizeDiagram({
   onLog = (msg) => process.stderr.write(msg + '\n'),
   signal = null,
   checkpointTimeout = 30000,
-  optimizationTimeout = 60000,
+  optimizationTimeout = 120000,
 }) {
   fs.mkdirSync(outputDir, { recursive: true });
 
@@ -120,18 +120,27 @@ export async function optimizeDiagram({
       screenshot: screenshotPath,
     });
 
-    if (report.collisions.length > 0) {
-      report.collisions.forEach((c, i) => onLog(`  ${i + 1}. [${c.type}] ${c.details}`));
-    } else {
-      onLog('[Critique] Visual layout is pristine! Zero collisions detected.');
-      success = true;
+    const hardCollisions = report.collisions.filter(c =>
+      c.type === 'node_overlap' ||
+      c.type === 'edge_node_crossing' ||
+      c.type === 'edge_label_node_crossing'
+    );
 
+    if (!success && hardCollisions.length === 0) {
+      onLog('[Critique] No node overlaps or edge crossings detected. Layout is visually clean.');
       svgContent = await captureSvg(page, result.width, result.height);
       const svgFilePath = path.join(outputDir, 'optimized.svg');
       fs.writeFileSync(svgFilePath, svgContent);
 
       pngPath = path.join(outputDir, 'optimized.png');
       fs.copyFileSync(screenshotPath, pngPath);
+      success = true;
+    }
+
+    if (report.collisions.length > 0) {
+      report.collisions.forEach((c, i) => onLog(`  ${i + 1}. [${c.type}] ${c.details}`));
+    } else {
+      onLog('[Critique] Visual layout is pristine! Zero collisions or warnings detected.');
       break;
     }
 
