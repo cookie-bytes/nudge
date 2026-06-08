@@ -288,6 +288,7 @@ const elk = new ELK();
 
       const leftSet  = new Set(leftNodes.map(n => n.id));
       const rightSet = new Set(rightNodes.map(n => n.id));
+      const routedEdgeSegments = [];
 
       function routeEdge(e, idx) {
         const sp = getAbs(e.from), tp = getAbs(e.to);
@@ -341,6 +342,77 @@ const elk = new ELK();
           }
           return len;
         }
+        function routeSegments(route) {
+          const pts = [route.startPoint, ...(route.bendPoints || []), route.endPoint];
+          return pts.slice(0, -1).map((p, i) => ({ a: p, b: pts[i + 1] }));
+        }
+        function pointsNear(a, b, tolerance = 2) {
+          return Math.hypot(a.x - b.x, a.y - b.y) <= tolerance;
+        }
+        function segmentOrientation(a, b, c) {
+          return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+        }
+        function pointOnSegment(a, b, p) {
+          return (
+            p.x >= Math.min(a.x, b.x) - 1 &&
+            p.x <= Math.max(a.x, b.x) + 1 &&
+            p.y >= Math.min(a.y, b.y) - 1 &&
+            p.y <= Math.max(a.y, b.y) + 1 &&
+            Math.abs(segmentOrientation(a, b, p)) < 1
+          );
+        }
+        function routeSegmentCrosses(segA, segB) {
+          const a = segA.a, b = segA.b, c = segB.a, d = segB.b;
+          if (pointsNear(a, c) || pointsNear(a, d) || pointsNear(b, c) || pointsNear(b, d)) {
+            return false;
+          }
+          const o1 = segmentOrientation(a, b, c);
+          const o2 = segmentOrientation(a, b, d);
+          const o3 = segmentOrientation(c, d, a);
+          const o4 = segmentOrientation(c, d, b);
+          if (((o1 > 0 && o2 < 0) || (o1 < 0 && o2 > 0)) &&
+              ((o3 > 0 && o4 < 0) || (o3 < 0 && o4 > 0))) {
+            return true;
+          }
+          return pointOnSegment(a, b, c) || pointOnSegment(a, b, d) ||
+                 pointOnSegment(c, d, a) || pointOnSegment(c, d, b);
+        }
+        function routeSegmentOverlapLength(segA, segB) {
+          const a = segA.a, b = segA.b, c = segB.a, d = segB.b;
+          const aHorizontal = Math.abs(a.y - b.y) < 2;
+          const bHorizontal = Math.abs(c.y - d.y) < 2;
+          const aVertical = Math.abs(a.x - b.x) < 2;
+          const bVertical = Math.abs(c.x - d.x) < 2;
+          if (aHorizontal && bHorizontal && Math.abs(a.y - c.y) < 6) {
+            const lo = Math.max(Math.min(a.x, b.x), Math.min(c.x, d.x));
+            const hi = Math.min(Math.max(a.x, b.x), Math.max(c.x, d.x));
+            return Math.max(0, hi - lo);
+          }
+          if (aVertical && bVertical && Math.abs(a.x - c.x) < 6) {
+            const lo = Math.max(Math.min(a.y, b.y), Math.min(c.y, d.y));
+            const hi = Math.min(Math.max(a.y, b.y), Math.max(c.y, d.y));
+            return Math.max(0, hi - lo);
+          }
+          return 0;
+        }
+        function routeEdgeConflictStats(route) {
+          const segments = routeSegments(route);
+          let edgeCrossings = 0;
+          let edgeOverlaps = 0;
+          let edgeOverlapPx = 0;
+          for (const candidateSeg of segments) {
+            for (const existingSeg of routedEdgeSegments) {
+              const overlapPx = routeSegmentOverlapLength(candidateSeg, existingSeg);
+              if (overlapPx > 20) {
+                edgeOverlaps++;
+                edgeOverlapPx += overlapPx;
+              } else if (routeSegmentCrosses(candidateSeg, existingSeg)) {
+                edgeCrossings++;
+              }
+            }
+          }
+          return { edgeCrossings, edgeOverlaps, edgeOverlapPx };
+        }
         function horizontalLaneBelowSource() {
           const nextTop = children
             .filter(child => child.id !== e.from && child.id !== e.to)
@@ -380,13 +452,22 @@ const elk = new ELK();
               route,
               order,
               crossings: routeCrossingCount(route),
+              ...routeEdgeConflictStats(route),
               bends: route.bendPoints ? route.bendPoints.length : 0,
               length: routeLength(route) + (route._scoreBias || 0)
             }))
+            .map(candidate => ({
+              ...candidate,
+              score:
+                candidate.edgeOverlaps * 80 +
+                candidate.edgeOverlapPx * 0.5 +
+                candidate.edgeCrossings * 120 +
+                candidate.bends * 45 +
+                candidate.length
+            }))
             .sort((a, b) =>
               a.crossings - b.crossings ||
-              a.bends - b.bends ||
-              a.length - b.length ||
+              a.score - b.score ||
               a.order - b.order
             )
             .map(({ route }) => {
@@ -638,6 +719,11 @@ const elk = new ELK();
       for (let idx = 0; idx < allEdges.length; idx++) {
         const e = allEdges[idx];
         const section = routeEdge(e, idx);
+        const sectionPoints = [section.startPoint, ...(section.bendPoints || []), section.endPoint];
+        routedEdgeSegments.push(...sectionPoints.slice(0, -1).map((p, i) => ({
+          a: p,
+          b: sectionPoints[i + 1]
+        })));
         const labels = e.label ? (() => {
           const match = e.label.match(/^(.*?)\s*\[(.*?)\]$/);
           if (match) {

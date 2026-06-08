@@ -21,6 +21,8 @@ npm test
 
 Tests render every `.mermaid` file in `test/` using Playwright + ELKjs, analyse the geometry, and grade the layout. If an OpenAI-compatible server is running on `localhost:1234` (or `$NUDGE_LLM_API`), it grades visually; otherwise it uses the built-in math scorer.
 
+When changing `src/render_engine.js`, inspect the generated PNGs in `test_outputs/` as well as the console summary. The math scorer catches node overlaps and edge-node crossings, but visual quality also depends on label placement, route length, and whether edges stack into shared corridors.
+
 ## Code structure
 
 The codebase has three layers — changes should respect the boundaries between them:
@@ -31,7 +33,7 @@ The codebase has three layers — changes should respect the boundaries between 
 - **`src/mermaid_parser.js`** — Converts Mermaid C4 syntax to the internal JSON model. Add test fixtures in `test/` to cover new node types or relationship forms.
 - **`src/render.html`** — HTML shell loaded by Playwright as a `file://` URL. Bundles ELKjs via `<script src="vendor/elk.bundled.js">` and sources the rendering engine.
 - **`src/render_engine.js`** — ELKjs layout engine + SVG renderer. Exposes `window.renderDiagram` and `window.computeContainerPlan`. The two-pass layout and port namespace quirks are documented in CLAUDE.md.
-- **`src/core/geometry.js`** — Pure geometric algorithms: overlap detection, segment-intersection, edge-label placement. No side-effects or network calls.
+- **`src/core/geometry.js`** — Pure geometric algorithms for the post-render critic: overlap detection, segment-intersection, edge-node crossings, label-node crossings, and spacing warnings. No side-effects or network calls.
 - **`src/core/llm_client.js`** — Stateless LLM API client. All functions accept `{ signal, timeout }` — keep this consistent if adding new LLM calls so the MCP cancellation chain stays intact.
 - **`src/utils.js`** — `fetchWithTimeout` with external signal support. Don't add unrelated utilities here.
 
@@ -40,7 +42,8 @@ The codebase has three layers — changes should respect the boundaries between 
 1. Fork the repo and create a branch: `git checkout -b your-feature`
 2. Make your changes and add or update tests in `test/`
 3. Run `npm test` and confirm it exits `0`
-4. Open a PR against `main` with a clear description of what changed and why
+4. For renderer changes, include before/after notes for at least the affected fixture PNGs.
+5. Open a PR against `main` with a clear description of what changed and why
 
 ## Reporting bugs
 

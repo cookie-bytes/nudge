@@ -165,7 +165,7 @@ Each edge is routed by `routeEdge(e)`, which uses absolute coordinates (converti
 - **Parent → database (column-aligned):** if the target is a database sitting directly below the source and their centres are within `min(srcWidth, tgtWidth) / 2`, route a straight line from source bottom-centre to target top-centre, bypassing the standard edge-distribution logic.
 - **Source → message bus (vertical entry blocked):** when the source sits above a bus, try side-entry first (route into the left or right end-cap of the bus) to keep the bus's top edge available for label placement.
 
-**Hybrid route scoring:** for internal boundary edges, the router compares the standard route, a direct route, a row-gap dogleg, and left/right gutter detours. Candidates are scored by node crossings first, then bend count, then path length. This keeps direct-looking lines when they are clean, while only using detours for routes that would cut through nodes.
+**Hybrid route scoring:** for internal boundary edges, the router compares the standard route, a direct route, a row-gap dogleg, and left/right gutter detours. Candidates are scored by node crossings first, then a weighted mix of existing edge overlaps/crossings, bend count, and path length. This keeps direct-looking lines when they are clean, while only using detours for routes that would cut through nodes or pile onto existing line corridors.
 
 | Spatial relationship | Route shape |
 |----------------------|-------------|
@@ -207,7 +207,7 @@ Labels containing technology notes (e.g. `Relationship Label [JSON/HTTPS]`) are 
 ## LM Checkpoint Pipeline
 
 **File:** `src/cli.js`  
-**Functions:** `getLLMZoneVerification`, `getLLMRoutingVerification` (both in `src/critic.js`)  
+**Functions:** `getLLMZoneVerification`, `getLLMRoutingVerification` (both in `src/core/llm_client.js`)
 **Runs:** Once, before the 4-iteration optimisation loop, only when `hasBoundary` is true.
 
 ### Step 1 — Compute initial plan
@@ -322,4 +322,4 @@ All edge coordinates are absolute. The `drawGraph` function uses `flattenNodes` 
 - **No cycle detection warning:** A cycle in the boundary's internal edges is silently broken by dumping remaining nodes into a final layer.
 - **SHIFT_ZONE not fully wired in routing pass:** `SHIFT_ZONE` commands from Checkpoint 2 are currently fed into `_layoutOverrides.swapCommands`, which `layoutContainerDiagram` ignores (it only processes `SWAP_NODE_ORDER` from `swapCommands`). A future pass should re-read `swapCommands` for `SHIFT_ZONE` and apply them as `zoneOverrides`.
 - **Edge routing is heuristic:** The orthogonal router has no obstacle avoidance — it routes by spatial relationship only. Edges may still cross left/right overflow nodes if those nodes happen to sit in the same vertical band as a cross-boundary edge's path.
-- **No edge-to-edge crossing detection:** The geometric critic (`analyzeLayout` in `critic.js`) checks for node overlaps, edge-node crossings, and label-node overlaps, but does not detect edge-to-edge intersections. Adding segment-segment intersection checks would allow the optimisation loop to flag and fix remaining crossing scenarios that the automatic zone sorting cannot resolve.
+- **Post-render edge-to-edge scoring is limited:** The renderer's candidate scorer penalizes overlaps and crossings against already-routed edges, but the post-render geometric critic (`analyzeLayout` in `src/core/geometry.js`) still grades node overlaps, edge-node crossings, label-node overlaps, spacing, and aspect ratio. It does not currently fail tests on edge-edge crossings, so renderer changes that affect line corridors should still be reviewed visually.
