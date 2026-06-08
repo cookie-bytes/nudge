@@ -110,6 +110,8 @@ Remember: output ONLY the JSON object.`;
 
 async function runTests() {
   console.log("=== Nudge Diagram Layout Test Suite ===");
+  const useVisualLLM = process.env.NUDGE_VISUAL_TEST === 'true';
+  console.log(`Mode: ${useVisualLLM ? 'Visual LLM-based critique' : 'Deterministic mathematical validation'}`);
   
   if (!fs.existsSync(OUTPUT_DIR)) {
     fs.mkdirSync(OUTPUT_DIR, { recursive: true });
@@ -174,7 +176,10 @@ async function runTests() {
     const totalCollisions = report.overlapCount + report.intersectionCount;
 
     // Grade
-    const gradeResult = await gradeWithLLM(model, result, report);
+    const useVisualLLM = process.env.NUDGE_VISUAL_TEST === 'true';
+    const gradeResult = useVisualLLM
+      ? await gradeWithLLM(model, result, report)
+      : gradeMathematically(report);
     const isPass = totalCollisions === 0 && (gradeResult.finalGrade === 'A' || gradeResult.finalGrade === 'B');
 
     summary.push({
