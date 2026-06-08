@@ -20,6 +20,7 @@ C4Container
         Container(search_api_gateway, "Search Service API Gateway", "AWS API Gateway", "Exposes Search Service APIs through API Gateway for external/internal consumers")
         Container(search_lambda, "Search Service Lambda", ".NET 10", "Handles search requests")
         ContainerDb(database, "Database", "AWS DynamoDB", "Stores search and availability results")
+        ContainerDb(cache_db, "Cache Database", "Redis / Valkey", "Caches search requests and responses to reduce latency and downstream load")
         Container(partner_sync_lambda, "Partner Sync Lambda", "NodeJS Lambda Function", "Handles partner data sync in search service")
     }
 
@@ -30,6 +31,7 @@ C4Container
     Rel(search_api_gateway, search_lambda, "makes API calls to", "HTTPS")
     
     Rel(search_lambda, database, "reads from and writes to", "TCP")
+    Rel(search_lambda, cache_db, "reads from and writes to cache using", "RESP / TCP")
     Rel(search_lambda, cart_service, "makes API calls to", "HTTPS")
     Rel(search_lambda, integration_service, "makes API calls to", "HTTPS")
     Rel(search_lambda, promotion_service, "makes API calls to", "HTTPS")
