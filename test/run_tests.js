@@ -321,8 +321,6 @@ async function runTests() {
     const report = analyzeLayout(result);
     const totalCollisions = report.overlapCount + report.intersectionCount;
 
-    // Grade
-    const useVisualLLM = process.env.NUDGE_VISUAL_TEST === 'true';
     const gradeResult = useVisualLLM
       ? await gradeWithLLM(model, result, report)
       : gradeMathematically(report);

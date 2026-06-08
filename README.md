@@ -97,7 +97,7 @@ Before using Nudge, make sure you have:
    ```bash
    npx playwright install chromium
    ```
-3. **Local LLM Server**: A running OpenAI-compatible API server on `http://localhost:1234` (e.g., [LM Studio](https://lmstudio.ai/)).
+3. **Local LLM Server**: A running OpenAI-compatible API server on `http://127.0.0.1:1234` (e.g., [LM Studio](https://lmstudio.ai/)).
    - **Recommended Models**: `google/gemma-2-9b-it`, `google/gemma-4-12b` or other reasoning models.
 
 ---
@@ -153,6 +153,46 @@ node src/cli/index.js path/to/diagram.mermaid
 node src/cli/index.js path/to/diagram.yaml
 ```
 
+#### YAML Input Format
+
+YAML is an alternative to Mermaid syntax that maps directly to Nudge's internal model. It gives you explicit control over node types, dimensions, and initial ELKjs layout parameters.
+
+```yaml
+title: "My System"
+layoutOptions:
+  "elk.algorithm": "layered"
+  "elk.direction": "DOWN"
+  "elk.spacing.nodeNode": "80"
+  "elk.layered.spacing.nodeNodeBetweenLayers": "110"
+
+nodes:
+  - id: user
+    label: "Customer"
+    type: "person"          # person | container | database | message_bus | external
+    description: "End user of the system"
+
+  - id: api
+    label: "API Gateway"
+    type: "container"
+    tech: "Node.js"
+    description: "Routes requests to downstream services"
+
+  - id: db
+    label: "Postgres"
+    type: "database"
+    description: "Stores all persistent data"
+
+edges:
+  - from: user
+    to: api
+    label: "Sends requests [HTTPS]"
+  - from: api
+    to: db
+    label: "Reads & writes"
+```
+
+See [`examples/`](examples/) for full working examples including container diagrams with boundary blocks.
+
 **Outputs** are written to `.nudge/`:
 - `iteration_N.png` — screenshot at each optimization pass
 - `optimized.png` — final layout as PNG
@@ -191,7 +231,7 @@ Add the following to your `claude_desktop_config.json` (on macOS: `~/Library/App
       "command": "node",
       "args": ["/absolute/path/to/nudge/src/mcp/index.js"],
       "env": {
-        "NUDGE_LLM_API": "http://localhost:1234"
+        "NUDGE_LLM_API": "http://127.0.0.1:1234"
       }
     }
   }

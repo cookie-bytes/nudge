@@ -2,6 +2,8 @@ import { fetchWithTimeout } from '../utils.js';
 
 const PREFERRED_MODEL = process.env.NUDGE_LLM_MODEL || "google/gemma-4-12b";
 
+const modelCache = new Map();
+
 // Helper to assemble headers with optional authorization key
 export function getHeaders() {
   const headers = { 'Content-Type': 'application/json' };
@@ -12,8 +14,11 @@ export function getHeaders() {
   return headers;
 }
 
-// Retrieve active model from LM Studio, preferring PREFERRED_MODEL if available
+// Retrieve active model from LM Studio, preferring PREFERRED_MODEL if available.
+// Result is cached per apiUrl for the lifetime of the process — avoids one /v1/models
+// roundtrip before every LLM call when the optimizer runs multiple iterations.
 export async function getActiveModel(apiUrl, { signal } = {}) {
+  if (modelCache.has(apiUrl)) return modelCache.get(apiUrl);
   try {
     const res = await fetchWithTimeout(`${apiUrl}/v1/models`, {
       headers: getHeaders(),
@@ -24,9 +29,11 @@ export async function getActiveModel(apiUrl, { signal } = {}) {
     if (data && data.data && data.data.length > 0) {
       const modelSearch = PREFERRED_MODEL.includes('/') ? PREFERRED_MODEL.split('/')[1] : PREFERRED_MODEL;
       const preferred = data.data.find(m => m.id.toLowerCase().includes(modelSearch.toLowerCase()));
-      if (preferred) return preferred.id;
-      const nonEmbed = data.data.find(m => !m.id.includes('embed'));
-      return nonEmbed ? nonEmbed.id : data.data[0].id;
+      const resolved = preferred
+        ? preferred.id
+        : (data.data.find(m => !m.id.includes('embed')) ?? data.data[0]).id;
+      modelCache.set(apiUrl, resolved);
+      return resolved;
     }
   } catch (err) {
     console.warn("Could not retrieve model list from LM Studio, falling back to", PREFERRED_MODEL, err.message);
