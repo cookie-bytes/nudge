@@ -142,7 +142,7 @@ You can customize Nudge's layout tuning behavior and LLM connections using envir
   export NUDGE_LLM_API_KEY=sk-or-...
   ```
 
-**Optimize the default example:**
+**Optimize the included Search Service container diagram** (the example shown in the screenshot above):
 ```bash
 npm start
 ```
