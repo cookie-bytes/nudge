@@ -1379,7 +1379,7 @@
         message_bus(node, absX, absY, layers) {
           const H = node.height, W = node.width;
           const eRy = H / 2;
-          const eRx = Math.max(12, Math.round(H * 0.25));
+          const eRx = Math.max(12, Math.round(H * 0.18));
           const cxBus = absX + eRx;
 
           // Body: horizontal tube.

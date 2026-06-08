@@ -35,8 +35,8 @@ const diagramModel = {
       label: 'Message Bus',
       type: 'message_bus',
       description: 'Handles incoming events.',
-      width: 160,
-      height: 80
+      width: 200,
+      height: 120
     }
   ],
   edges: [],
@@ -76,6 +76,11 @@ async function pickVisionModel() {
   const res = await fetchWithTimeout(`${LM_STUDIO_API}/v1/models`, { timeout: 4000 });
   const data = await res.json();
   const ids = (data.data || []).map(m => m.id);
+  const preferred = process.env.NUDGE_LLM_MODEL;
+  if (preferred) {
+    const found = ids.find(id => id.toLowerCase().includes(preferred.toLowerCase()));
+    if (found) return found;
+  }
   // Prefer the larger 12b for better vision judgement, fall back to other multimodal.
   const order = [
     id => /gemma-4-12b/i.test(id),
