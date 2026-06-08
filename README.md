@@ -16,7 +16,7 @@ Nudge runs as a **CLI tool** for direct use from the terminal, and as a local **
 
 | Before (Native Mermaid Layout) | After (Nudge AI-Optimized) |
 | :---: | :---: |
-| ![Mermaid Default Layout](docs/MermaidBefore.png) | ![Nudge Optimized Layout](docs/search_service_container.png) |
+| ![Mermaid Default Layout](docs/MermaidBefore.png) | ![Nudge Optimized Layout](docs/search_service_container.png?v=2) |
 
 ---
 
