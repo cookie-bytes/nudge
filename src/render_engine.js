@@ -1942,7 +1942,9 @@ const elk = new ELK();
             labels: edge.labels ? edge.labels.map(l => ({
               text: l.text,
               width: l.width,
-              height: l.height
+              height: l.height,
+              x: Number.isFinite(l.x) ? l.x + absX : undefined,
+              y: Number.isFinite(l.y) ? l.y + absY : undefined
             })) : []
           };
 
@@ -2397,23 +2399,54 @@ const elk = new ELK();
               }
 
               function checkLabelEdgeCollision(cx, cy, w, h) {
-                const labelBox = {
+                const labelBox = labelBoxAt(cx, cy, w, h);
+                return labelEdgeHitCount(labelBox) > 0;
+              }
+
+              function labelBoxAt(cx, cy, w, h) {
+                return {
                   x: cx - w / 2 - H_PAD,
                   y: cy - h / 2 - V_PAD,
                   width: w + 2 * H_PAD,
                   height: h + 2 * V_PAD
                 };
+              }
+
+              function labelEdgeHitCount(labelBox) {
+                let hits = 0;
                 for (const otherEdge of allEdgesPoints) {
                   if (otherEdge.id === edge.id) continue;
                   for (let i = 0; i < otherEdge.points.length - 1; i++) {
                     const p1 = otherEdge.points[i];
                     const p2 = otherEdge.points[i + 1];
                     if (lineSegmentIntersectsBox(p1, p2, labelBox)) {
-                      return true;
+                      hits++;
+                      break;
                     }
                   }
                 }
-                return false;
+                return hits;
+              }
+
+              function labelCandidateScore(cx, cy, segLen = 0) {
+                const labelBox = labelBoxAt(cx, cy, textWidth, textHeight);
+                const nodeCollision = checkLabelCollision(cx, cy, textWidth, textHeight, obstacles) ? 1 : 0;
+                const edgeHits = labelEdgeHitCount(labelBox);
+                const labelHits = placedLabels.filter(pl => boxesOverlap(labelBox, pl)).length;
+                const centerClearance = allComponents.length > 0
+                  ? Math.min(...allComponents.map(n => pointToBoxDist(cx, cy, n)))
+                  : 200;
+                return {
+                  nodeCollision,
+                  edgeHits,
+                  labelHits,
+                  score:
+                    nodeCollision * 100000 +
+                    labelHits * 50000 +
+                    edgeHits * 9000 -
+                    Math.min(centerClearance, 180) * 12 -
+                    segLen * 0.3
+                };
               }
 
               let midX, midY;
@@ -2472,11 +2505,12 @@ const elk = new ELK();
                 }
               }
 
-              // Second Pass (Fallback): Try placing label avoiding component collisions, even if it overlaps other connection lines
+              // Second Pass (Fallback): prefer edge-clear anchor positions, then relax only if needed.
               if (!placed) {
                 if (!hasBendPoints) {
                   const candMid = getPointAtFraction(0.5);
-                  if (!checkLabelCollision(candMid.x, candMid.y, textWidth, textHeight, obstacles)) {
+                  if (!checkLabelCollision(candMid.x, candMid.y, textWidth, textHeight, obstacles) &&
+                      !checkLabelEdgeCollision(candMid.x, candMid.y, textWidth, textHeight)) {
                     midX = candMid.x;
                     midY = candMid.y;
                     placed = true;
@@ -2495,7 +2529,8 @@ const elk = new ELK();
                 if (totalLen >= 2 * targetAnchorDist) {
                   const targetFraction = (totalLen - targetAnchorDist) / totalLen;
                   const candA = getPointAtFraction(targetFraction);
-                  if (!checkLabelCollision(candA.x, candA.y, textWidth, textHeight, obstacles)) {
+                  if (!checkLabelCollision(candA.x, candA.y, textWidth, textHeight, obstacles) &&
+                      !checkLabelEdgeCollision(candA.x, candA.y, textWidth, textHeight)) {
                     midX = candA.x;
                     midY = candA.y;
                     placed = true;
@@ -2514,7 +2549,8 @@ const elk = new ELK();
                 if (totalLen >= 2 * sourceAnchorDist) {
                   const sourceFraction = sourceAnchorDist / totalLen;
                   const candB = getPointAtFraction(sourceFraction);
-                  if (!checkLabelCollision(candB.x, candB.y, textWidth, textHeight, obstacles)) {
+                  if (!checkLabelCollision(candB.x, candB.y, textWidth, textHeight, obstacles) &&
+                      !checkLabelEdgeCollision(candB.x, candB.y, textWidth, textHeight)) {
                     midX = candB.x;
                     midY = candB.y;
                     placed = true;
@@ -2524,8 +2560,7 @@ const elk = new ELK();
 
               // Rule 3: Fallback to Middle Gutter Clearance
               if (!placed) {
-                const nearbyNodes = allComponents;
-                let bestSeg = null;
+                const candidates = [];
                 let bestScore = -Infinity;
                 for (let i = 0; i < points.length - 1; i++) {
                   const p1 = points[i];
@@ -2533,40 +2568,44 @@ const elk = new ELK();
                   const dx = p2.x - p1.x;
                   const dy = p2.y - p1.y;
                   const len = Math.sqrt(dx * dx + dy * dy);
-                  const mx = (p1.x + p2.x) / 2;
-                  const my = (p1.y + p2.y) / 2;
-                  const clearance = nearbyNodes.length > 0
-                    ? Math.min(...nearbyNodes.map(n => pointToBoxDist(mx, my, n)))
-                    : Infinity;
-                  const score = clearance * 10 + len;
-                  if (score > bestScore) { bestScore = score; bestSeg = { p1, p2 }; }
+                  if (len < 1) continue;
+
+                  for (const fraction of [0.25, 0.5, 0.75]) {
+                    const x = p1.x + dx * fraction;
+                    const y = p1.y + dy * fraction;
+                    const candidate = { x, y, p1, p2, len, ...labelCandidateScore(x, y, len) };
+                    candidates.push(candidate);
+                    if (candidate.score > bestScore) bestScore = candidate.score;
+                  }
                 }
 
-                if (bestSeg) {
-                  const isHorizontal = Math.abs(bestSeg.p1.y - bestSeg.p2.y) < 2;
+                candidates.sort((a, b) =>
+                  a.score - b.score ||
+                  a.edgeHits - b.edgeHits ||
+                  a.labelHits - b.labelHits ||
+                  a.nodeCollision - b.nodeCollision
+                );
+
+                const best = candidates[0];
+                if (best) {
+                  const isHorizontal = Math.abs(best.p1.y - best.p2.y) < 2;
+                  const isVertical = Math.abs(best.p1.x - best.p2.x) < 2;
+                  midX = best.x;
+                  midY = best.y;
                   if (isHorizontal) {
-                    midY = bestSeg.p1.y;
-                    const minX = Math.min(bestSeg.p1.x, bestSeg.p2.x);
-                    const maxX = Math.max(bestSeg.p1.x, bestSeg.p2.x);
+                    const minX = Math.min(best.p1.x, best.p2.x);
+                    const maxX = Math.max(best.p1.x, best.p2.x);
                     const padX = (textWidth / 2) + 20;
-                    const rawMidX = (bestSeg.p1.x + bestSeg.p2.x) / 2;
                     midX = (maxX - minX >= 2 * padX)
-                      ? Math.max(minX + padX, Math.min(maxX - padX, rawMidX))
-                      : rawMidX;
-                  } else {
-                    midX = (bestSeg.p1.x + bestSeg.p2.x) / 2;
-                    const LABEL_TARGET_BIAS = 0.85;
-                    const edgeStart = points[0];
-                    const edgeEnd   = points[points.length - 1];
-                    const biasedY = edgeStart.y + LABEL_TARGET_BIAS * (edgeEnd.y - edgeStart.y);
-                    
-                    const minY = Math.min(bestSeg.p1.y, bestSeg.p2.y);
-                    const maxY = Math.max(bestSeg.p1.y, bestSeg.p2.y);
+                      ? Math.max(minX + padX, Math.min(maxX - padX, best.x))
+                      : best.x;
+                  } else if (isVertical) {
+                    const minY = Math.min(best.p1.y, best.p2.y);
+                    const maxY = Math.max(best.p1.y, best.p2.y);
                     const padY = (textHeight / 2) + 20;
-                    const rawMidY = biasedY;
                     midY = (maxY - minY >= 2 * padY)
-                      ? Math.max(minY + padY, Math.min(maxY - padY, rawMidY))
-                      : (minY + maxY) / 2;
+                      ? Math.max(minY + padY, Math.min(maxY - padY, best.y))
+                      : best.y;
                   }
                 } else {
                   midX = (points[0].x + points[points.length - 1].x) / 2;
@@ -2596,6 +2635,8 @@ const elk = new ELK();
               }
 
               const bgRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+              label.x = midX - absX;
+              label.y = midY - absY;
               bgRect.setAttribute("x", midX - textWidth / 2 - H_PAD);
               bgRect.setAttribute("y", midY - textHeight / 2 - V_PAD);
               bgRect.setAttribute("width", textWidth + 2 * H_PAD);

@@ -39,10 +39,15 @@ This gives the renderer a local optimization loop without turning it into a full
 
 ## Later Ideas
 
-- Tune label placement with edge-density scoring.
 - Use explicit side/endcap ports for databases and message buses.
 - Make high-connectivity bus placement depend on connection span and direction balance instead of a simple threshold.
 - Add optional route style modes such as `direct`, `balanced`, and `avoid-conflicts`.
+
+## Completed Follow-Up — Label Edge Avoidance
+
+Status: implemented.
+
+Label placement now records actual rendered label coordinates on returned edge labels and uses edge-density-aware fallback scoring. The test suite's label-edge metric therefore measures the labels that were actually drawn. Fallback label candidates penalize node collisions, already-placed label collisions, and intersections with other connection lines.
 
 ## Guardrails
 

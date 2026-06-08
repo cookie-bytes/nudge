@@ -187,7 +187,7 @@ Bend points are post-processed by `renderEdges` into SVG quadratic bezier curves
 
 **File:** `src/render.html` → `renderEdges()`
 
-After the absolute layout positions are computed, the edges and their description labels are rendered dynamically. To prevent relationship labels from overlapping with nodes and arrowheads, a rule-based placement engine evaluates segment clearance and selects the best location.
+After the absolute layout positions are computed, the edges and their description labels are rendered dynamically. To prevent relationship labels from overlapping with nodes, arrowheads, other labels, and dense route corridors, a rule-based placement engine evaluates segment clearance and selects the best location. The final rendered label coordinates are written back onto the returned edge labels so post-render metrics measure the actual placement rather than estimating it independently.
 
 ### 3a: Collision Analysis
 `checkLabelCollision(cx, cy, w, h, nodesList)` calculates a bounding box around a candidate center label position (padded with horizontal and vertical margins) and checks for intersection/overlap against all node bounding boxes in the diagram. Only nodes that are not the direct source or target of the edge are considered potential collision risks.
@@ -196,11 +196,11 @@ After the absolute layout positions are computed, the edges and their descriptio
 1. **Preference 0: Midpoint (No Collision)**: If there are no node collisions along the straight path, the label is placed directly at the midpoint (`fraction = 0.5`) of the edge.
 2. **Rule 1: Target-Anchored Placement**: If the midpoint fails or a collision is found, the engine attempts to anchor the label near the target node. It calculates a dynamic distance `targetAnchorDist = Math.max(45, (labelDimension / 2) + 20)` (which ensures the label does not overlap the target arrowhead) and checks for collision.
 3. **Rule 2: Source-Anchored Placement**: If target placement fails, it tries to anchor near the source node using a dynamic distance `sourceAnchorDist = Math.max(45, (labelDimension / 2) + 20)`.
-4. **Rule 3: Fallback (Gutter Clearance Segment Scoring)**: If all anchor placements collide, the engine performs a clearance scan of every individual routing segment. Each segment is scored based on:
+4. **Rule 3: Fallback (Edge-Density-Aware Segment Scoring)**: If all anchor placements collide, the engine samples every individual routing segment. Each candidate is scored based on:
    ```
-   Score = (Min Distance to Nearby Nodes × 10) + Segment Length
+   Score = node collision penalty + placed-label penalty + edge-hit penalty - node clearance reward - segment length reward
    ```
-   This prioritizes segments that are far from surrounding nodes and have sufficient length. Once the segment is chosen, the label coordinates are clamped to the safe inner bounds of the segment.
+   This prioritizes candidates that avoid nodes, already-placed labels, and other connection lines, while still preferring segments that are far from surrounding nodes and have sufficient length. Once the segment is chosen, the label coordinates are clamped to the safe inner bounds of the segment.
 5. **Default Fallback**: If all else fails, the label defaults to the absolute middle of the start/end points.
 
 ### 3c: Text Wrapping

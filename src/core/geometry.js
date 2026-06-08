@@ -156,6 +156,16 @@ function estimateLabelBox(edge) {
   const label = edge.labels[0];
   const H_PAD = 10;
   const V_PAD = 3;
+
+  if (Number.isFinite(label.x) && Number.isFinite(label.y)) {
+    return {
+      x: label.x - label.width / 2 - H_PAD,
+      y: label.y - label.height / 2 - V_PAD,
+      width: label.width + 2 * H_PAD,
+      height: label.height + 2 * V_PAD
+    };
+  }
+
   const totalLen = getEdgeSegments(edge).reduce((sum, seg) => sum + segmentLength(seg), 0);
   const anchorDist = Math.min(Math.max(45, (label.width || 0) / 2 + 20), totalLen / 2);
   const center = totalLen > 0
