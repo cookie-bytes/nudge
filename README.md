@@ -231,7 +231,8 @@ Add the following to your `claude_desktop_config.json` (on macOS: `~/Library/App
       "command": "node",
       "args": ["/absolute/path/to/nudge/src/mcp/index.js"],
       "env": {
-        "NUDGE_LLM_API": "http://127.0.0.1:1234"
+        "NUDGE_LLM_API": "http://127.0.0.1:1234",
+        "NUDGE_LLM_MODEL": "google/gemma-4-12b"
       }
     }
   }
