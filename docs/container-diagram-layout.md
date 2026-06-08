@@ -69,7 +69,7 @@ Two node types are excluded from the topological sort and reinserted into purpos
 - Reinserted into a dedicated row directly beneath the **deepest contributing service** layer. Dbs sharing the same deepest contributor layer share a single dedicated row.
 - **Column override:** databases break the standard "centre each layer" rule. Each db is placed at the x of its deepest connecting service so storage sits directly beneath its owner. When multiple dbs in the same row collide on column, they pack left-to-right starting from the leftmost parent's x.
 
-**Tighter spacing before a db row** (`DB_V_GAP = V_GAP / 2`): the gap between a service row and its paired db row is half the standard `V_GAP`, so the db visually pairs with its parent instead of floating in its own band of whitespace.
+**DB row spacing** (`DB_V_GAP = V_GAP`): database rows use the same vertical gap as service rows. Visual pairing with the parent is established by the x-centering rule below, so no tighter spacing is needed.
 
 **Parent→db direct vertical route:** when a parent service sits directly above its db (column-aligned within half the smaller node's width), the edge bypasses the standard distribution logic and runs from the bottom-centre of the parent straight into the top-centre of the db. Other outgoing edges from the same parent still use the distributed exit points.
 
@@ -87,7 +87,7 @@ Constants & Sizing Rules:
 |-----------------|-------|---------|
 | `H_GAP`         | 80px  | Horizontal gap between nodes in the same layer |
 | `V_GAP`         | 80px  | Vertical gap between layers |
-| `DB_V_GAP`      | 40px (`V_GAP / 2`) | Vertical gap when the next layer is a database row |
+| `DB_V_GAP`      | same as `V_GAP`    | Vertical gap before a database row (same as standard) |
 | `B_PAD`         | 80px  | Boundary padding — left, right, and top |
 | `B_BOT`         | 84px  | Bottom clearance for the boundary label area |
 | Default Width   | 200px | Standardized width for all nodes (database, person, container, external) to align them nicely in a grid |
@@ -98,7 +98,7 @@ Constants & Sizing Rules:
 
 Each layer is centred horizontally inside the boundary. Positions are stored in `childPos[id]` as offsets relative to the boundary's top-left corner.
 
-**Database row exception:** db rows skip the centring step. Each db is placed at the x of its deepest connecting service (looked up from `childPos`, which has already been computed for the parent's row since dbs always sit below their parent). If two dbs in the same row resolve to overlapping columns, they pack left-to-right starting from the leftmost parent's x.
+**Database row exception:** db rows skip the standard centring step. Each db is first given a tentative x equal to its deepest connecting service's x (looked up from `childPos`). The row is then packed left-to-right to resolve collisions, producing a cluster. The whole cluster is then shifted so its centre aligns with the centroid of all parent node centres in the row, then clamped to `[0, bndW − clusterWidth]` so no db can escape the boundary. This guarantees the db cluster sits visually beneath its owning services without ever overflowing.
 
 **Corner bus row exception:** high-connectivity message bus rows skip the centring step and right-align to `bndW - B_PAD`, keeping standard right padding while placing the bus in the boundary's bottom-right quadrant.
 

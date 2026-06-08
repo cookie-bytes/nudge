@@ -11,6 +11,31 @@ const LM_STUDIO_API = process.env.NUDGE_LLM_API || 'http://127.0.0.1:1234';
 const TEST_DIR = path.resolve('test');
 const OUTPUT_DIR = path.resolve('test_outputs');
 
+// Verify all boundary children are geometrically inside their parent boundary
+function checkBoundaryContainment(model, result) {
+  const violations = [];
+  const nodeMap = new Map((result.nodes || []).map(n => [n.id, n]));
+
+  for (const node of model.nodes || []) {
+    if (node.type !== 'boundary' || !node.children?.length) continue;
+    const boundary = nodeMap.get(node.id);
+    if (!boundary) continue;
+
+    const bRight  = boundary.x + boundary.width;
+    const bBottom = boundary.y + boundary.height;
+
+    for (const child of node.children) {
+      const cn = nodeMap.get(child.id);
+      if (!cn) continue;
+      if (cn.x < boundary.x || cn.y < boundary.y || cn.x + cn.width > bRight || cn.y + cn.height > bBottom) {
+        violations.push(`"${cn.label || child.id}" (${Math.round(cn.x)},${Math.round(cn.y)} ${Math.round(cn.width)}×${Math.round(cn.height)}) outside boundary "${boundary.label || node.id}" (${Math.round(boundary.x)},${Math.round(boundary.y)} ${Math.round(boundary.width)}×${Math.round(boundary.height)})`);
+      }
+    }
+  }
+
+  return violations;
+}
+
 // Math-based grading fallback if LLM is offline
 function gradeMathematically(report) {
   let c4AlignmentScore = 10;
@@ -345,10 +370,18 @@ async function runTests() {
     const report = analyzeLayout(result);
     const totalCollisions = report.overlapCount + report.intersectionCount;
 
+    // Boundary containment check — every node declared inside a boundary must
+    // render inside that boundary's bounding box.
+    const boundaryViolations = checkBoundaryContainment(model, result);
+    if (boundaryViolations.length > 0) {
+      console.error(`  [FAIL] Boundary containment violations (${boundaryViolations.length}):`);
+      for (const v of boundaryViolations) console.error(`    - ${v}`);
+    }
+
     const gradeResult = useVisualLLM
       ? await gradeWithLLM(model, result, report)
       : gradeMathematically(report);
-    const isPass = totalCollisions === 0 && (gradeResult.finalGrade === 'A' || gradeResult.finalGrade === 'B');
+    const isPass = totalCollisions === 0 && boundaryViolations.length === 0 && (gradeResult.finalGrade === 'A' || gradeResult.finalGrade === 'B');
 
     summary.push({
       file,
@@ -358,6 +391,7 @@ async function runTests() {
       grade: gradeResult.finalGrade,
       explanation: gradeResult.gradeExplanation,
       collisions: totalCollisions,
+      boundaryViolations: boundaryViolations.length,
       edgeCrossings: report.edgeQuality.edgeCrossingCount,
       edgeOverlaps: report.edgeQuality.edgeOverlapCount,
       edgeOverlapPx: report.edgeQuality.edgeOverlapPx,
@@ -385,6 +419,7 @@ async function runTests() {
     Clarity: s.clarity,
     Grade: s.grade,
     Collisions: s.collisions,
+    'Bnd Viol': s.boundaryViolations,
     'Edge X': s.edgeCrossings,
     'Edge OL': s.edgeOverlaps,
     'OL px': s.edgeOverlapPx,
@@ -397,10 +432,10 @@ async function runTests() {
   // Write markdown report
   let mdReport = `# Nudge Layout Test Run Results\n\n`;
   mdReport += `Generated on: ${new Date().toISOString()}\n\n`;
-  mdReport += `| File | C4 Align Score | Aspect Score | Clarity Score | Grade | Collisions | Edge X | Edge OL | OL px | Lbl/Edge | Bends | Route px | Status | Explanation |\n`;
-  mdReport += `| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |\n`;
+  mdReport += `| File | C4 Align Score | Aspect Score | Clarity Score | Grade | Collisions | Bnd Viol | Edge X | Edge OL | OL px | Lbl/Edge | Bends | Route px | Status | Explanation |\n`;
+  mdReport += `| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |\n`;
   for (const s of summary) {
-    mdReport += `| [${s.file}](file://${path.join(TEST_DIR, s.file)}) | ${s.c4Align} | ${s.aspect} | ${s.clarity} | **${s.grade}** | ${s.collisions} | ${s.edgeCrossings} | ${s.edgeOverlaps} | ${s.edgeOverlapPx} | ${s.labelEdgeHits} | ${s.bends} | ${s.routeLength} | ${s.status === 'PASSED' ? '✅ PASSED' : '❌ FAILED'} | ${s.explanation} |\n`;
+    mdReport += `| [${s.file}](file://${path.join(TEST_DIR, s.file)}) | ${s.c4Align} | ${s.aspect} | ${s.clarity} | **${s.grade}** | ${s.collisions} | ${s.boundaryViolations} | ${s.edgeCrossings} | ${s.edgeOverlaps} | ${s.edgeOverlapPx} | ${s.labelEdgeHits} | ${s.bends} | ${s.routeLength} | ${s.status === 'PASSED' ? '✅ PASSED' : '❌ FAILED'} | ${s.explanation} |\n`;
   }
   mdReport += `\nEdge-quality diagnostics are observational only. They do not currently affect pass/fail status.\n`;
   mdReport += `\n*Visual snapshot assets saved in [test_outputs/](file://${OUTPUT_DIR}) directory.*\n`;

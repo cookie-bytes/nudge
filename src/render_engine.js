@@ -162,10 +162,9 @@ const elk = new ELK();
         }
       }
 
-      // Boundary dimensions. Use a tighter vertical gap before a db row so
-      // the database visually pairs with its parent service rather than
-      // floating in its own band of whitespace.
-      const DB_V_GAP = Math.round(V_GAP / 2);
+      // Boundary dimensions. DB rows use the same vertical gap as service
+      // rows; visual pairing with the parent is established by x-centering.
+      const DB_V_GAP = V_GAP;
       const isDbLayer = (l) => l.length > 0 && l.every(n => n.type === 'database');
       const gapBefore = (i) => i === 0 ? 0 : (isDbLayer(layers[i]) ? DB_V_GAP : V_GAP);
       const layerW = layers.map(l => l.reduce((s, n) => s + (n.width || 200), 0) + Math.max(0, l.length - 1) * H_GAP);
@@ -174,10 +173,11 @@ const elk = new ELK();
       const bndW   = maxLW + 2 * B_PAD;
       const bndH   = layerH.reduce((s, h) => s + h, 0) + layers.reduce((s, _, i) => s + gapBefore(i), 0) + B_PAD + B_BOT;
 
-      // Position children relative to boundary. Database rows override the
-      // standard centred layout: each db is placed at the x of its deepest
-      // connecting service so it sits directly underneath its owner; ties
-      // pack left-to-right from the leftmost parent's x.
+      // Position children relative to boundary. Database rows are centred
+      // around the centroid of their parent nodes' centres so the cluster
+      // reads as "belonging to" those services regardless of how many dbs
+      // share the same parent. The cluster is clamped to stay within the
+      // boundary so overflow is impossible.
       const childPos = {};
       let ry = B_PAD;
       for (let i = 0; i < layers.length; i++) {
@@ -196,14 +196,32 @@ const elk = new ELK();
               if (rowIdx > deepestRow) { deepestRow = rowIdx; deepest = otherNode; }
             }
             const parentX = deepest && childPos[deepest.id] ? childPos[deepest.id].x : (bndW - (db.width || 200)) / 2;
-            return { db, parentX };
+            const parentCenter = parentX + (deepest ? (deepest.width || 200) : 200) / 2;
+            return { db, parentX, parentCenter };
           });
           placements.sort((a, b) => a.parentX - b.parentX);
+
+          // Pack dbs left-to-right from each parent's x (preserves relative order)
+          const rawPositions = [];
           let nextX = -Infinity;
           for (const p of placements) {
             const x = Math.max(p.parentX, nextX);
-            childPos[p.db.id] = { x, y: ry };
+            rawPositions.push({ db: p.db, x });
             nextX = x + (p.db.width || 200) + H_GAP;
+          }
+
+          // Shift the packed cluster so it is centred on the parent centroid,
+          // then clamp so no db can escape the boundary.
+          const clusterLeft  = rawPositions[0].x;
+          const clusterRight = rawPositions[rawPositions.length - 1].x + (rawPositions[rawPositions.length - 1].db.width || 200);
+          const clusterWidth = clusterRight - clusterLeft;
+          const parentCentroid = placements.reduce((s, p) => s + p.parentCenter, 0) / placements.length;
+          const desiredStart  = parentCentroid - clusterWidth / 2;
+          const clampedStart  = Math.max(0, Math.min(bndW - clusterWidth, desiredStart));
+          const shift = clampedStart - clusterLeft;
+
+          for (const p of rawPositions) {
+            childPos[p.db.id] = { x: p.x + shift, y: ry };
           }
         } else if (layer.some(n => n._cornerAnchor)) {
           // Corner-anchor row (e.g. high-connectivity message bus): right-align
