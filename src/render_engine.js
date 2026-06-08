@@ -289,6 +289,170 @@ const elk = new ELK();
       const leftSet  = new Set(leftNodes.map(n => n.id));
       const rightSet = new Set(rightNodes.map(n => n.id));
       const routedEdgeSegments = [];
+      const LANE_OFFSETS = [0, -10, 10, -18, 18, -26, 26];
+      const LANE_OVERLAP_THRESHOLD = 24;
+
+      function sectionToPoints(section) {
+        return [
+          { x: section.startPoint.x, y: section.startPoint.y },
+          ...(section.bendPoints || []).map(p => ({ x: p.x, y: p.y })),
+          { x: section.endPoint.x, y: section.endPoint.y }
+        ];
+      }
+
+      function pointsToSection(points) {
+        return {
+          startPoint: points[0],
+          bendPoints: points.slice(1, -1),
+          endPoint: points[points.length - 1]
+        };
+      }
+
+      function pointsToSegments(points) {
+        return points.slice(0, -1).map((p, i) => ({
+          a: p,
+          b: points[i + 1]
+        })).filter(seg => Math.hypot(seg.b.x - seg.a.x, seg.b.y - seg.a.y) > 0.5);
+      }
+
+      function clonePoints(points) {
+        return points.map(p => ({ x: p.x, y: p.y }));
+      }
+
+      function segmentOverlapLength(segA, segB) {
+        const a = segA.a, b = segA.b, c = segB.a, d = segB.b;
+        const aHorizontal = Math.abs(a.y - b.y) < 2;
+        const bHorizontal = Math.abs(c.y - d.y) < 2;
+        const aVertical = Math.abs(a.x - b.x) < 2;
+        const bVertical = Math.abs(c.x - d.x) < 2;
+        if (aHorizontal && bHorizontal && Math.abs(a.y - c.y) < 6) {
+          const lo = Math.max(Math.min(a.x, b.x), Math.min(c.x, d.x));
+          const hi = Math.min(Math.max(a.x, b.x), Math.max(c.x, d.x));
+          return Math.max(0, hi - lo);
+        }
+        if (aVertical && bVertical && Math.abs(a.x - c.x) < 6) {
+          const lo = Math.max(Math.min(a.y, b.y), Math.min(c.y, d.y));
+          const hi = Math.min(Math.max(a.y, b.y), Math.max(c.y, d.y));
+          return Math.max(0, hi - lo);
+        }
+        return 0;
+      }
+
+      function segmentOrientation(a, b, c) {
+        return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+      }
+
+      function pointsNear(a, b, tolerance = 2) {
+        return Math.hypot(a.x - b.x, a.y - b.y) <= tolerance;
+      }
+
+      function pointOnSegment(a, b, p) {
+        return (
+          p.x >= Math.min(a.x, b.x) - 1 &&
+          p.x <= Math.max(a.x, b.x) + 1 &&
+          p.y >= Math.min(a.y, b.y) - 1 &&
+          p.y <= Math.max(a.y, b.y) + 1 &&
+          Math.abs(segmentOrientation(a, b, p)) < 1
+        );
+      }
+
+      function segmentsCross(segA, segB) {
+        const a = segA.a, b = segA.b, c = segB.a, d = segB.b;
+        if (pointsNear(a, c) || pointsNear(a, d) || pointsNear(b, c) || pointsNear(b, d)) {
+          return false;
+        }
+        const o1 = segmentOrientation(a, b, c);
+        const o2 = segmentOrientation(a, b, d);
+        const o3 = segmentOrientation(c, d, a);
+        const o4 = segmentOrientation(c, d, b);
+        if (((o1 > 0 && o2 < 0) || (o1 < 0 && o2 > 0)) &&
+            ((o3 > 0 && o4 < 0) || (o3 < 0 && o4 > 0))) {
+          return true;
+        }
+        return pointOnSegment(a, b, c) || pointOnSegment(a, b, d) ||
+               pointOnSegment(c, d, a) || pointOnSegment(c, d, b);
+      }
+
+      function edgeConflictScore(points, edge) {
+        const segments = pointsToSegments(points);
+        let crossings = 0;
+        let overlaps = 0;
+        let overlapPx = 0;
+        let nodeCrossings = 0;
+
+        for (const segment of segments) {
+          for (const existing of routedEdgeSegments) {
+            const overlap = segmentOverlapLength(segment, existing);
+            if (overlap > 20) {
+              overlaps++;
+              overlapPx += overlap;
+            } else if (segmentsCross(segment, existing)) {
+              crossings++;
+            }
+          }
+
+          for (const child of children) {
+            if (child.id === edge.from || child.id === edge.to) continue;
+            const childAbsX = bndX + childPos[child.id].x;
+            const childAbsY = bndY + childPos[child.id].y;
+            const rect = { x: childAbsX, y: childAbsY, width: child.width || 200, height: child.height || 80 };
+            if (lineSegmentIntersectsRect(segment.a, segment.b, rect)) {
+              nodeCrossings++;
+              break;
+            }
+          }
+        }
+
+        return {
+          crossings,
+          overlaps,
+          overlapPx,
+          nodeCrossings,
+          score: nodeCrossings * 10000 + overlaps * 120 + overlapPx + crossings * 180
+        };
+      }
+
+      function shiftSegment(points, segmentIndex, offset) {
+        const shifted = clonePoints(points);
+        const p1 = shifted[segmentIndex];
+        const p2 = shifted[segmentIndex + 1];
+        if (Math.abs(p1.x - p2.x) < 2) {
+          p1.x += offset;
+          p2.x += offset;
+        } else if (Math.abs(p1.y - p2.y) < 2) {
+          p1.y += offset;
+          p2.y += offset;
+        }
+        return shifted;
+      }
+
+      function reserveRouteLanes(section, edge) {
+        let points = sectionToPoints(section);
+        if (points.length < 4 || routedEdgeSegments.length === 0) return section;
+
+        for (let i = 1; i < points.length - 2; i++) {
+          const current = { a: points[i], b: points[i + 1] };
+          const isAxisAligned = Math.abs(current.a.x - current.b.x) < 2 ||
+                                Math.abs(current.a.y - current.b.y) < 2;
+          if (!isAxisAligned) continue;
+
+          const currentStats = edgeConflictScore(points, edge);
+          if (currentStats.overlaps === 0 || currentStats.overlapPx < LANE_OVERLAP_THRESHOLD) continue;
+
+          let best = { points, score: currentStats.score, offset: 0 };
+          for (const offset of LANE_OFFSETS.slice(1)) {
+            const candidatePoints = shiftSegment(points, i, offset);
+            const stats = edgeConflictScore(candidatePoints, edge);
+            const score = stats.score + Math.abs(offset) * 2;
+            if (score < best.score) {
+              best = { points: candidatePoints, score, offset };
+            }
+          }
+          if (best.offset !== 0) points = best.points;
+        }
+
+        return pointsToSection(points);
+      }
 
       function routeEdge(e, idx) {
         const sp = getAbs(e.from), tp = getAbs(e.to);
@@ -718,7 +882,7 @@ const elk = new ELK();
 
       for (let idx = 0; idx < allEdges.length; idx++) {
         const e = allEdges[idx];
-        const section = routeEdge(e, idx);
+        const section = reserveRouteLanes(routeEdge(e, idx), e);
         const sectionPoints = [section.startPoint, ...(section.bendPoints || []), section.endPoint];
         routedEdgeSegments.push(...sectionPoints.slice(0, -1).map((p, i) => ({
           a: p,

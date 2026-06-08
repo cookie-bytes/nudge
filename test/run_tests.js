@@ -358,6 +358,12 @@ async function runTests() {
       grade: gradeResult.finalGrade,
       explanation: gradeResult.gradeExplanation,
       collisions: totalCollisions,
+      edgeCrossings: report.edgeQuality.edgeCrossingCount,
+      edgeOverlaps: report.edgeQuality.edgeOverlapCount,
+      edgeOverlapPx: report.edgeQuality.edgeOverlapPx,
+      labelEdgeHits: report.edgeQuality.labelEdgeIntersectionCount,
+      bends: report.edgeQuality.totalBends,
+      routeLength: report.edgeQuality.totalRouteLength,
       status: isPass ? "PASSED" : "FAILED"
     });
 
@@ -379,17 +385,24 @@ async function runTests() {
     Clarity: s.clarity,
     Grade: s.grade,
     Collisions: s.collisions,
+    'Edge X': s.edgeCrossings,
+    'Edge OL': s.edgeOverlaps,
+    'OL px': s.edgeOverlapPx,
+    'Lbl/Edge': s.labelEdgeHits,
+    Bends: s.bends,
+    'Route px': s.routeLength,
     Status: s.status
   })));
 
   // Write markdown report
   let mdReport = `# Nudge Layout Test Run Results\n\n`;
   mdReport += `Generated on: ${new Date().toISOString()}\n\n`;
-  mdReport += `| File | C4 Align Score | Aspect Score | Clarity Score | Grade | Collisions | Status | Explanation |\n`;
-  mdReport += `| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :--- |\n`;
+  mdReport += `| File | C4 Align Score | Aspect Score | Clarity Score | Grade | Collisions | Edge X | Edge OL | OL px | Lbl/Edge | Bends | Route px | Status | Explanation |\n`;
+  mdReport += `| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |\n`;
   for (const s of summary) {
-    mdReport += `| [${s.file}](file://${path.join(TEST_DIR, s.file)}) | ${s.c4Align} | ${s.aspect} | ${s.clarity} | **${s.grade}** | ${s.collisions} | ${s.status === 'PASSED' ? '✅ PASSED' : '❌ FAILED'} | ${s.explanation} |\n`;
+    mdReport += `| [${s.file}](file://${path.join(TEST_DIR, s.file)}) | ${s.c4Align} | ${s.aspect} | ${s.clarity} | **${s.grade}** | ${s.collisions} | ${s.edgeCrossings} | ${s.edgeOverlaps} | ${s.edgeOverlapPx} | ${s.labelEdgeHits} | ${s.bends} | ${s.routeLength} | ${s.status === 'PASSED' ? '✅ PASSED' : '❌ FAILED'} | ${s.explanation} |\n`;
   }
+  mdReport += `\nEdge-quality diagnostics are observational only. They do not currently affect pass/fail status.\n`;
   mdReport += `\n*Visual snapshot assets saved in [test_outputs/](file://${OUTPUT_DIR}) directory.*\n`;
 
   fs.writeFileSync(path.join(OUTPUT_DIR, 'test_results.md'), mdReport);
