@@ -1,4 +1,146 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1220 1190">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1220 1190"><style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #0f172a; /* Slate 900 */
+      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      overflow: hidden;
+    }
+    #diagram-container {
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    svg {
+      width: 100%;
+      height: 100%;
+      user-select: none;
+    }
+    /* SVG Styling */
+    .boundary {
+      fill: #334155; /* Slate 700 — lifted from Slate 800 for better contrast */
+      stroke: #64748b;
+      stroke-width: 2px;
+      stroke-dasharray: 6, 6;
+      rx: 8;
+    }
+    .boundary-label {
+      fill: #94a3b8;
+      font-size: 14px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .node {
+      filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.3));
+      stroke-width: 2px;
+      rx: 6;
+    }
+    .node-person {
+      fill: #0284c7; /* Sky 600 */
+      stroke: #0ea5e9;
+    }
+    .person-head {
+      fill: #0ea5e9; /* Sky 500 — lighter than body */
+      stroke: none;
+    }
+    .node-container {
+      fill: #1e3a8a; /* Blue 900 */
+      stroke: #3b82f6;
+    }
+    .node-external {
+      fill: #334155; /* Slate 700 */
+      stroke: #64748b;
+    }
+    .node-database {
+      fill: #1e3a8a; /* Blue 900 body */
+      stroke: #3b82f6; /* Blue 500 */
+    }
+    .db-cap {
+      fill: #3b82f6; /* Blue 500 — clearly lighter than body so lid reads as solid */
+      stroke: none;
+    }
+    .db-rim {
+      fill: none;
+      stroke: #dbeafe; /* Blue 100 — bright */
+      stroke-width: 2.5px;
+      stroke-linecap: round;
+    }
+    .node-message-bus {
+      fill: #1e3a8a; /* Blue 900 body */
+      stroke: #3b82f6; /* Blue 500 */
+    }
+    .message-bus-cap {
+      fill: #3b82f6; /* Blue 500 — lighter than body */
+      stroke: #1e3a8a; /* Blue 900 cap border */
+      stroke-width: 2px;
+    }
+    /* Edge and Connector lines */
+    .edge-line {
+      fill: none;
+      stroke: #64748b;
+      stroke-width: 1.8px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-dasharray: 6, 6;
+      transition: stroke 0.2s;
+    }
+    .edge-label-bg {
+      fill: #0f172a; /* Same as background to mask line */
+      rx: 4;
+    }
+    .edge-label-text {
+      fill: #cbd5e1;
+      font-size: 11px;
+      font-weight: 500;
+      text-anchor: middle;
+    }
+    .diagram-title-text {
+      fill: #f8fafc;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.025em;
+    }
+    /* Node HTML content via foreignObject */
+    .node-content-wrapper {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 4px 8px;
+      box-sizing: border-box;
+      color: #f8fafc;
+      text-align: center;
+    }
+    .node-title {
+      font-size: 14px;
+      font-weight: bold;
+      margin-bottom: 2px;
+      line-height: 1.2;
+    }
+    .node-type {
+      font-size: 10px;
+      font-weight: 600;
+      opacity: 0.7;
+      margin-bottom: 4px;
+      letter-spacing: 0.05em;
+      line-height: 1.2;
+    }
+    .node-desc {
+      font-size: 11px;
+      opacity: 0.85;
+      line-height: 1.2;
+      display: -webkit-box;
+      -webkit-line-clamp: 5;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  </style>
       <defs>
         <!-- Arrowhead markers -->
         <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -8,6 +150,6 @@
       <g id="title-layer"><text x="30" y="35" class="diagram-title-text">C4 Container Diagram : Search Service</text></g>
       <g id="boundaries-layer"><rect x="120" y="300" width="640" height="774" class="boundary"></rect><text x="170" y="1054" class="boundary-label">Search Service</text></g>
       <g id="edges-layer"><path d="M 100 190 L 270 350" class="edge-line" marker-end="url(#arrow)"></path><path d="M 440 190 L 270 350" class="edge-line" marker-end="url(#arrow)"></path><path d="M 270 490 L 440 600" class="edge-line" marker-end="url(#arrow)"></path><path d="M 440 740 L 610 850" class="edge-line" marker-end="url(#arrow)"></path><path d="M 440 740 L 270 850" class="edge-line" marker-end="url(#arrow)"></path><path d="M 540 670 L 900 620" class="edge-line" marker-end="url(#arrow)"></path><path d="M 540 670 L 900 870" class="edge-line" marker-end="url(#arrow)"></path><path d="M 540 670 L 820 670 Q 830 670 830 680 L 830 1110 Q 830 1120 840 1120 L 900 1120" class="edge-line" marker-end="url(#arrow)"></path><path d="M 610 490 L 610 850" class="edge-line" marker-end="url(#arrow)"></path><path d="M 710 420 L 900 370" class="edge-line" marker-end="url(#arrow)"></path><path d="M 780 190 L 610 350" class="edge-line" marker-end="url(#arrow)"></path></g>
-      <g id="nodes-layer"><rect x="0" y="50" width="200" height="140" class="node node-container"></rect><foreignObject x="0" y="50" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">FE White Label</div><div class="node-type">[Container: Front End Web Application]</div><div class="node-desc">Provides search and book capabilities to White Label users</div></div></foreignObject><rect x="340" y="50" width="200" height="140" class="node node-container"></rect><foreignObject x="340" y="50" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">Public API Gateway</div><div class="node-type">[Container: Software System]</div><div class="node-desc">Provides Public API to 3rd party API partners</div></div></foreignObject><rect x="900" y="550" width="200" height="140" class="node node-container"></rect><foreignObject x="900" y="550" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">Cart Service</div><div class="node-type">[Container: Software System]</div><div class="node-desc">Provides cart management capabilities. Create cart, add item to cart, remove item to cart and validate cart.</div></div></foreignObject><rect x="900" y="800" width="200" height="140" class="node node-container"></rect><foreignObject x="900" y="800" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">Integration Service</div><div class="node-type">[Container: Software System]</div><div class="node-desc">Performs searches and bookings with 3rd party API providers.</div></div></foreignObject><rect x="900" y="1050" width="200" height="140" class="node node-container"></rect><foreignObject x="900" y="1050" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">Promotion Service</div><div class="node-type">[Container: Software System]</div><div class="node-desc">Provides promotion management capabilities and applies promotion offers on search results</div></div></foreignObject><rect x="680" y="50" width="200" height="140" class="node node-external"></rect><foreignObject x="680" y="50" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">AWS EventBridge</div><div class="node-type">[External System: Software System]</div><div class="node-desc">AWS EventBridge serverless event bus that enables applications to communicate with each other using events.</div></div></foreignObject><rect x="900" y="300" width="200" height="140" class="node node-container"></rect><foreignObject x="900" y="300" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">Partner Service</div><div class="node-type">[Container: Software System]</div><div class="node-desc">Manages Partner configuration and management</div></div></foreignObject><rect x="170" y="350" width="200" height="140" class="node node-container"></rect><foreignObject x="170" y="350" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">Search Service API Gateway</div><div class="node-type">[Container: AWS API Gateway]</div><div class="node-desc">Exposes Search Service APIs through API Gateway for external/internal consumers</div></div></foreignObject><rect x="340" y="600" width="200" height="140" class="node node-container"></rect><foreignObject x="340" y="600" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">Search Service Lambda</div><div class="node-type">[Container: .NET 10]</div><div class="node-desc">Handles search requests</div></div></foreignObject><path d="M 510 866 L 510 974 A 100 16 0 0 0 710 974 L 710 866" class="node node-database"></path><ellipse cx="610" cy="866" rx="100" ry="16" class="db-cap"></ellipse><foreignObject x="510" y="890" width="200" height="84"><div class="node-content-wrapper"><div class="node-title">Database</div><div class="node-type">[Database: AWS DynamoDB]</div><div class="node-desc">Stores search and availability results</div></div></foreignObject><path d="M 170 866 L 170 974 A 100 16 0 0 0 370 974 L 370 866" class="node node-database"></path><ellipse cx="270" cy="866" rx="100" ry="16" class="db-cap"></ellipse><foreignObject x="170" y="890" width="200" height="84"><div class="node-content-wrapper"><div class="node-title">Cache Database</div><div class="node-type">[Database: Redis / Valkey]</div><div class="node-desc">Caches search requests and responses to reduce latency and downstream load</div></div></foreignObject><rect x="510" y="350" width="200" height="140" class="node node-container"></rect><foreignObject x="510" y="350" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">Partner Sync Lambda</div><div class="node-type">[Container: NodeJS Lambda Function]</div><div class="node-desc">Handles partner data sync in search service</div></div></foreignObject></g>
+      <g id="nodes-layer"><rect x="0" y="50" width="200" height="140" class="node node-container"></rect><foreignObject x="0" y="50" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">FE White Label</div><div class="node-type">[Container]</div><div class="node-desc">Front End Web Application</div></div></foreignObject><rect x="340" y="50" width="200" height="140" class="node node-container"></rect><foreignObject x="340" y="50" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">Public API Gateway</div><div class="node-type">[Container]</div><div class="node-desc">Software System</div></div></foreignObject><rect x="900" y="550" width="200" height="140" class="node node-container"></rect><foreignObject x="900" y="550" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">Cart Service</div><div class="node-type">[Container]</div><div class="node-desc">Software System</div></div></foreignObject><rect x="900" y="800" width="200" height="140" class="node node-container"></rect><foreignObject x="900" y="800" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">Integration Service</div><div class="node-type">[Container]</div><div class="node-desc">Software System</div></div></foreignObject><rect x="900" y="1050" width="200" height="140" class="node node-container"></rect><foreignObject x="900" y="1050" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">Promotion Service</div><div class="node-type">[Container]</div><div class="node-desc">Software System</div></div></foreignObject><rect x="680" y="50" width="200" height="140" class="node node-external"></rect><foreignObject x="680" y="50" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">AWS EventBridge</div><div class="node-type">[External System]</div><div class="node-desc">Software System</div></div></foreignObject><rect x="900" y="300" width="200" height="140" class="node node-container"></rect><foreignObject x="900" y="300" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">Partner Service</div><div class="node-type">[Container]</div><div class="node-desc">Software System</div></div></foreignObject><rect x="170" y="350" width="200" height="140" class="node node-container"></rect><foreignObject x="170" y="350" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">Search Service API Gateway</div><div class="node-type">[Container: AWS API Gateway]</div><div class="node-desc">Exposes Search Service APIs through API Gateway for external/internal consumers</div></div></foreignObject><rect x="340" y="600" width="200" height="140" class="node node-container"></rect><foreignObject x="340" y="600" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">Search Service Lambda</div><div class="node-type">[Container: .NET 10]</div><div class="node-desc">Handles search requests</div></div></foreignObject><path d="M 510 866 L 510 974 A 100 16 0 0 0 710 974 L 710 866" class="node node-database"></path><ellipse cx="610" cy="866" rx="100" ry="16" class="db-cap"></ellipse><foreignObject x="510" y="890" width="200" height="84"><div class="node-content-wrapper"><div class="node-title">Database</div><div class="node-type">[Database: AWS DynamoDB]</div><div class="node-desc">Stores search and availability results</div></div></foreignObject><path d="M 170 866 L 170 974 A 100 16 0 0 0 370 974 L 370 866" class="node node-database"></path><ellipse cx="270" cy="866" rx="100" ry="16" class="db-cap"></ellipse><foreignObject x="170" y="890" width="200" height="84"><div class="node-content-wrapper"><div class="node-title">Cache Database</div><div class="node-type">[Database: Redis / Valkey]</div><div class="node-desc">Caches search requests and responses to reduce latency and downstream load</div></div></foreignObject><rect x="510" y="350" width="200" height="140" class="node node-container"></rect><foreignObject x="510" y="350" width="200" height="140"><div class="node-content-wrapper"><div class="node-title">Partner Sync Lambda</div><div class="node-type">[Container: NodeJS Lambda Function]</div><div class="node-desc">Handles partner data sync in search service</div></div></foreignObject></g>
       <g id="edge-labels-layer"><rect x="138.5" y="254" width="93" height="32" class="edge-label-bg"></rect><text x="185" y="267.4" class="edge-label-text">make API calls to</text><text x="185" y="280.4" class="edge-label-text" style="opacity: 0.85; font-size: 10px;">[HTTPS]</text><rect x="308.5" y="254" width="93" height="32" class="edge-label-bg"></rect><text x="355" y="267.4" class="edge-label-text">make API calls to</text><text x="355" y="280.4" class="edge-label-text" style="opacity: 0.85; font-size: 10px;">[HTTPS]</text><rect x="305.5" y="529" width="99" height="32" class="edge-label-bg"></rect><text x="355" y="542.4" class="edge-label-text">makes API calls to</text><text x="355" y="555.4" class="edge-label-text" style="opacity: 0.85; font-size: 10px;">[HTTPS]</text><rect x="462" y="779" width="126" height="32" class="edge-label-bg"></rect><text x="525" y="792.4" class="edge-label-text">reads from and writes to</text><text x="525" y="805.4" class="edge-label-text" style="opacity: 0.85; font-size: 10px;">[TCP]</text><rect x="292" y="772.5" width="126" height="45" class="edge-label-bg"></rect><text x="355" y="785.9" class="edge-label-text">reads from and writes to</text><text x="355" y="798.9" class="edge-label-text">cache using</text><text x="355" y="811.9" class="edge-label-text" style="opacity: 0.85; font-size: 10px;">[RESP / TCP]</text><rect x="670.5" y="629" width="99" height="32" class="edge-label-bg"></rect><text x="720" y="642.4" class="edge-label-text">makes API calls to</text><text x="720" y="655.4" class="edge-label-text" style="opacity: 0.85; font-size: 10px;">[HTTPS]</text><rect x="670.5" y="754" width="99" height="32" class="edge-label-bg"></rect><text x="720" y="767.4" class="edge-label-text">makes API calls to</text><text x="720" y="780.4" class="edge-label-text" style="opacity: 0.85; font-size: 10px;">[HTTPS]</text><rect x="785" y="1104" width="99" height="32" class="edge-label-bg"></rect><text x="834.5" y="1117.4" class="edge-label-text">makes API calls to</text><text x="834.5" y="1130.4" class="edge-label-text" style="opacity: 0.85; font-size: 10px;">[HTTPS]</text><rect x="547" y="519" width="126" height="32" class="edge-label-bg"></rect><text x="610" y="532.4" class="edge-label-text">reads from and writes to</text><text x="610" y="545.4" class="edge-label-text" style="opacity: 0.85; font-size: 10px;">[TCP]</text><rect x="755.5" y="379" width="99" height="32" class="edge-label-bg"></rect><text x="805" y="392.4" class="edge-label-text">makes API calls to</text><text x="805" y="405.4" class="edge-label-text" style="opacity: 0.85; font-size: 10px;">[HTTPS]</text><rect x="631.5" y="254" width="127" height="32" class="edge-label-bg"></rect><text x="695" y="267.4" class="edge-label-text">sends Partner sync</text><text x="695" y="280.4" class="edge-label-text">reference data events to</text></g>
     </svg>
