@@ -57,7 +57,7 @@ This prevents utility/support nodes (e.g. background lambdas with no callers) fr
 ### 1b: Boundary dimensions
 
 ```
-bndW = max(layer widths) + 2 × B_PAD     (B_PAD = 50px each side)
+bndW = max(layer widths) + 2 × B_PAD     (B_PAD = 80px each side)
 bndH = sum(layer heights) + (layers-1) × V_GAP + B_PAD + B_BOT
 ```
 
@@ -66,7 +66,7 @@ Constants & Sizing Rules:
 |-----------------|-------|---------|
 | `H_GAP`         | 80px  | Horizontal gap between nodes in the same layer |
 | `V_GAP`         | 80px  | Vertical gap between layers |
-| `B_PAD`         | 50px  | Boundary padding — left, right, and top |
+| `B_PAD`         | 80px  | Boundary padding — left, right, and top |
 | `B_BOT`         | 84px  | Bottom clearance for the boundary label area |
 | Default Width   | 200px | Standardized width for all nodes (database, person, container, external) to align them nicely in a grid |
 | Default Height  | 80px / 140px | Standardized heights: 140px for database, person, container, and external systems; 80px for other types |

@@ -124,7 +124,7 @@
       const options = diagramData.layoutOptions || {};
       const H_GAP   = Number(options["elk.spacing.nodeNode"] || 80);
       const V_GAP   = Number(options["elk.layered.spacing.nodeNodeBetweenLayers"] || 80);
-      const B_PAD   = 50;   // boundary left/right/top padding
+      const B_PAD   = 80;   // boundary left/right/top padding
       const B_BOT   = 84;   // boundary bottom clearance (label area)
       const EXT_GAP = Number(options["elk.layered.spacing.nodeNodeBetweenLayers"] || 80);
 
@@ -1060,7 +1060,7 @@
 
     const MAX_LABEL_WIDTH = 120;
     const LINE_HEIGHT = 13;
-    const BOUNDARY_H_PAD = 50;
+    const BOUNDARY_H_PAD = 80;
 
     function wrapText(text, maxWidth, fontSize) {
       const words = text.split(' ');
