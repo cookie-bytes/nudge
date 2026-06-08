@@ -127,7 +127,7 @@ export function parseMermaidC4(mermaidString) {
         tech,
         description,
         width: 200,
-        height: (mappedType === 'database' || mappedType === 'person' || mappedType === 'container' || mappedType === 'external') ? 140 : 80
+        height: mappedType === 'person' ? 200 : (mappedType === 'database' || mappedType === 'container' || mappedType === 'external') ? 140 : 80
       };
 
       if (activeBoundaries.length > 0) {

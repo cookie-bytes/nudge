@@ -32,11 +32,11 @@ const diagramModel = {
   nodes: [
     {
       id: 'person1',
-      label: 'Person',
+      label: 'E-Commerce Customer',
       type: 'person',
       description: 'A system user with personal bank accounts and access to the dashboard.',
       width: 160,
-      height: 140
+      height: 220
     }
   ],
   edges: [],
