@@ -19,6 +19,9 @@ output.log
 test_outputs/
 
 
+# Claude Code local settings
+.claude/
+
 # OS metadata
 .DS_Store
 Thumbs.db

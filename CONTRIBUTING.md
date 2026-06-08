@@ -29,8 +29,10 @@ The codebase has three layers — changes should respect the boundaries between 
 - **`src/cli/index.js`** — Thin CLI wrapper. Should only handle argument parsing, file I/O, and console output. Business logic belongs in `core/`.
 - **`src/mcp/index.js`** — MCP stdio server. Should only handle tool registration, request parsing, and response formatting. Business logic belongs in `core/`. Remember: stdout is sacred for the MCP JSON protocol — any logging must go to stderr.
 - **`src/mermaid_parser.js`** — Converts Mermaid C4 syntax to the internal JSON model. Add test fixtures in `test/` to cover new node types or relationship forms.
-- **`src/render.html`** — ELKjs layout engine + SVG renderer, evaluated in a headless browser via Playwright. The two-pass layout and port namespace quirks are documented in CLAUDE.md.
-- **`src/critic.js`** — Geometric collision analysis and the LLM API client. All LLM functions accept `{ signal, timeout }` — keep this consistent if adding new LLM calls so the MCP cancellation chain stays intact.
+- **`src/render.html`** — HTML shell loaded by Playwright as a `file://` URL. Bundles ELKjs via `<script src="vendor/elk.bundled.js">` and sources the rendering engine.
+- **`src/render_engine.js`** — ELKjs layout engine + SVG renderer. Exposes `window.renderDiagram` and `window.computeContainerPlan`. The two-pass layout and port namespace quirks are documented in CLAUDE.md.
+- **`src/core/geometry.js`** — Pure geometric algorithms: overlap detection, segment-intersection, edge-label placement. No side-effects or network calls.
+- **`src/core/llm_client.js`** — Stateless LLM API client. All functions accept `{ signal, timeout }` — keep this consistent if adding new LLM calls so the MCP cancellation chain stays intact.
 - **`src/utils.js`** — `fetchWithTimeout` with external signal support. Don't add unrelated utilities here.
 
 ## Pull requests

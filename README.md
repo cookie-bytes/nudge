@@ -118,10 +118,29 @@ npm install
 
 Start your local LLM server in LM Studio (default port `1234`), then run Nudge.
 
-> **Custom API endpoint**: set `NUDGE_LLM_API` if your LLM server runs elsewhere:
-> ```bash
-> export NUDGE_LLM_API=http://localhost:5000
-> ```
+#### Configuration & Environment Variables
+
+You can customize Nudge's layout tuning behavior and LLM connections using environment variables:
+
+| Variable | Description | Default / Fallback |
+|---|---|---|
+| `NUDGE_LLM_API` | The base URL of your OpenAI-compatible API endpoint. | `http://127.0.0.1:1234` |
+| `NUDGE_LLM_MODEL` | The model name Nudge should request. | `google/gemma-4-12b` |
+| `NUDGE_LLM_API_KEY` | The API Key to send in the `Authorization` header. | *(none)* |
+| `OPENAI_API_KEY` | Alternative API key if `NUDGE_LLM_API_KEY` is unset. | *(none)* |
+
+**Examples:**
+- **Local LM Studio/Ollama (Custom Port)**:
+  ```bash
+  export NUDGE_LLM_API=http://localhost:11434
+  export NUDGE_LLM_MODEL=gemma2:9b
+  ```
+- **Remote Hosted API (e.g., OpenRouter / OpenAI)**:
+  ```bash
+  export NUDGE_LLM_API=https://openrouter.ai/api/v1
+  export NUDGE_LLM_MODEL=google/gemma-2-9b-it
+  export NUDGE_LLM_API_KEY=sk-or-...
+  ```
 
 **Optimize the default example:**
 ```bash
@@ -214,17 +233,19 @@ Call the nudge optimize_diagram tool with this diagram and return the SVG:
 ├── .nudge/                 # Output directory for rendered iterations and final exports
 ├── docs/                   # Documentation and example images
 ├── examples/               # Example C4 model YAML and Mermaid diagrams
-├── scripts/                # Developer utilities
+├── scripts/                # Developer utilities for iterating on SVG symbol designs
 ├── src/
 │   ├── core/
-│   │   └── optimizer.js    # Shared optimization loop — called by both CLI and MCP
+│   │   ├── optimizer.js    # Shared optimization loop — called by both CLI and MCP
+│   │   ├── geometry.js     # Pure geometric algorithms: overlap, intersection, label placement
+│   │   └── llm_client.js   # Stateless LLM API client — zone/routing/optimization calls
 │   ├── cli/
 │   │   └── index.js        # CLI entry point — argument parsing, file I/O, console output
 │   ├── mcp/
 │   │   └── index.js        # MCP stdio server — registers and handles optimize_diagram tool
-│   ├── critic.js           # Geometric collision analysis and LLM API client
 │   ├── mermaid_parser.js   # Mermaid C4 syntax → internal JSON model
-│   ├── render.html         # ELKjs layout engine + SVG renderer (loaded by Playwright)
+│   ├── render.html         # HTML shell loaded by Playwright — sources render_engine.js
+│   ├── render_engine.js    # ELKjs layout engine + SVG renderer (window.renderDiagram)
 │   └── utils.js            # fetchWithTimeout with cancellation signal support
 ├── test/                   # Test diagrams (.mermaid) and test runner
 ├── test_outputs/           # Rendered PNGs, SVGs, and test result summary from npm test

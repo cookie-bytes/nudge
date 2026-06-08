@@ -134,10 +134,21 @@ export function parseMermaidC4(mermaidString) {
 
         let tech = '';
         let description = '';
-        if (descAfterTech !== undefined) {
-          tech = descOrTech || '';
-          description = descAfterTech || '';
+        
+        // Container and Component macro variants natively support a technology field.
+        // Person and System macro variants do not.
+        const supportsTech = macroLower.startsWith('container') || macroLower.startsWith('component');
+
+        if (supportsTech) {
+          if (descAfterTech !== undefined) {
+            tech = descOrTech || '';
+            description = descAfterTech || '';
+          } else {
+            tech = descOrTech || '';
+            description = '';
+          }
         } else {
+          // Person and System variants do not support technology; the 3rd argument is the description
           description = descOrTech || '';
         }
 

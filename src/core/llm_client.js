@@ -3,7 +3,7 @@ import { fetchWithTimeout } from '../utils.js';
 const PREFERRED_MODEL = process.env.NUDGE_LLM_MODEL || "google/gemma-4-12b";
 
 // Helper to assemble headers with optional authorization key
-function getHeaders() {
+export function getHeaders() {
   const headers = { 'Content-Type': 'application/json' };
   const apiKey = process.env.NUDGE_LLM_API_KEY || process.env.OPENAI_API_KEY;
   if (apiKey) {

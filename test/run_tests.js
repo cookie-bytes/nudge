@@ -3,7 +3,7 @@ import path from 'path';
 import { chromium } from 'playwright';
 import { parseMermaidC4 } from '../src/mermaid_parser.js';
 import { analyzeLayout } from '../src/core/geometry.js';
-import { getActiveModel } from '../src/core/llm_client.js';
+import { getActiveModel, getHeaders } from '../src/core/llm_client.js';
 import { fetchWithTimeout } from '../src/utils.js';
 import { optimizeDiagram } from '../src/core/optimizer.js';
 
@@ -93,6 +93,7 @@ Remember: output ONLY the JSON object.`;
         ],
         temperature: 0.1
       }),
+      headers: getHeaders(),
       timeout: 3000 // 3s timeout to fail fast
     });
 
