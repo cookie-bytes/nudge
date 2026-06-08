@@ -4,8 +4,6 @@
     // Main layout and rendering entrypoint called by Playwright
     window.renderDiagram = async function (diagramData) {
       try {
-        console.log("Ingesting diagram data:", diagramData);
-
         const hasBoundary = (diagramData.nodes || []).some(n => n.type === 'boundary');
         let laidOutGraph;
 
@@ -16,9 +14,7 @@
         } else {
           // Standard ELK layered layout for flat diagrams (C4Context etc.)
           const elkGraph = transformToElkGraph(diagramData);
-          console.log("Transformed ELK graph configuration:", JSON.stringify(elkGraph, null, 2));
           laidOutGraph = await elk.layout(elkGraph);
-          console.log("Pass 1 laid out graph coordinates:", laidOutGraph);
 
           // Pass 2: Refine port side connections based on actual Pass 1 coordinates
           let needsSecondPass = false;
@@ -94,7 +90,6 @@
           if (needsSecondPass) {
             console.log("Refining layout with side port constraints in Pass 2...");
             laidOutGraph = await elk.layout(elkGraph);
-            console.log("Pass 2 laid out graph coordinates:", laidOutGraph);
           }
         }
 
@@ -742,7 +737,7 @@
 
       // 2. Resolve custom rules using Bellman-Ford style relaxation
       if (rules.length > 0) {
-        console.log("Resolving layout priority rules:", JSON.stringify(rules));
+        // resolve custom ordering rules via Bellman-Ford relaxation
         for (let iter = 0; iter < 5; iter++) {
           for (const rule of rules) {
             const sources = findNodesMatching(rule.source);
@@ -916,7 +911,6 @@
               "org.eclipse.elk.port.side": side
             }
           });
-          console.log(`[Port] Added port ${portId} to side ${side} on node ${node.id}`);
         }
         node.layoutOptions["elk.portConstraints"] = "FIXED_SIDE";
         node.layoutOptions["portConstraints"] = "FIXED_SIDE";
