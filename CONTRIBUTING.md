@@ -21,12 +21,17 @@ npm test
 
 Tests render every `.mermaid` file in `test/` using Playwright + ELKjs, analyse the geometry, and grade the layout. If an OpenAI-compatible server is running on `localhost:1234` (or `$NUDGE_LLM_API`), it grades visually; otherwise it uses the built-in math scorer.
 
-## Making changes
+## Code structure
 
-- **Parser** (`src/mermaid_parser.js`) — converts Mermaid C4 syntax to the internal JSON model. Add test fixtures in `test/` to cover new node types.
-- **Renderer** (`src/render.html`) — ELKjs layout + SVG output, evaluated in a headless browser. The two-pass layout and port namespace quirks are documented in CLAUDE.md (see project root if present) and in the file itself.
-- **Critic** (`src/critic.js`) — geometric collision analysis and the LLM API client.
-- **CLI** (`src/cli.js`) — orchestrates the optimizer loop.
+The codebase has three layers — changes should respect the boundaries between them:
+
+- **`src/core/optimizer.js`** — The shared optimization loop. Called by both the CLI and the MCP server. Any change to the loop logic, iteration behaviour, or SVG export belongs here. Accept new behaviour via parameters rather than reading from `process.env` or `process.argv` directly.
+- **`src/cli/index.js`** — Thin CLI wrapper. Should only handle argument parsing, file I/O, and console output. Business logic belongs in `core/`.
+- **`src/mcp/index.js`** — MCP stdio server. Should only handle tool registration, request parsing, and response formatting. Business logic belongs in `core/`. Remember: stdout is sacred for the MCP JSON protocol — any logging must go to stderr.
+- **`src/mermaid_parser.js`** — Converts Mermaid C4 syntax to the internal JSON model. Add test fixtures in `test/` to cover new node types or relationship forms.
+- **`src/render.html`** — ELKjs layout engine + SVG renderer, evaluated in a headless browser via Playwright. The two-pass layout and port namespace quirks are documented in CLAUDE.md.
+- **`src/critic.js`** — Geometric collision analysis and the LLM API client. All LLM functions accept `{ signal, timeout }` — keep this consistent if adding new LLM calls so the MCP cancellation chain stays intact.
+- **`src/utils.js`** — `fetchWithTimeout` with external signal support. Don't add unrelated utilities here.
 
 ## Pull requests
 
