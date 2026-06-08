@@ -127,8 +127,28 @@ By default, this will optimize the sample layout at `examples/system_context.yam
 ### Run on a custom Mermaid or YAML file
 Provide the path to your diagram file as an argument:
 ```bash
-node src/cli.js examples/internet_banking.mermaid
+node src/cli/index.js examples/internet_banking.mermaid
 ```
+
+### Use as an MCP server (Claude Desktop / Claude Code)
+
+Nudge exposes an `optimize_diagram` MCP tool over stdio. Add it to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "nudge": {
+      "command": "node",
+      "args": ["/absolute/path/to/nudge/src/mcp/index.js"],
+      "env": {
+        "NUDGE_LLM_API": "http://localhost:1234"
+      }
+    }
+  }
+}
+```
+
+Once connected, Claude can generate or edit C4 diagram content and call `optimize_diagram` to render and optimize it in one step — no files needed, SVG is returned directly in the response.
 
 ### Run the test suite
 ```bash
@@ -153,7 +173,12 @@ Nudge writes all outputs to the `.nudge/` directory:
 ├── examples/               # Example C4 model YAML and Mermaid diagrams
 ├── scripts/                # Developer utilities (visual symbol match harnesses)
 ├── src/
-│   ├── cli.js              # CLI entry point, LM checkpoint pipeline, and optimization loop
+│   ├── core/
+│   │   └── optimizer.js    # Optimization loop (shared by CLI and MCP)
+│   ├── cli/
+│   │   └── index.js        # CLI entry point — argument parsing, file I/O, console output
+│   ├── mcp/
+│   │   └── index.js        # MCP stdio server — exposes optimize_diagram tool
 │   ├── critic.js           # Geometric evaluation and LLM API connector
 │   ├── mermaid_parser.js   # Parse Mermaid C4 diagram structures
 │   ├── render.html         # Layout engine and SVG rendering template (loaded by Playwright)

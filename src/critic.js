@@ -325,8 +325,8 @@ export function analyzeLayout(layoutData) {
 }
 
 // Query LM to verify zone assignments after Phase 2 classification
-export async function getLLMZoneVerification(apiUrl, plan) {
-  const activeModel = await getActiveModel(apiUrl);
+export async function getLLMZoneVerification(apiUrl, plan, { signal, timeout = 30000 } = {}) {
+  const activeModel = await getActiveModel(apiUrl, { signal });
   console.log(`[Checkpoint 1] Querying LLM (${activeModel}) for zone verification...`);
 
   const systemPrompt = `You are Nudge, an expert C4 architecture diagram layout optimizer.
@@ -374,7 +374,8 @@ If the layout is already correct: { "zoneOverrides": {}, "swapCommands": [], "ra
         temperature: 0.1,
         max_tokens: 1024
       }),
-      timeout: 30000
+      timeout,
+      signal,
     });
     const result = await response.json();
     if (!result.choices || result.choices.length === 0) return null;
@@ -393,8 +394,8 @@ If the layout is already correct: { "zoneOverrides": {}, "swapCommands": [], "ra
 }
 
 // Query LM to verify node ordering within zones (post edge-routing)
-export async function getLLMRoutingVerification(apiUrl, plan) {
-  const activeModel = await getActiveModel(apiUrl);
+export async function getLLMRoutingVerification(apiUrl, plan, { signal, timeout = 30000 } = {}) {
+  const activeModel = await getActiveModel(apiUrl, { signal });
   console.log(`[Checkpoint 2] Querying LLM (${activeModel}) for routing verification...`);
 
   const systemPrompt = `You are Nudge, an expert C4 architecture diagram layout optimizer.
@@ -436,7 +437,8 @@ If no changes are needed: { "swapCommands": [], "rationale": "Ordering is optima
         temperature: 0.1,
         max_tokens: 1024
       }),
-      timeout: 30000
+      timeout,
+      signal,
     });
     const result = await response.json();
     if (!result.choices || result.choices.length === 0) return null;
@@ -457,9 +459,9 @@ If no changes are needed: { "swapCommands": [], "rationale": "Ordering is optima
 const PREFERRED_MODEL = "google/gemma-4-12b";
 
 // Retrieve active model from LM Studio, preferring PREFERRED_MODEL if available
-export async function getActiveModel(apiUrl) {
+export async function getActiveModel(apiUrl, { signal } = {}) {
   try {
-    const res = await fetchWithTimeout(`${apiUrl}/v1/models`, { timeout: 3000 });
+    const res = await fetchWithTimeout(`${apiUrl}/v1/models`, { timeout: 3000, signal });
     const data = await res.json();
     if (data && data.data && data.data.length > 0) {
       const preferred = data.data.find(m => m.id.includes(PREFERRED_MODEL.split('/')[1]));
@@ -474,8 +476,8 @@ export async function getActiveModel(apiUrl) {
 }
 
 // Query the LLM to get layout options patch
-export async function getLLMOptimizationPatch(apiUrl, currentOptions, layoutReport) {
-  const activeModel = await getActiveModel(apiUrl);
+export async function getLLMOptimizationPatch(apiUrl, currentOptions, layoutReport, { signal, timeout = 60000 } = {}) {
+  const activeModel = await getActiveModel(apiUrl, { signal });
   console.log(`[Critic] Querying local LLM (${activeModel}) at ${apiUrl}...`);
 
   const systemPrompt = `You are Nudge, an expert AI visual layout optimizer for Model-Based Architecture Diagrams.
@@ -532,7 +534,8 @@ Identify the spacing defects and output your optimized JSON layout patch below. 
         temperature: 0.1,
         max_tokens: 2048
       }),
-      timeout: 60000
+      timeout,
+      signal,
     });
 
     const result = await response.json();
