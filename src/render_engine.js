@@ -102,10 +102,11 @@ const elk = new ELK();
         const titleWidth = measureTextWidth(titleText, 16, true) + 60;
         const finalWidth = Math.max(laidOutGraph.width + DIAGRAM_H_PAD * 2, titleWidth);
 
+        const DIAGRAM_B_PAD = 40;
         return {
           success: true,
           width: finalWidth,
-          height: laidOutGraph.height + 50,
+          height: laidOutGraph.height + 50 + DIAGRAM_B_PAD,
           nodes: flattenNodes(laidOutGraph, DIAGRAM_H_PAD, 50),
           edges: flattenEdges(laidOutGraph, DIAGRAM_H_PAD, 50)
         };
@@ -1220,9 +1221,10 @@ const elk = new ELK();
       const finalWidth = Math.max(graph.width + DIAGRAM_H_PAD * 2, titleWidth);
 
       // Adjust viewport size dynamically (shifted vertically by +50px for title)
-      svg.setAttribute("viewBox", `0 0 ${finalWidth} ${graph.height + 50}`);
+      const DIAGRAM_B_PAD = 40;
+      svg.setAttribute("viewBox", `0 0 ${finalWidth} ${graph.height + 50 + DIAGRAM_B_PAD}`);
       svg.style.width = `${finalWidth}px`;
-      svg.style.height = `${graph.height + 50}px`;
+      svg.style.height = `${graph.height + 50 + DIAGRAM_B_PAD}px`;
 
       const allComponents = flattenNodes(graph, DIAGRAM_H_PAD, 50).filter(n => n.type !== 'boundary');
       const placedLabels = [];
