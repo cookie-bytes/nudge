@@ -457,12 +457,12 @@ If no changes are needed: { "swapCommands": [], "rationale": "Ordering is optima
 const PREFERRED_MODEL = "google/gemma-4-12b";
 
 // Retrieve active model from LM Studio, preferring PREFERRED_MODEL if available
-async function getActiveModel(apiUrl) {
+export async function getActiveModel(apiUrl) {
   try {
     const res = await fetchWithTimeout(`${apiUrl}/v1/models`, { timeout: 3000 });
     const data = await res.json();
     if (data && data.data && data.data.length > 0) {
-      const preferred = data.data.find(m => m.id.includes('gemma-4-12b'));
+      const preferred = data.data.find(m => m.id.includes(PREFERRED_MODEL.split('/')[1]));
       if (preferred) return preferred.id;
       const nonEmbed = data.data.find(m => !m.id.includes('embed'));
       return nonEmbed ? nonEmbed.id : data.data[0].id;

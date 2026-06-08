@@ -2,12 +2,12 @@
   "name": "@cookie-bytes/nudge",
   "version": "1.0.0",
   "description": "AI-driven layout optimizer for C4 Model architecture diagrams",
-  "main": "src/cli.js",
   "bin": {
     "nudge": "./src/cli.js"
   },
   "type": "module",
   "scripts": {
+    "postinstall": "node -e \"const fs=require('fs');fs.mkdirSync('src/vendor',{recursive:true});fs.copyFileSync('node_modules/elkjs/lib/elk.bundled.js','src/vendor/elk.bundled.js');\"",
     "start": "node src/cli.js",
     "test": "node test/run_tests.js"
   },
@@ -35,6 +35,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "elkjs": "0.9.3",
     "js-yaml": "^4.1.0",
     "playwright": "^1.44.1"
   }

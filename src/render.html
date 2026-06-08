@@ -3,8 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>Nudge Diagram Renderer</title>
-  <!-- Load ELKjs bundled from CDN -->
-  <script src="https://cdn.jsdelivr.net/npm/elkjs@0.9.3/lib/elk.bundled.js"></script>
+  <script src="vendor/elk.bundled.js"></script>
   <style>
     body {
       margin: 0;
@@ -301,82 +300,19 @@
       const B_BOT   = 84;   // boundary bottom clearance (label area)
       const EXT_GAP = Number(options["elk.layered.spacing.nodeNodeBetweenLayers"] || 80);
 
-      const boundaryNode = (diagramData.nodes || []).find(n => n.type === 'boundary');
-      if (!boundaryNode) return null;
+      const plan = buildContainerZonePlan(diagramData);
+      if (!plan) return null;
+      const { boundaryNode, children, childIds, allEdges, extNodes, extMap, layers, nodeLayerIdx, nodeColIdx } = plan;
+      let { aboveNodes, belowNodes, leftNodes, rightNodes } = plan;
 
-      const children  = boundaryNode.children || [];
-      const childIds  = new Set(children.map(c => c.id));
-      const allEdges  = diagramData.edges || [];
-      const intEdges  = allEdges.filter(e => childIds.has(e.from) && childIds.has(e.to));
-      const extEdges  = allEdges.filter(e => childIds.has(e.from) !== childIds.has(e.to));
-
-      // ── Phase 1a: Kahn topological layer assignment ────────────────────────
-      // Nodes that receive external (cross-boundary) incoming edges are true
-      // entry points and are seeded into Layer 0. Zero-in-degree nodes with no
-      // external incoming are deferred to Layer 1 so the entry row stays clean.
-      const hasExternalIn = new Set();
-      for (const e of extEdges) { if (childIds.has(e.to)) hasExternalIn.add(e.to); }
-
-      const inDeg = new Map(children.map(n => [n.id, 0]));
-      const adj   = new Map(children.map(n => [n.id, []]));
-      for (const e of intEdges) {
-        inDeg.set(e.to, (inDeg.get(e.to) || 0) + 1);
-        adj.get(e.from)?.push(e.to);
-      }
-      const layers = [];
-      const done   = new Set();
-
-      // Separate zero-in-degree nodes into true entry nodes vs lateral nodes
-      const zeroIndeg   = children.filter(n => inDeg.get(n.id) === 0);
-      const entryNodes  = zeroIndeg.filter(n =>  hasExternalIn.has(n.id));
-      const lateralNodes = zeroIndeg.filter(n => !hasExternalIn.has(n.id));
-
-      // If there are externally-connected entry nodes, place them alone in Layer 0
-      // and let lateral nodes flow naturally into the next Kahn round.
-      const seedLayer = zeroIndeg;
-      layers.push(seedLayer);
-      for (const n of seedLayer) {
-        done.add(n.id);
-        for (const nxt of (adj.get(n.id) || [])) inDeg.set(nxt, inDeg.get(nxt) - 1);
-      }
-
-      while (done.size < children.length) {
-        const layer = children.filter(n => !done.has(n.id) && inDeg.get(n.id) === 0);
-        if (layer.length === 0) { layers.push(children.filter(n => !done.has(n.id))); break; }
-        layers.push(layer);
-        for (const n of layer) {
-          done.add(n.id);
-          for (const nxt of (adj.get(n.id) || [])) inDeg.set(nxt, inDeg.get(nxt) - 1);
-        }
-      }
-
-      // ── Phase 1a′: Barycenter sort within each layer ──────────────────────
-      // Build a cumulative column map across all processed layers so that
-      // skip-layer edges (e.g. Layer 0 → Layer 2) are visible when sorting.
-      const colMap = new Map();
-      layers[0].forEach((n, idx) => colMap.set(n.id, idx));
-      for (let i = 1; i < layers.length; i++) {
-        const barycenter = (node) => {
-          const positions = [];
-          for (const e of intEdges) {
-            if (e.to === node.id && colMap.has(e.from)) positions.push(colMap.get(e.from));
-            if (e.from === node.id && colMap.has(e.to)) positions.push(colMap.get(e.to));
-          }
-          if (positions.length === 0) return Infinity;
-          return positions.reduce((a, b) => a + b, 0) / positions.length;
-        };
-        layers[i] = [...layers[i]].sort((a, b) => barycenter(a) - barycenter(b));
-        layers[i].forEach((n, idx) => colMap.set(n.id, idx));
-      }
-
-      // ── Phase 1b: Boundary dimensions ─────────────────────────────────────
+      // Boundary dimensions
       const layerW = layers.map(l => l.reduce((s, n) => s + (n.width || 200), 0) + Math.max(0, l.length - 1) * H_GAP);
       const layerH = layers.map(l => Math.max(...l.map(n => n.height || 80)));
       const maxLW  = Math.max(...layerW, 200);
       const bndW   = maxLW + 2 * B_PAD;
       const bndH   = layerH.reduce((s, h) => s + h, 0) + Math.max(0, layers.length - 1) * V_GAP + B_PAD + B_BOT;
 
-      // ── Phase 1c: Position children relative to boundary ──────────────────
+      // Position children relative to boundary
       const childPos = {};
       let ry = B_PAD;
       for (let i = 0; i < layers.length; i++) {
@@ -386,161 +322,6 @@
           rx += (n.width || 200) + H_GAP;
         }
         ry += layerH[i] + V_GAP;
-      }
-
-      // ── Phase 2a: Classify external nodes (organic 4-sided distribution) ───
-      const extNodes = (diagramData.nodes || []).filter(n => n.type !== 'boundary');
-      const extMap   = new Map(extNodes.map(n => [n.id, n]));
-
-      // Layer-index map: internal node id → its Kahn layer index
-      const nodeLayerIdx = new Map();
-      for (let li = 0; li < layers.length; li++) {
-        for (const n of layers[li]) nodeLayerIdx.set(n.id, li);
-      }
-      const maxLayerIdx = Math.max(0, layers.length - 1);
-
-      // Classify each external node by connectivity pattern and target layer depth
-      const zoneMap2a = new Map();
-      const unconnectedExt = [];
-
-      for (const node of extNodes) {
-        const callsIn  = extEdges.filter(e => e.from === node.id && childIds.has(e.to));
-        const callsOut = extEdges.filter(e => e.to   === node.id && childIds.has(e.from));
-
-        if (callsIn.length > 0 && callsOut.length === 0) {
-          // Pure caller — classify by which layer it targets
-          const allLayer0 = callsIn.every(e => (nodeLayerIdx.get(e.to) ?? 0) === 0);
-          zoneMap2a.set(node.id, allLayer0 ? 'above' : 'left');
-        } else if (callsOut.length > 0 && callsIn.length === 0) {
-          // Pure callee — classify by which layer it receives from
-          const allDeepest = callsOut.every(e => (nodeLayerIdx.get(e.from) ?? maxLayerIdx) === maxLayerIdx);
-          zoneMap2a.set(node.id, allDeepest ? 'below' : 'right');
-        } else if (callsIn.length > 0 && callsOut.length > 0) {
-          // Bidirectional → Async/Stream column
-          zoneMap2a.set(node.id, 'right');
-        } else {
-          unconnectedExt.push(node);
-        }
-      }
-
-      // Unconnected nodes: inherit zone from an inter-external edge partner, else default 'above'
-      const interExtEdges = allEdges.filter(e => extMap.has(e.from) && extMap.has(e.to));
-      for (const node of unconnectedExt) {
-        let zone = 'above';
-        for (const e of interExtEdges) {
-          const partnerId = e.from === node.id ? e.to : (e.to === node.id ? e.from : null);
-          if (!partnerId) continue;
-          const partnerZone = zoneMap2a.get(partnerId);
-          if (partnerZone) { zone = partnerZone; break; }
-        }
-        zoneMap2a.set(node.id, zone);
-      }
-
-      let aboveNodes = extNodes.filter(n => zoneMap2a.get(n.id) === 'above');
-      let belowNodes = extNodes.filter(n => zoneMap2a.get(n.id) === 'below');
-      let leftNodes  = extNodes.filter(n => zoneMap2a.get(n.id) === 'left');
-      let rightNodes = extNodes.filter(n => zoneMap2a.get(n.id) === 'right');
-
-      // Map each internal node ID to its column/horizontal index within its layer
-      const nodeColIdx = new Map();
-      for (let li = 0; li < layers.length; li++) {
-        for (let ci = 0; ci < layers[li].length; ci++) {
-          nodeColIdx.set(layers[li][ci].id, ci);
-        }
-      }
-
-      // Map each external node to its original declaration order index for stable sorting fallback
-      const extNodeIndex = new Map(extNodes.map((n, idx) => [n.id, idx]));
-
-      const getConnectedAvgLayer = (node) => {
-        const connected = [];
-        for (const e of extEdges) {
-          if (e.from === node.id && childIds.has(e.to)) {
-            const idx = nodeLayerIdx.get(e.to);
-            if (idx !== undefined) connected.push(idx);
-          } else if (e.to === node.id && childIds.has(e.from)) {
-            const idx = nodeLayerIdx.get(e.from);
-            if (idx !== undefined) connected.push(idx);
-          }
-        }
-        if (connected.length === 0) return Infinity;
-        return connected.reduce((a, b) => a + b, 0) / connected.length;
-      };
-
-      const getConnectedAvgCol = (node) => {
-        const connected = [];
-        for (const e of extEdges) {
-          if (e.from === node.id && childIds.has(e.to)) {
-            const idx = nodeColIdx.get(e.to);
-            if (idx !== undefined) connected.push(idx);
-          } else if (e.to === node.id && childIds.has(e.from)) {
-            const idx = nodeColIdx.get(e.from);
-            if (idx !== undefined) connected.push(idx);
-          }
-        }
-        if (connected.length === 0) return Infinity;
-        return connected.reduce((a, b) => a + b, 0) / connected.length;
-      };
-
-      const stableSort = (arr, getValueFn) => {
-        return arr.sort((a, b) => {
-          const valA = getValueFn(a);
-          const valB = getValueFn(b);
-          if (valA !== valB) return valA - valB;
-          return extNodeIndex.get(a.id) - extNodeIndex.get(b.id);
-        });
-      };
-
-      aboveNodes = stableSort(aboveNodes, getConnectedAvgCol);
-      belowNodes = stableSort(belowNodes, getConnectedAvgCol);
-      leftNodes  = stableSort(leftNodes, getConnectedAvgLayer);
-      rightNodes = stableSort(rightNodes, getConnectedAvgLayer);
-
-      // Apply LM zone overrides (_layoutOverrides injected by cli.js checkpoint pipeline)
-      const _ov = diagramData._layoutOverrides || {};
-      if (_ov.zoneOverrides && Object.keys(_ov.zoneOverrides).length > 0) {
-        for (const [nodeId, newZone] of Object.entries(_ov.zoneOverrides)) {
-          aboveNodes = aboveNodes.filter(n => n.id !== nodeId);
-          belowNodes = belowNodes.filter(n => n.id !== nodeId);
-          leftNodes  = leftNodes.filter(n => n.id !== nodeId);
-          rightNodes = rightNodes.filter(n => n.id !== nodeId);
-          const node = extMap.get(nodeId);
-          if (!node) continue;
-          if (newZone === 'above')      aboveNodes.push(node);
-          else if (newZone === 'below') belowNodes.push(node);
-          else if (newZone === 'left')  leftNodes.push(node);
-          else if (newZone === 'right') rightNodes.push(node);
-        }
-      }
-      if (_ov.swapCommands && _ov.swapCommands.length > 0) {
-        // Handle SHIFT_ZONE first — splice nodes between zones before dimensions are computed
-        for (const cmd of _ov.swapCommands) {
-          if (cmd.type !== 'SHIFT_ZONE') continue;
-          const node = extMap.get(cmd.nodeId);
-          if (!node) continue;
-          aboveNodes = aboveNodes.filter(n => n.id !== cmd.nodeId);
-          belowNodes = belowNodes.filter(n => n.id !== cmd.nodeId);
-          leftNodes  = leftNodes.filter(n => n.id !== cmd.nodeId);
-          rightNodes = rightNodes.filter(n => n.id !== cmd.nodeId);
-          if (cmd.to === 'above')      aboveNodes.push(node);
-          else if (cmd.to === 'below') belowNodes.push(node);
-          else if (cmd.to === 'left')  leftNodes.push(node);
-          else if (cmd.to === 'right') rightNodes.push(node);
-        }
-        // Then reorder within zones via SWAP_NODE_ORDER
-        const applySwaps = arr => {
-          for (const cmd of _ov.swapCommands) {
-            if (cmd.type !== 'SWAP_NODE_ORDER') continue;
-            const iA = arr.findIndex(n => n.id === cmd.nodeA);
-            const iB = arr.findIndex(n => n.id === cmd.nodeB);
-            if (iA >= 0 && iB >= 0) [arr[iA], arr[iB]] = [arr[iB], arr[iA]];
-          }
-          return arr;
-        };
-        aboveNodes = applySwaps([...aboveNodes]);
-        belowNodes = applySwaps([...belowNodes]);
-        leftNodes  = applySwaps([...leftNodes]);
-        rightNodes = applySwaps([...rightNodes]);
       }
 
       // ── Phase 2b: Row widths and diagram dimensions ────────────────────────
@@ -752,12 +533,10 @@
       return out;
     }
 
-    // Returns a structured layout plan for LM verification checkpoints (no SVG rendered)
-    window.computeContainerPlan = function(diagramData) {
-      const options = diagramData.layoutOptions || {};
-      const H_GAP    = Number(options["elk.spacing.nodeNode"] || 80);
-      const MAX_ABOVE = 6;
-
+    // Shared helper: Kahn layering → barycenter sort → zone classification →
+    // connectivity sort → LM override application.
+    // Returns the data both layoutContainerDiagram and computeContainerPlan need.
+    function buildContainerZonePlan(diagramData) {
       const boundaryNode = (diagramData.nodes || []).find(n => n.type === 'boundary');
       if (!boundaryNode) return null;
 
@@ -767,7 +546,7 @@
       const intEdges = allEdges.filter(e => childIds.has(e.from) && childIds.has(e.to));
       const extEdges = allEdges.filter(e => childIds.has(e.from) !== childIds.has(e.to));
 
-      // Phase 1a: Kahn layer assignment (mirrors layoutContainerDiagram)
+      // Kahn topological layer assignment
       const hasExternalIn = new Set();
       for (const e of extEdges) { if (childIds.has(e.to)) hasExternalIn.add(e.to); }
       const inDeg = new Map(children.map(n => [n.id, 0]));
@@ -777,12 +556,10 @@
         adj.get(e.from)?.push(e.to);
       }
       const layers = [];
-      const done = new Set();
-      const zeroIndeg  = children.filter(n => inDeg.get(n.id) === 0);
-      const entryNodes = zeroIndeg.filter(n => hasExternalIn.has(n.id));
-      const seedLayer  = zeroIndeg;
-      layers.push(seedLayer);
-      for (const n of seedLayer) {
+      const done   = new Set();
+      const zeroIndeg = children.filter(n => inDeg.get(n.id) === 0);
+      layers.push(zeroIndeg);
+      for (const n of zeroIndeg) {
         done.add(n.id);
         for (const nxt of (adj.get(n.id) || [])) inDeg.set(nxt, inDeg.get(nxt) - 1);
       }
@@ -796,72 +573,84 @@
         }
       }
 
-      // Phase 2a: Classify external nodes (organic 4-sided distribution)
-      const extNodes  = (diagramData.nodes || []).filter(n => n.type !== 'boundary');
-      const extMap    = new Map(extNodes.map(n => [n.id, n]));
-
-      const nodeLayerIdxP = new Map();
-      for (let li = 0; li < layers.length; li++) {
-        for (const n of layers[li]) nodeLayerIdxP.set(n.id, li);
+      // Barycenter sort within each layer to reduce edge crossings
+      const colMap = new Map();
+      layers[0].forEach((n, idx) => colMap.set(n.id, idx));
+      for (let i = 1; i < layers.length; i++) {
+        const barycenter = (node) => {
+          const positions = [];
+          for (const e of intEdges) {
+            if (e.to === node.id && colMap.has(e.from)) positions.push(colMap.get(e.from));
+            if (e.from === node.id && colMap.has(e.to)) positions.push(colMap.get(e.to));
+          }
+          if (positions.length === 0) return Infinity;
+          return positions.reduce((a, b) => a + b, 0) / positions.length;
+        };
+        layers[i] = [...layers[i]].sort((a, b) => barycenter(a) - barycenter(b));
+        layers[i].forEach((n, idx) => colMap.set(n.id, idx));
       }
-      const maxLayerIdxP = Math.max(0, layers.length - 1);
 
-      const zoneMapP = new Map();
-      const unconnectedExtP = [];
+      // Layer and column index maps
+      const nodeLayerIdx = new Map();
+      for (let li = 0; li < layers.length; li++) {
+        for (const n of layers[li]) nodeLayerIdx.set(n.id, li);
+      }
+      const maxLayerIdx = Math.max(0, layers.length - 1);
+      const nodeColIdx  = new Map();
+      for (let li = 0; li < layers.length; li++) {
+        for (let ci = 0; ci < layers[li].length; ci++) nodeColIdx.set(layers[li][ci].id, ci);
+      }
+
+      // Classify external nodes by connectivity pattern and target layer depth
+      const extNodes = (diagramData.nodes || []).filter(n => n.type !== 'boundary');
+      const extMap   = new Map(extNodes.map(n => [n.id, n]));
+      const zoneMap  = new Map();
+      const unconnectedExt = [];
 
       for (const node of extNodes) {
         const callsIn  = extEdges.filter(e => e.from === node.id && childIds.has(e.to));
         const callsOut = extEdges.filter(e => e.to   === node.id && childIds.has(e.from));
-
         if (callsIn.length > 0 && callsOut.length === 0) {
-          const allLayer0 = callsIn.every(e => (nodeLayerIdxP.get(e.to) ?? 0) === 0);
-          zoneMapP.set(node.id, allLayer0 ? 'above' : 'left');
+          const allLayer0 = callsIn.every(e => (nodeLayerIdx.get(e.to) ?? 0) === 0);
+          zoneMap.set(node.id, allLayer0 ? 'above' : 'left');
         } else if (callsOut.length > 0 && callsIn.length === 0) {
-          const allDeepest = callsOut.every(e => (nodeLayerIdxP.get(e.from) ?? maxLayerIdxP) === maxLayerIdxP);
-          zoneMapP.set(node.id, allDeepest ? 'below' : 'right');
+          const allDeepest = callsOut.every(e => (nodeLayerIdx.get(e.from) ?? maxLayerIdx) === maxLayerIdx);
+          zoneMap.set(node.id, allDeepest ? 'below' : 'right');
         } else if (callsIn.length > 0 && callsOut.length > 0) {
-          zoneMapP.set(node.id, 'right');
+          zoneMap.set(node.id, 'right');
         } else {
-          unconnectedExtP.push(node);
+          unconnectedExt.push(node);
         }
       }
 
-      const interExtEdgesP = allEdges.filter(e => extMap.has(e.from) && extMap.has(e.to));
-      for (const node of unconnectedExtP) {
+      const interExtEdges = allEdges.filter(e => extMap.has(e.from) && extMap.has(e.to));
+      for (const node of unconnectedExt) {
         let zone = 'above';
-        for (const e of interExtEdgesP) {
+        for (const e of interExtEdges) {
           const partnerId = e.from === node.id ? e.to : (e.to === node.id ? e.from : null);
           if (!partnerId) continue;
-          const partnerZone = zoneMapP.get(partnerId);
+          const partnerZone = zoneMap.get(partnerId);
           if (partnerZone) { zone = partnerZone; break; }
         }
-        zoneMapP.set(node.id, zone);
+        zoneMap.set(node.id, zone);
       }
 
-      let aboveNodes = extNodes.filter(n => zoneMapP.get(n.id) === 'above');
-      let belowNodes = extNodes.filter(n => zoneMapP.get(n.id) === 'below');
-      let leftNodes  = extNodes.filter(n => zoneMapP.get(n.id) === 'left');
-      let rightNodes = extNodes.filter(n => zoneMapP.get(n.id) === 'right');
+      let aboveNodes = extNodes.filter(n => zoneMap.get(n.id) === 'above');
+      let belowNodes = extNodes.filter(n => zoneMap.get(n.id) === 'below');
+      let leftNodes  = extNodes.filter(n => zoneMap.get(n.id) === 'left');
+      let rightNodes = extNodes.filter(n => zoneMap.get(n.id) === 'right');
 
-      // Map each internal node ID to its column/horizontal index within its layer
-      const nodeColIdxP = new Map();
-      for (let li = 0; li < layers.length; li++) {
-        for (let ci = 0; ci < layers[li].length; ci++) {
-          nodeColIdxP.set(layers[li][ci].id, ci);
-        }
-      }
-
-      // Map each external node to its original declaration order index for stable sorting fallback
+      // Connectivity-based stable sort within each zone
       const extNodeIndex = new Map(extNodes.map((n, idx) => [n.id, idx]));
 
-      const getConnectedAvgLayerP = (node) => {
+      const getConnectedAvgLayer = (node) => {
         const connected = [];
         for (const e of extEdges) {
           if (e.from === node.id && childIds.has(e.to)) {
-            const idx = nodeLayerIdxP.get(e.to);
+            const idx = nodeLayerIdx.get(e.to);
             if (idx !== undefined) connected.push(idx);
           } else if (e.to === node.id && childIds.has(e.from)) {
-            const idx = nodeLayerIdxP.get(e.from);
+            const idx = nodeLayerIdx.get(e.from);
             if (idx !== undefined) connected.push(idx);
           }
         }
@@ -869,14 +658,14 @@
         return connected.reduce((a, b) => a + b, 0) / connected.length;
       };
 
-      const getConnectedAvgColP = (node) => {
+      const getConnectedAvgCol = (node) => {
         const connected = [];
         for (const e of extEdges) {
           if (e.from === node.id && childIds.has(e.to)) {
-            const idx = nodeColIdxP.get(e.to);
+            const idx = nodeColIdx.get(e.to);
             if (idx !== undefined) connected.push(idx);
           } else if (e.to === node.id && childIds.has(e.from)) {
-            const idx = nodeColIdxP.get(e.from);
+            const idx = nodeColIdx.get(e.from);
             if (idx !== undefined) connected.push(idx);
           }
         }
@@ -884,22 +673,20 @@
         return connected.reduce((a, b) => a + b, 0) / connected.length;
       };
 
-      const stableSortP = (arr, getValueFn) => {
-        return arr.sort((a, b) => {
-          const valA = getValueFn(a);
-          const valB = getValueFn(b);
-          if (valA !== valB) return valA - valB;
-          return extNodeIndex.get(a.id) - extNodeIndex.get(b.id);
-        });
-      };
+      const stableSort = (arr, getValueFn) => arr.sort((a, b) => {
+        const valA = getValueFn(a), valB = getValueFn(b);
+        if (valA !== valB) return valA - valB;
+        return extNodeIndex.get(a.id) - extNodeIndex.get(b.id);
+      });
 
-      aboveNodes = stableSortP(aboveNodes, getConnectedAvgColP);
-      belowNodes = stableSortP(belowNodes, getConnectedAvgColP);
-      leftNodes  = stableSortP(leftNodes, getConnectedAvgLayerP);
-      rightNodes = stableSortP(rightNodes, getConnectedAvgLayerP);
+      aboveNodes = stableSort(aboveNodes, getConnectedAvgCol);
+      belowNodes = stableSort(belowNodes, getConnectedAvgCol);
+      leftNodes  = stableSort(leftNodes,  getConnectedAvgLayer);
+      rightNodes = stableSort(rightNodes, getConnectedAvgLayer);
 
+      // Apply LM layout overrides (_layoutOverrides injected by cli.js checkpoint pipeline)
       const _ov = diagramData._layoutOverrides || {};
-      if (_ov.zoneOverrides) {
+      if (_ov.zoneOverrides && Object.keys(_ov.zoneOverrides).length > 0) {
         for (const [nodeId, newZone] of Object.entries(_ov.zoneOverrides)) {
           aboveNodes = aboveNodes.filter(n => n.id !== nodeId);
           belowNodes = belowNodes.filter(n => n.id !== nodeId);
@@ -913,8 +700,7 @@
           else if (newZone === 'right') rightNodes.push(node);
         }
       }
-      if (_ov.swapCommands) {
-        // SHIFT_ZONE: splice nodes between zones before ordering swaps
+      if (_ov.swapCommands && _ov.swapCommands.length > 0) {
         for (const cmd of _ov.swapCommands) {
           if (cmd.type !== 'SHIFT_ZONE') continue;
           const node = extMap.get(cmd.nodeId);
@@ -929,7 +715,8 @@
           else if (cmd.to === 'right') rightNodes.push(node);
         }
         const applySwaps = arr => {
-          for (const cmd of _ov.swapCommands.filter(c => c.type === 'SWAP_NODE_ORDER')) {
+          for (const cmd of _ov.swapCommands) {
+            if (cmd.type !== 'SWAP_NODE_ORDER') continue;
             const iA = arr.findIndex(n => n.id === cmd.nodeA);
             const iB = arr.findIndex(n => n.id === cmd.nodeB);
             if (iA >= 0 && iB >= 0) [arr[iA], arr[iB]] = [arr[iB], arr[iA]];
@@ -941,6 +728,21 @@
         leftNodes  = applySwaps([...leftNodes]);
         rightNodes = applySwaps([...rightNodes]);
       }
+
+      return {
+        boundaryNode, children, childIds, allEdges,
+        extNodes, extMap, layers, nodeLayerIdx, nodeColIdx,
+        aboveNodes, belowNodes, leftNodes, rightNodes
+      };
+    }
+
+    // Returns a structured layout plan for LM verification checkpoints (no SVG rendered)
+    window.computeContainerPlan = function(diagramData) {
+      const MAX_ABOVE = 6;
+
+      const plan = buildContainerZonePlan(diagramData);
+      if (!plan) return null;
+      const { boundaryNode, childIds, allEdges, layers, aboveNodes, belowNodes, leftNodes, rightNodes } = plan;
 
       const getZone = id => {
         if (childIds.has(id))              return 'boundary';

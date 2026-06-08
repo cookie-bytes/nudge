@@ -42,6 +42,19 @@ async function main() {
     process.exit(1);
   }
 
+  if (!diagramModel || typeof diagramModel !== 'object') {
+    console.error("Input file parsed to an empty or invalid structure.");
+    process.exit(1);
+  }
+  if (!Array.isArray(diagramModel.nodes)) {
+    console.error(`Input is missing a 'nodes' array. Check your YAML or Mermaid syntax.`);
+    process.exit(1);
+  }
+  if (!Array.isArray(diagramModel.edges)) {
+    console.error(`Input is missing an 'edges' array. Check your YAML or Mermaid syntax.`);
+    process.exit(1);
+  }
+
   console.log(`Diagram loaded: "${diagramModel.title}"`);
   console.log("Initial Layout Options:", JSON.stringify(diagramModel.layoutOptions, null, 2));
 

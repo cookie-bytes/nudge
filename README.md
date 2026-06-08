@@ -74,12 +74,12 @@ All override commands are written to `diagramModel._layoutOverrides` and applied
 - 🔄 **Critic Loop**: Continuous optimization loop that improves layout quality iteratively (up to 4 passes).
 - 🤖 **LM Checkpoint Pipeline**: Two pre-render LLM checkpoints verify and correct zone assignments and node ordering for container diagrams before the main loop begins.
 - 🎨 **Supports Mermaid & YAML**: Seamless support for C4 diagrams in `.mermaid`/`.mmd` syntax and structured `.yaml` specifications.
-- 📏 **Standardized Sizing & Grid**: All nodes are standardized to a width of `200px` (heights `140px` for database, person, container, and external systems; `80px` for others), ensuring consistent alignment and a clean grid.
+- 📏 **Standardized Sizing & Grid**: All nodes are standardized to a width of `200px`. Heights: `200px` for Person, `140px` for Container/Database/External, `80px` for MessageBus — ensuring consistent alignment and a clean grid.
 - 💬 **3-Line Descriptions**: Node descriptions support a 3-line clamp, providing space for detailed technical notes without clipping.
 - 🏷️ **Collision-Aware Label Placement**: Edge labels check four strategies sequentially — straight-middle, target-anchored, source-anchored, and gutter-clearance segment scoring. Each strategy checks for collision against both node boxes and already-placed labels, preventing co-terminal edges from stacking their labels on top of each other.
 - 🔌 **Orthogonal Edge Routing**: Cross-boundary edges route via L-shape, straight-line, or U-shape paths; corners are smoothed with quadratic bezier curves.
 - 🌐 **Connectivity-Based Zone Sorting**: External nodes are auto-sorted to align with the internal layer or column they connect to, reducing edge crossings without LLM intervention.
-- 🏠 **100% Local**: Runs fully on your machine using Playwright and a local LLM backend (like LM Studio).
+- 🏠 **No Cloud Dependencies**: Runs fully on your machine using Playwright and a local LLM backend (like LM Studio). The layout engine (ELKjs) is bundled locally via `npm install` — no CDN calls at runtime.
 
 ---
 
@@ -151,11 +151,13 @@ Nudge writes all outputs to the `.nudge/` directory:
 ├── .nudge/                 # Output directory for rendered iterations and final exports
 ├── docs/                   # Documentation and example images
 ├── examples/               # Example C4 model YAML and Mermaid diagrams
+├── scripts/                # Developer utilities (visual symbol match harnesses)
 ├── src/
 │   ├── cli.js              # CLI entry point, LM checkpoint pipeline, and optimization loop
 │   ├── critic.js           # Geometric evaluation and LLM API connector
 │   ├── mermaid_parser.js   # Parse Mermaid C4 diagram structures
-│   └── render.html         # Layout engine and SVG rendering template (loaded by Playwright)
+│   ├── render.html         # Layout engine and SVG rendering template (loaded by Playwright)
+│   └── utils.js            # Shared fetch-with-timeout helper
 ├── test/                   # Test diagrams (.mermaid) and test runner
 ├── test_outputs/           # Rendered PNGs, SVGs, and test result summary from npm test
 ├── LICENSE                 # MIT License

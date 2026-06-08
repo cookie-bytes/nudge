@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { chromium } from 'playwright';
 import { parseMermaidC4 } from '../src/mermaid_parser.js';
-import { analyzeLayout } from '../src/critic.js';
+import { analyzeLayout, getActiveModel } from '../src/critic.js';
 import { fetchWithTimeout } from '../src/utils.js';
 
 const LM_STUDIO_API = process.env.NUDGE_LLM_API || 'http://localhost:1234';
@@ -79,11 +79,12 @@ Respond with a JSON object strictly in this format:
 Remember: output ONLY the JSON object.`;
 
   try {
+    const activeModel = await getActiveModel(LM_STUDIO_API);
     const response = await fetchWithTimeout(`${LM_STUDIO_API}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: "any",
+        model: activeModel,
         messages: [
           { role: "system", content: "You are a visual design QA bot." },
           { role: "user", content: prompt }
