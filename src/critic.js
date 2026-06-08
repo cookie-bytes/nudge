@@ -515,9 +515,11 @@ ELKjs parameters you can optimize:
 Rules for optimization:
 - If node_overlap or tight_spacing are present, increase "elk.spacing.nodeNode" and "elk.layered.spacing.nodeNodeBetweenLayers" significantly (e.g., from 30 up to 80, 100, or 120).
 - If edge_node_crossing or edge_label_node_crossing is present, increase "elk.layered.spacing.nodeNodeBetweenLayers" and "elk.spacing.edgeNode" so connections and labels have room to route around components.
-- If poor_aspect_ratio is present:
-  * Too narrow/portrait (< 1.0): Increase horizontal node spacing ("elk.spacing.nodeNode") and/or decrease vertical node spacing ("elk.layered.spacing.nodeNodeBetweenLayers") to widen the layout, or change flow direction ("elk.direction") to "RIGHT" or "LEFT" if appropriate.
-  * Too wide/landscape (> 2.0): Decrease horizontal node spacing and/or increase vertical spacing.
+- If poor_aspect_ratio is present, note that spacing behaves differently depending on the flow direction:
+  * For "elk.direction": "DOWN" or "UP", "elk.spacing.nodeNode" controls horizontal spacing and "elk.layered.spacing.nodeNodeBetweenLayers" controls vertical spacing.
+  * For "elk.direction": "RIGHT" or "LEFT", "elk.spacing.nodeNode" controls vertical spacing and "elk.layered.spacing.nodeNodeBetweenLayers" controls horizontal spacing.
+  * If Too narrow/portrait (< 1.0): You want to increase width and/or decrease height. If DOWN/UP: increase "elk.spacing.nodeNode" or decrease "elk.layered.spacing.nodeNodeBetweenLayers". If RIGHT/LEFT: increase "elk.layered.spacing.nodeNodeBetweenLayers" or decrease "elk.spacing.nodeNode". Or change "elk.direction" to "RIGHT"/"LEFT".
+  * If Too wide/landscape (> 2.0): You want to decrease width and/or increase height. If DOWN/UP: decrease "elk.spacing.nodeNode" or increase "elk.layered.spacing.nodeNodeBetweenLayers". If RIGHT/LEFT: decrease "elk.layered.spacing.nodeNodeBetweenLayers" or increase "elk.spacing.nodeNode". Or change "elk.direction" to "DOWN"/"UP".
 - Output a JSON object matching the exact key names of layoutOptions, e.g.:
 {
   "elk.spacing.nodeNode": "100",
