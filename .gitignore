@@ -9,6 +9,8 @@ src/vendor/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+output.log
+*.log
 
 # Output directory for nudge results
 .nudge/

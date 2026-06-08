@@ -14,7 +14,9 @@ Nudge runs as a **CLI tool** for direct use from the terminal, and as a local **
 
 ## Example Output
 
-![Search Service Container Diagram](docs/search_service_container.png)
+| Before (Native Mermaid Layout) | After (Nudge AI-Optimized) |
+| :---: | :---: |
+| ![Mermaid Default Layout](docs/MermaidBefore.png) | ![Nudge Optimized Layout](docs/search_service_container.png) |
 
 ---
 

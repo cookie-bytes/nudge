@@ -2,8 +2,10 @@ import fs from 'fs';
 import path from 'path';
 import { chromium } from 'playwright';
 import { parseMermaidC4 } from '../src/mermaid_parser.js';
-import { analyzeLayout, getActiveModel } from '../src/critic.js';
+import { analyzeLayout } from '../src/core/geometry.js';
+import { getActiveModel } from '../src/core/llm_client.js';
 import { fetchWithTimeout } from '../src/utils.js';
+import { optimizeDiagram } from '../src/core/optimizer.js';
 
 const LM_STUDIO_API = process.env.NUDGE_LLM_API || 'http://127.0.0.1:1234';
 const TEST_DIR = path.resolve('test');
@@ -108,8 +110,151 @@ Remember: output ONLY the JSON object.`;
   }
 }
 
+async function runIntegrationTest() {
+  console.log("\n=== Running Offline Deterministic Integration Test ===");
+  
+  const mockOutputDir = path.resolve('test_outputs/integration_test');
+  if (fs.existsSync(mockOutputDir)) {
+    fs.rmSync(mockOutputDir, { recursive: true, force: true });
+  }
+
+  // Sample C4Context diagram with potential tight spacing
+  const mermaidDiagram = `
+    C4Context
+      title Sample Context Diagram
+      Person(user, "User", "A user of the system")
+      System(system, "Software System", "The software system under test")
+      Rel(user, system, "Uses", "HTTPS")
+  `;
+  const model = parseMermaidC4(mermaidDiagram);
+  // Force a small spacing initially to cause a layout warning / critic trigger
+  model.layoutOptions["elk.spacing.nodeNode"] = "10";
+  model.layoutOptions["elk.layered.spacing.nodeNodeBetweenLayers"] = "10";
+
+  // Mock global fetch
+  const originalFetch = globalThis.fetch;
+  let fetchCallCount = 0;
+
+  globalThis.fetch = async (url, options) => {
+    fetchCallCount++;
+    const body = JSON.parse(options.body || '{}');
+    
+    // Determine which API call this is
+    if (url.endsWith('/v1/models')) {
+      return {
+        ok: true,
+        json: async () => ({
+          data: [{ id: "mock-model" }]
+        })
+      };
+    }
+
+    if (url.endsWith('/v1/chat/completions')) {
+      const messages = body.messages || [];
+      const systemMessage = messages.find(m => m.role === 'system')?.content || '';
+
+      if (systemMessage.includes("expert AI visual layout optimizer")) {
+        // Optimization patch request
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{
+              message: {
+                content: JSON.stringify({
+                  "elk.spacing.nodeNode": "150",
+                  "elk.layered.spacing.nodeNodeBetweenLayers": "120"
+                })
+              }
+            }]
+          })
+        };
+      }
+      
+      if (systemMessage.includes("zone verification")) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{
+              message: {
+                content: JSON.stringify({
+                  zoneOverrides: {},
+                  swapCommands: [],
+                  rationale: "Assignments correct."
+                })
+              }
+            }]
+          })
+        };
+      }
+
+      if (systemMessage.includes("routing verification")) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{
+              message: {
+                content: JSON.stringify({
+                  swapCommands: [],
+                  rationale: "Ordering is optimal."
+                })
+              }
+            }]
+          })
+        };
+      }
+    }
+
+    // Default fallback
+    return {
+      ok: true,
+      json: async () => ({})
+    };
+  };
+
+  try {
+    const result = await optimizeDiagram({
+      diagramModel: model,
+      outputDir: mockOutputDir,
+      apiUrl: 'http://mock-api.local',
+      maxIterations: 3,
+      onLog: (msg) => console.log(`  [Integration Log] ${msg.trim()}`),
+    });
+
+    console.log("Integration test finished. Success:", result.success);
+    console.log("Iterations run:", result.history.length);
+    console.log("Fetch call count:", fetchCallCount);
+
+    if (!result.success) {
+      throw new Error("Integration test failed: optimization did not succeed.");
+    }
+    if (result.history.length < 2) {
+      throw new Error("Integration test failed: optimizer did not iterate to apply mock patch.");
+    }
+    if (!fs.existsSync(path.join(mockOutputDir, 'optimized.svg'))) {
+      throw new Error("Integration test failed: optimized.svg was not created.");
+    }
+    if (!fs.existsSync(path.join(mockOutputDir, 'optimized.png'))) {
+      throw new Error("Integration test failed: optimized.png was not created.");
+    }
+
+    console.log("✅ Integration test PASSED successfully!");
+    return true;
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
 async function runTests() {
   console.log("=== Nudge Diagram Layout Test Suite ===");
+  
+  // Run integration test first
+  try {
+    await runIntegrationTest();
+  } catch (err) {
+    console.error("❌ Integration test failed:", err.message);
+    process.exit(1);
+  }
+
   const useVisualLLM = process.env.NUDGE_VISUAL_TEST === 'true';
   console.log(`Mode: ${useVisualLLM ? 'Visual LLM-based critique' : 'Deterministic mathematical validation'}`);
   
@@ -127,8 +272,8 @@ async function runTests() {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   
-  const templatePath = path.resolve('src/render.html');
-  await page.goto(`file://${templatePath}`);
+  const templatePath = new URL('../src/render.html', import.meta.url).href;
+  await page.goto(templatePath);
   page.on('console', msg => {
     if (msg.type() === 'error' || msg.type() === 'warning') {
       console.log(`  PAGE ${msg.type().toUpperCase()}:`, msg.text());
