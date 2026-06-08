@@ -1227,6 +1227,43 @@ const elk = new ELK();
       const allComponents = flattenNodes(graph, DIAGRAM_H_PAD, 50).filter(n => n.type !== 'boundary');
       const placedLabels = [];
 
+      // Gather all edges and their exact drawn points to check for label-edge crossings
+      const flatEdges = flattenEdges(graph, DIAGRAM_H_PAD, 50);
+      const allEdgesPoints = flatEdges.map(fe => {
+        const pStart = fe.sections[0].startPoint;
+        const pEnd = fe.sections[0].endPoint;
+        const sourceId = fe.sources[0];
+        const targetId = fe.targets[0];
+        const getBaseNodeId = (id) => id.split('_port_')[0];
+        const srcNodeId = getBaseNodeId(sourceId);
+        const tgtNodeId = getBaseNodeId(targetId);
+
+        const collisionNodes = allComponents.filter(n => n.id !== srcNodeId && n.id !== tgtNodeId);
+        let hasCollision = false;
+        for (const comp of collisionNodes) {
+          if (lineSegmentIntersectsRect(pStart, pEnd, comp)) {
+            hasCollision = true;
+            break;
+          }
+        }
+
+        const points = [];
+        if (hasCollision) {
+          points.push(pStart);
+          if (fe.sections[0].bendPoints) {
+            points.push(...fe.sections[0].bendPoints);
+          }
+          points.push(pEnd);
+        } else {
+          points.push(pStart, pEnd);
+        }
+
+        return {
+          id: fe.id,
+          points
+        };
+      });
+
       // Helper to generate capitalized node type label, appending technology if present
       function getNodeTypeLabel(node) {
         let typeName = node.type;
@@ -1589,22 +1626,124 @@ const elk = new ELK();
                 return false;
               }
 
+              function lineSegmentIntersectsBox(p1, p2, box) {
+                const rx = box.x;
+                const ry = box.y;
+                const rw = box.width;
+                const rh = box.height;
+
+                function lineSegmentsIntersect(a1, a2, b1, b2) {
+                  const det = (a2.x - a1.x) * (b2.y - b1.y) - (b2.x - b1.x) * (a2.y - a1.y);
+                  if (det === 0) return false;
+                  const lambda = ((b2.y - b1.y) * (b2.x - a1.x) + (b1.x - b2.x) * (b2.y - a1.y)) / det;
+                  const gamma = ((a1.y - a2.y) * (b2.x - a1.x) + (a2.x - a1.x) * (b2.y - a1.y)) / det;
+                  return (0 <= lambda && lambda <= 1) && (0 <= gamma && gamma <= 1);
+                }
+
+                if (p1.x >= rx && p1.x <= rx + rw && p1.y >= ry && p1.y <= ry + rh) return true;
+                if (p2.x >= rx && p2.x <= rx + rw && p2.y >= ry && p2.y <= ry + rh) return true;
+
+                const rTopLeft = { x: rx, y: ry };
+                const rTopRight = { x: rx + rw, y: ry };
+                const rBotLeft = { x: rx, y: ry + rh };
+                const rBotRight = { x: rx + rw, y: ry + rh };
+
+                if (lineSegmentsIntersect(p1, p2, rTopLeft, rTopRight)) return true;
+                if (lineSegmentsIntersect(p1, p2, rTopRight, rBotRight)) return true;
+                if (lineSegmentsIntersect(p1, p2, rBotRight, rBotLeft)) return true;
+                if (lineSegmentsIntersect(p1, p2, rBotLeft, rTopLeft)) return true;
+
+                return false;
+              }
+
+              function checkLabelEdgeCollision(cx, cy, w, h) {
+                const labelBox = {
+                  x: cx - w / 2 - 4,
+                  y: cy - h / 2 - 2,
+                  width: w + 8,
+                  height: h + 4
+                };
+                for (const otherEdge of allEdgesPoints) {
+                  if (otherEdge.id === edge.id) continue;
+                  for (let i = 0; i < otherEdge.points.length - 1; i++) {
+                    const p1 = otherEdge.points[i];
+                    const p2 = otherEdge.points[i + 1];
+                    if (lineSegmentIntersectsBox(p1, p2, labelBox)) {
+                      return true;
+                    }
+                  }
+                }
+                return false;
+              }
+
               let midX, midY;
               let placed = false;
 
               const obstacles = [...allComponents, ...placedLabels];
 
-              // For straight diagonal lines (no collision), first preference is the exact middle of the line
+              // First Pass: Try to place label avoiding BOTH component collisions and other connection line crossings
               if (!hasCollision) {
                 const candMid = getPointAtFraction(0.5);
-                if (!checkLabelCollision(candMid.x, candMid.y, textWidth, textHeight, obstacles)) {
+                if (!checkLabelCollision(candMid.x, candMid.y, textWidth, textHeight, obstacles) &&
+                    !checkLabelEdgeCollision(candMid.x, candMid.y, textWidth, textHeight)) {
                   midX = candMid.x;
                   midY = candMid.y;
                   placed = true;
                 }
               }
 
-              // Rule 1: Try Target Anchor (dynamic anchorDist based on label size to prevent overlapping target arrow)
+              if (!placed && points.length >= 2) {
+                const pLastPrev = points[points.length - 2];
+                const pLastEnd = points[points.length - 1];
+                const lastIsHorizontal = Math.abs(pLastPrev.y - pLastEnd.y) < 2;
+                const targetAnchorDist = lastIsHorizontal
+                  ? Math.max(45, (textWidth / 2) + 20)
+                  : Math.max(45, (textHeight / 2) + 20);
+
+                if (totalLen >= 2 * targetAnchorDist) {
+                  const targetFraction = (totalLen - targetAnchorDist) / totalLen;
+                  const candA = getPointAtFraction(targetFraction);
+                  if (!checkLabelCollision(candA.x, candA.y, textWidth, textHeight, obstacles) &&
+                      !checkLabelEdgeCollision(candA.x, candA.y, textWidth, textHeight)) {
+                    midX = candA.x;
+                    midY = candA.y;
+                    placed = true;
+                  }
+                }
+              }
+
+              if (!placed && points.length >= 2) {
+                const pFirstStart = points[0];
+                const pFirstEnd = points[1];
+                const firstIsHorizontal = Math.abs(pFirstStart.y - pFirstEnd.y) < 2;
+                const sourceAnchorDist = firstIsHorizontal
+                  ? Math.max(45, (textWidth / 2) + 20)
+                  : Math.max(45, (textHeight / 2) + 20);
+
+                if (totalLen >= 2 * sourceAnchorDist) {
+                  const sourceFraction = sourceAnchorDist / totalLen;
+                  const candB = getPointAtFraction(sourceFraction);
+                  if (!checkLabelCollision(candB.x, candB.y, textWidth, textHeight, obstacles) &&
+                      !checkLabelEdgeCollision(candB.x, candB.y, textWidth, textHeight)) {
+                    midX = candB.x;
+                    midY = candB.y;
+                    placed = true;
+                  }
+                }
+              }
+
+              // Second Pass (Fallback): Try placing label avoiding component collisions, even if it overlaps other connection lines
+              if (!placed) {
+                if (!hasCollision) {
+                  const candMid = getPointAtFraction(0.5);
+                  if (!checkLabelCollision(candMid.x, candMid.y, textWidth, textHeight, obstacles)) {
+                    midX = candMid.x;
+                    midY = candMid.y;
+                    placed = true;
+                  }
+                }
+              }
+
               if (!placed && points.length >= 2) {
                 const pLastPrev = points[points.length - 2];
                 const pLastEnd = points[points.length - 1];
@@ -1624,7 +1763,6 @@ const elk = new ELK();
                 }
               }
 
-              // Rule 2: Try Source Anchor (dynamic anchorDist based on label size to prevent overlapping source arrow/node)
               if (!placed && points.length >= 2) {
                 const pFirstStart = points[0];
                 const pFirstEnd = points[1];
