@@ -6,10 +6,12 @@ C4Container
         SystemDb(coreDb, "Core DB", "Oracle", "Stores user profiles.")
         SystemQueue(notificationQueue, "Notification Queue", "RabbitMQ", "Stores notification events.")
         Container(apiGateway, "API Gateway", "Spring Cloud", "Routes API requests.")
+        Container(authService, "Auth Service", "Go, OAuth2, JWT", "Handles user authorization, session validation, and \"single sign-on\" functionality.")
     }
     ContainerDb_Ext(partnerDb, "Partner Database", "PostgreSQL", "Stores partner transactional sync data.")
 
     BiRel(customer, apiGateway, "Interacts with", "HTTPS")
+    Rel(apiGateway, authService, "Authenticates request using", "gRPC")
     Rel_Back(coreDb, apiGateway, "Pulls configurations", "JDBC")
     Rel_Down(apiGateway, notificationQueue, "Pushes event", "AMQP")
     Rel_Back(notificationQueue, partnerDb, "Feeds external sync", "JDBC/SSL")

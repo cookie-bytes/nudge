@@ -21,12 +21,15 @@ export function parseMermaidC4(mermaidString) {
   const activeBoundaries = [];
   const boundaryMap = new Map();
 
-  // Regular expression patterns
   const titleRegex = /^\s*title\s+(.+)$/i;
-  const boundaryRegex = /^\s*(?:(Enterprise|System|Container)_)?Boundary\((\w+),\s*"([^"]+)"\)\s*\{/i;
-  const nodeRegex = /^\s*(Person|Person_Ext|System|System_Ext|SystemDb|SystemDb_Ext|SystemQueue|SystemQueue_Ext|Container|Container_Ext|ContainerDb|ContainerDb_Ext|ContainerQueue|ContainerQueue_Ext|Component|ComponentDb|ComponentQueue)\((\w+),\s*"([^"]+)"(?:,\s*"([^"]*)")?(?:,\s*"([^"]*)")?\)/i;
-  const relRegex = /^\s*(?:Bi)?Rel(?:_[A-Za-z]+)?\((\w+),\s*(\w+),\s*"([^"]+)"(?:,\s*"([^"]*)")?\)/i;
   const ruleRegex = /^\s*%%\s*Rule:\s*(\w+)\s+(above|below)\s+(\w+)/i;
+
+  const nodeTypes = new Set([
+    'person', 'person_ext',
+    'system', 'system_ext', 'systemdb', 'systemdb_ext', 'systemqueue', 'systemqueue_ext',
+    'container', 'container_ext', 'containerdb', 'containerdb_ext', 'containerqueue', 'containerqueue_ext',
+    'component', 'componentdb', 'componentqueue'
+  ]);
 
   for (let line of lines) {
     line = line.trim();
@@ -61,108 +64,117 @@ export function parseMermaidC4(mermaidString) {
       continue;
     }
 
-    // 2. Boundary Open Match
-    const boundaryMatch = line.match(boundaryRegex);
-    if (boundaryMatch) {
-      const [_, boundaryType, id, label] = boundaryMatch;
-      const boundaryNode = {
-        id,
-        label,
-        type: 'boundary',
-        description: '',
-        children: []
-      };
-      
-      boundaryMap.set(id, boundaryNode);
-
-      if (activeBoundaries.length > 0) {
-        const parentId = activeBoundaries[activeBoundaries.length - 1];
-        const parentBoundary = boundaryMap.get(parentId);
-        parentBoundary.children.push(boundaryNode);
-      } else {
-        result.nodes.push(boundaryNode);
-      }
-
-      activeBoundaries.push(id);
-      continue;
-    }
-
-    // 3. Boundary Close Match
+    // 2. Boundary Close Match
     if (line === '}') {
       activeBoundaries.pop();
       continue;
     }
 
-    // 4. Node Match
-    const nodeMatch = line.match(nodeRegex);
-    if (nodeMatch) {
-      const [_, type, id, label, descOrTech, descAfterTech] = nodeMatch;
-      const typeLower = type.toLowerCase();
-      let mappedType = 'container';
-      if (typeLower === 'person' || typeLower === 'person_ext') {
-        mappedType = typeLower === 'person' ? 'person' : 'external';
-      } else if (
-        typeLower === 'system_ext' ||
-        typeLower === 'container_ext' ||
-        typeLower === 'systemdb_ext' ||
-        typeLower === 'containerdb_ext' ||
-        typeLower === 'systemqueue_ext' ||
-        typeLower === 'containerqueue_ext'
-      ) {
-        mappedType = 'external';
-      } else if (typeLower === 'containerdb' || typeLower === 'systemdb' || typeLower === 'componentdb') {
-        mappedType = 'database';
-      } else if (typeLower === 'containerqueue' || typeLower === 'systemqueue' || typeLower === 'componentqueue') {
-        mappedType = 'message_bus';
-      } else if (typeLower === 'system' || typeLower === 'container' || typeLower === 'component') {
-        mappedType = 'container';
-      }
-
-      // Support optional technology parameter: if 4 arguments are provided, the 3rd is technology and 4th is description.
-      // Otherwise, the 3rd is description.
-      let tech = '';
-      let description = '';
-      if (descAfterTech !== undefined) {
-        tech = descOrTech || '';
-        description = descAfterTech || '';
-      } else {
-        description = descOrTech || '';
-      }
-
-      const componentNode = {
-        id,
-        label,
-        type: mappedType,
-        tech,
-        description,
-        width: 200,
-        height: mappedType === 'person' ? 200 : (mappedType === 'database' || mappedType === 'container' || mappedType === 'external') ? 140 : 80
-      };
-
-      if (activeBoundaries.length > 0) {
-        const parentId = activeBoundaries[activeBoundaries.length - 1];
-        const parentBoundary = boundaryMap.get(parentId);
-        parentBoundary.children.push(componentNode);
-      } else {
-        result.nodes.push(componentNode);
-      }
-      continue;
+    // 3. Boundary Open or Node or Relationship
+    const isBoundaryOpen = line.endsWith('{');
+    let cleanLine = line;
+    if (isBoundaryOpen) {
+      cleanLine = line.slice(0, -1).trim();
     }
 
-    // 5. Relationship Match
-    const relMatch = line.match(relRegex);
-    if (relMatch) {
-      const [_, from, to, label, tech] = relMatch;
-      let edgeLabel = label;
-      if (tech) {
-        edgeLabel = `${label} [${tech}]`;
+    const macroMatch = cleanLine.match(/^\s*(\w+)\((.*)\)\s*$/);
+    if (macroMatch) {
+      const macroName = macroMatch[1];
+      const argsStr = macroMatch[2];
+      const args = parseArgs(argsStr);
+      const macroLower = macroName.toLowerCase();
+
+      // Case A: Boundary Open
+      if (macroLower.endsWith('boundary')) {
+        const [id, label] = args;
+        const boundaryNode = {
+          id,
+          label,
+          type: 'boundary',
+          description: '',
+          children: []
+        };
+        
+        boundaryMap.set(id, boundaryNode);
+
+        if (activeBoundaries.length > 0) {
+          const parentId = activeBoundaries[activeBoundaries.length - 1];
+          const parentBoundary = boundaryMap.get(parentId);
+          parentBoundary.children.push(boundaryNode);
+        } else {
+          result.nodes.push(boundaryNode);
+        }
+
+        activeBoundaries.push(id);
+        continue;
       }
-      result.edges.push({
-        from,
-        to,
-        label: edgeLabel
-      });
-      continue;
+
+      // Case B: Node Match
+      if (nodeTypes.has(macroLower)) {
+        const [id, label, descOrTech, descAfterTech] = args;
+        let mappedType = 'container';
+        if (macroLower === 'person' || macroLower === 'person_ext') {
+          mappedType = macroLower === 'person' ? 'person' : 'external';
+        } else if (
+          macroLower === 'system_ext' ||
+          macroLower === 'container_ext' ||
+          macroLower === 'systemdb_ext' ||
+          macroLower === 'containerdb_ext' ||
+          macroLower === 'systemqueue_ext' ||
+          macroLower === 'containerqueue_ext'
+        ) {
+          mappedType = 'external';
+        } else if (macroLower === 'containerdb' || macroLower === 'systemdb' || macroLower === 'componentdb') {
+          mappedType = 'database';
+        } else if (macroLower === 'containerqueue' || macroLower === 'systemqueue' || macroLower === 'componentqueue') {
+          mappedType = 'message_bus';
+        } else if (macroLower === 'system' || macroLower === 'container' || macroLower === 'component') {
+          mappedType = 'container';
+        }
+
+        let tech = '';
+        let description = '';
+        if (descAfterTech !== undefined) {
+          tech = descOrTech || '';
+          description = descAfterTech || '';
+        } else {
+          description = descOrTech || '';
+        }
+
+        const componentNode = {
+          id,
+          label,
+          type: mappedType,
+          tech,
+          description,
+          width: 200,
+          height: mappedType === 'person' ? 200 : (mappedType === 'database' || mappedType === 'container' || mappedType === 'external') ? 140 : 80
+        };
+
+        if (activeBoundaries.length > 0) {
+          const parentId = activeBoundaries[activeBoundaries.length - 1];
+          const parentBoundary = boundaryMap.get(parentId);
+          parentBoundary.children.push(componentNode);
+        } else {
+          result.nodes.push(componentNode);
+        }
+        continue;
+      }
+
+      // Case C: Relationship Match
+      if (macroLower.endsWith('rel') || macroLower.includes('rel_')) {
+        const [from, to, label, tech] = args;
+        let edgeLabel = label || '';
+        if (tech) {
+          edgeLabel = `${label} [${tech}]`;
+        }
+        result.edges.push({
+          from,
+          to,
+          label: edgeLabel
+        });
+        continue;
+      }
     }
   }
 
@@ -187,4 +199,39 @@ function normalizeTypeName(name) {
   if (lower === 'database' || lower === 'containerdb' || lower === 'systemdb' || lower === 'componentdb') return 'database';
   if (lower === 'message_bus' || lower === 'containerqueue' || lower === 'messagebus' || lower === 'systemqueue' || lower === 'componentqueue') return 'message_bus';
   return trimmed; // Preserve case for custom node IDs!
+}
+
+// Robust tokenizer to parse CSV-like macro arguments, respecting quotes and escaped quotes
+function parseArgs(argsStr) {
+  const args = [];
+  let current = '';
+  let inQuotes = false;
+  
+  for (let i = 0; i < argsStr.length; i++) {
+    const char = argsStr[i];
+    if (char === '"') {
+      if (i > 0 && argsStr[i - 1] === '\\') {
+        current += char;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      args.push(current.trim());
+      current = '';
+    } else {
+      if (char === '\\' && i + 1 < argsStr.length && argsStr[i + 1] === '"') {
+        continue;
+      }
+      current += char;
+    }
+  }
+  args.push(current.trim());
+  
+  return args.map(arg => {
+    let clean = arg;
+    if (clean.startsWith('"') && clean.endsWith('"')) {
+      clean = clean.slice(1, -1);
+    }
+    return clean;
+  });
 }
