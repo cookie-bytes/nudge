@@ -167,6 +167,10 @@ Each edge is routed by `routeEdge(e)`, which uses absolute coordinates (converti
 
 **Hybrid route scoring:** for internal boundary edges, the router compares the standard route, a direct route, a row-gap dogleg, and left/right gutter detours. Candidates are scored by node crossings first, then a weighted mix of existing edge overlaps/crossings, bend count, and path length. This keeps direct-looking lines when they are clean, while only using detours for routes that would cut through nodes or pile onto existing line corridors.
 
+**Lane reservation:** after a route is selected, `reserveRouteLanes` may offset interior horizontal or vertical segments by compact amounts when they overlap already-routed segments. Start and end segments stay anchored so arrows remain visually attached to their source and target nodes.
+
+**Second-pass rerouting:** after all edges have an initial route, `improveRoutedSections` scores the complete route set, retries only the worst few edge-conflict offenders, and keeps a reroute only when the global score improves without adding node crossings or excessive route length. This removes remaining shared corridors without turning edge routing into a hard no-crossing constraint.
+
 | Spatial relationship | Route shape |
 |----------------------|-------------|
 | Target directly below source | L-shape: source bottom → horizontal jog at midpoint → target top |
@@ -321,5 +325,5 @@ All edge coordinates are absolute. The `drawGraph` function uses `flattenNodes` 
 - **Single boundary only:** The engine assumes exactly one `Boundary(...)` node at the top level. Nested boundaries are not supported in container mode.
 - **No cycle detection warning:** A cycle in the boundary's internal edges is silently broken by dumping remaining nodes into a final layer.
 - **SHIFT_ZONE not fully wired in routing pass:** `SHIFT_ZONE` commands from Checkpoint 2 are currently fed into `_layoutOverrides.swapCommands`, which `layoutContainerDiagram` ignores (it only processes `SWAP_NODE_ORDER` from `swapCommands`). A future pass should re-read `swapCommands` for `SHIFT_ZONE` and apply them as `zoneOverrides`.
-- **Edge routing is heuristic:** The orthogonal router has no obstacle avoidance — it routes by spatial relationship only. Edges may still cross left/right overflow nodes if those nodes happen to sit in the same vertical band as a cross-boundary edge's path.
-- **Post-render edge-to-edge scoring is limited:** The renderer's candidate scorer penalizes overlaps and crossings against already-routed edges, but the post-render geometric critic (`analyzeLayout` in `src/core/geometry.js`) still grades node overlaps, edge-node crossings, label-node overlaps, spacing, and aspect ratio. It does not currently fail tests on edge-edge crossings, so renderer changes that affect line corridors should still be reviewed visually.
+- **Edge routing is heuristic:** The hybrid router scores route candidates, reserves lanes, and performs bounded second-pass rerouting, but it is still not a full obstacle-avoidance engine. Edges may still cross when avoiding them would require long or visually awkward detours.
+- **Post-render edge-to-edge scoring is observational:** The renderer uses edge-conflict scoring while choosing routes, and the test suite reports edge-edge crossings, overlaps, overlap pixels, label-edge intersections, bends, and route length. These metrics do not currently fail tests, so renderer changes that affect line corridors should still be reviewed visually.

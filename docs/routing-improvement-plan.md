@@ -26,6 +26,8 @@ This happens after route selection, so route scoring still chooses clean paths a
 
 ## Phase 3 — Second-Pass Rerouting
 
+Status: implemented.
+
 After all edges have a first route:
 
 1. Score every edge against the complete routed graph.
@@ -33,7 +35,7 @@ After all edges have a first route:
 3. Re-run route selection for only those edges while treating the rest of the graph as fixed.
 4. Keep a reroute only if total edge-quality score improves.
 
-This gives the renderer a local optimization loop without turning it into a full graph-routing engine.
+This gives the renderer a local optimization loop without turning it into a full graph-routing engine. The first experiment keeps reroutes conservative: only the worst few edge-conflict offenders are retried, reroutes are rejected if they introduce extra node crossings, and total route length may not grow beyond a small bound.
 
 ## Later Ideas
 

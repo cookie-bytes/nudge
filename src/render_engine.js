@@ -454,6 +454,131 @@ const elk = new ELK();
         return pointsToSection(points);
       }
 
+      function sectionRouteLength(section) {
+        return pointsToSegments(sectionToPoints(section))
+          .reduce((sum, segment) => {
+            const dx = segment.b.x - segment.a.x;
+            const dy = segment.b.y - segment.a.y;
+            return sum + Math.sqrt(dx * dx + dy * dy);
+          }, 0);
+      }
+
+      function sectionNodeCrossings(section, edge) {
+        let crossings = 0;
+        for (const segment of pointsToSegments(sectionToPoints(section))) {
+          for (const child of children) {
+            if (child.id === edge.from || child.id === edge.to) continue;
+            const childAbsX = bndX + childPos[child.id].x;
+            const childAbsY = bndY + childPos[child.id].y;
+            const rect = { x: childAbsX, y: childAbsY, width: child.width || 200, height: child.height || 80 };
+            if (lineSegmentIntersectsRect(segment.a, segment.b, rect)) {
+              crossings++;
+              break;
+            }
+          }
+        }
+        return crossings;
+      }
+
+      function setRoutedSegmentsForSections(sections, excludeIndex = -1) {
+        routedEdgeSegments.length = 0;
+        sections.forEach((section, idx) => {
+          if (!section || idx === excludeIndex) return;
+          routedEdgeSegments.push(...pointsToSegments(sectionToPoints(section)));
+        });
+      }
+
+      function evaluateRouteSet(sections) {
+        const edgeScores = sections.map((section, idx) => ({
+          idx,
+          nodeCrossings: sectionNodeCrossings(section, allEdges[idx]),
+          edgeCrossings: 0,
+          edgeOverlaps: 0,
+          edgeOverlapPx: 0,
+          routeLength: sectionRouteLength(section)
+        }));
+        const segmentsByEdge = sections.map(section => pointsToSegments(sectionToPoints(section)));
+
+        for (let i = 0; i < segmentsByEdge.length; i++) {
+          for (let j = i + 1; j < segmentsByEdge.length; j++) {
+            for (const segA of segmentsByEdge[i]) {
+              for (const segB of segmentsByEdge[j]) {
+                const overlapPx = segmentOverlapLength(segA, segB);
+                if (overlapPx > 20) {
+                  edgeScores[i].edgeOverlaps++;
+                  edgeScores[j].edgeOverlaps++;
+                  edgeScores[i].edgeOverlapPx += overlapPx;
+                  edgeScores[j].edgeOverlapPx += overlapPx;
+                } else if (segmentsCross(segA, segB)) {
+                  edgeScores[i].edgeCrossings++;
+                  edgeScores[j].edgeCrossings++;
+                }
+              }
+            }
+          }
+        }
+
+        const totals = edgeScores.reduce((acc, edgeScore) => {
+          acc.nodeCrossings += edgeScore.nodeCrossings;
+          acc.edgeCrossings += edgeScore.edgeCrossings;
+          acc.edgeOverlaps += edgeScore.edgeOverlaps;
+          acc.edgeOverlapPx += edgeScore.edgeOverlapPx;
+          acc.totalRouteLength += edgeScore.routeLength;
+          edgeScore.score =
+            edgeScore.nodeCrossings * 100000 +
+            edgeScore.edgeOverlaps * 600 +
+            edgeScore.edgeOverlapPx * 2 +
+            edgeScore.edgeCrossings * 180 +
+            edgeScore.routeLength * 0.01;
+          return acc;
+        }, {
+          nodeCrossings: 0,
+          edgeCrossings: 0,
+          edgeOverlaps: 0,
+          edgeOverlapPx: 0,
+          totalRouteLength: 0
+        });
+
+        totals.edgeScores = edgeScores;
+        totals.score =
+          totals.nodeCrossings * 100000 +
+          totals.edgeOverlaps * 600 +
+          totals.edgeOverlapPx * 2 +
+          totals.edgeCrossings * 180 +
+          totals.totalRouteLength * 0.01;
+        return totals;
+      }
+
+      function improveRoutedSections(sections) {
+        let current = evaluateRouteSet(sections);
+        const maxReroutes = Math.min(5, Math.ceil(allEdges.length * 0.2));
+        const candidates = [...current.edgeScores]
+          .filter(edgeScore => edgeScore.edgeCrossings > 0 || edgeScore.edgeOverlaps > 0 || edgeScore.nodeCrossings > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, maxReroutes);
+
+        for (const candidate of candidates) {
+          setRoutedSegmentsForSections(sections, candidate.idx);
+          const rerouted = reserveRouteLanes(routeEdge(allEdges[candidate.idx], candidate.idx), allEdges[candidate.idx]);
+          const nextSections = [...sections];
+          nextSections[candidate.idx] = rerouted;
+          const next = evaluateRouteSet(nextSections);
+          const routeLengthLimit = current.totalRouteLength * 1.12;
+
+          if (
+            next.nodeCrossings <= current.nodeCrossings &&
+            next.totalRouteLength <= routeLengthLimit &&
+            next.score < current.score - 1
+          ) {
+            sections[candidate.idx] = rerouted;
+            current = next;
+          }
+        }
+
+        setRoutedSegmentsForSections(sections);
+        return sections;
+      }
+
       function routeEdge(e, idx) {
         const sp = getAbs(e.from), tp = getAbs(e.to);
         const ss = getSz(e.from),  ts = getSz(e.to);
@@ -802,7 +927,15 @@ const elk = new ELK();
           return { startPoint: {x: scx, y: sTop}, endPoint: {x: tcx, y: tTop}, bendPoints: [{x: scx, y: routeY}, {x: tcx, y: routeY}] };
         })();
 
-        if (checkCollision(standardRoute) && (leftSet.has(e.from) || rightSet.has(e.from) || leftSet.has(e.to) || rightSet.has(e.to))) {
+        const standardRouteConflicts = routeEdgeConflictStats(standardRoute);
+        if (
+          (leftSet.has(e.from) || rightSet.has(e.from) || leftSet.has(e.to) || rightSet.has(e.to)) &&
+          (
+            checkCollision(standardRoute) ||
+            standardRouteConflicts.edgeCrossings > 0 ||
+            standardRouteConflicts.edgeOverlaps > 0
+          )
+        ) {
           const candidates = [standardRoute];
           const xCandidates = [
             bndX - H_GAP / 2,
@@ -880,14 +1013,19 @@ const elk = new ELK();
         children: children.map(n => ({ id: n.id, x: childPos[n.id].x, y: childPos[n.id].y, width: n.width || 200, height: n.height || 80, type: n.type, label: n.label, tech: n.tech || '', description: n.description || '', edges: [] }))
       });
 
+      const routedSections = [];
       for (let idx = 0; idx < allEdges.length; idx++) {
         const e = allEdges[idx];
         const section = reserveRouteLanes(routeEdge(e, idx), e);
-        const sectionPoints = [section.startPoint, ...(section.bendPoints || []), section.endPoint];
-        routedEdgeSegments.push(...sectionPoints.slice(0, -1).map((p, i) => ({
-          a: p,
-          b: sectionPoints[i + 1]
-        })));
+        routedSections[idx] = section;
+        routedEdgeSegments.push(...pointsToSegments(sectionToPoints(section)));
+      }
+
+      improveRoutedSections(routedSections);
+
+      for (let idx = 0; idx < allEdges.length; idx++) {
+        const e = allEdges[idx];
+        const section = routedSections[idx];
         const labels = e.label ? (() => {
           const match = e.label.match(/^(.*?)\s*\[(.*?)\]$/);
           if (match) {
