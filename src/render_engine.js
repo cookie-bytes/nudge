@@ -132,26 +132,96 @@ const elk = new ELK();
 
       const plan = buildContainerZonePlan(diagramData);
       if (!plan) return null;
-      const { boundaryNode, children, childIds, allEdges, extNodes, extMap, layers, nodeLayerIdx, nodeColIdx } = plan;
+      const { boundaryNode, children, childIds, allEdges, intEdges, extNodes, extMap, layers, nodeLayerIdx, nodeColIdx } = plan;
       let { aboveNodes, belowNodes, leftNodes, rightNodes } = plan;
 
-      // Boundary dimensions
+      const incomingEdges = new Map();
+      const outgoingEdges = new Map();
+      allEdges.forEach((e, idx) => {
+        if (!incomingEdges.has(e.to)) incomingEdges.set(e.to, []);
+        incomingEdges.get(e.to).push(idx);
+
+        if (!outgoingEdges.has(e.from)) outgoingEdges.set(e.from, []);
+        outgoingEdges.get(e.from).push(idx);
+      });
+
+      // Step up the width of a message bus when it has 3+ connections, so a
+      // busy hub reads as a wide spine while a low-traffic bus stays at the
+      // standard container size. Corner-anchor buses (≥4 connections, placed
+      // in the bottom-right) get an extra bump to 3× so the hub reads clearly
+      // and gives edges from multiple directions room to land.
+      for (const layer of layers) {
+        for (const n of layer) {
+          if (n.type !== 'message_bus') continue;
+          const connections = allEdges.reduce(
+            (count, e) => count + (e.from === n.id || e.to === n.id ? 1 : 0), 0);
+          if (n._layoutBaseWidth === undefined) n._layoutBaseWidth = n.width || 200;
+          if (n._cornerAnchor) n.width = n._layoutBaseWidth * 3;
+          else if (connections >= 3) n.width = n._layoutBaseWidth * 2;
+          else n.width = n._layoutBaseWidth;
+        }
+      }
+
+      // Boundary dimensions. Use a tighter vertical gap before a db row so
+      // the database visually pairs with its parent service rather than
+      // floating in its own band of whitespace.
+      const DB_V_GAP = Math.round(V_GAP / 2);
+      const isDbLayer = (l) => l.length > 0 && l.every(n => n.type === 'database');
+      const gapBefore = (i) => i === 0 ? 0 : (isDbLayer(layers[i]) ? DB_V_GAP : V_GAP);
       const layerW = layers.map(l => l.reduce((s, n) => s + (n.width || 200), 0) + Math.max(0, l.length - 1) * H_GAP);
       const layerH = layers.map(l => Math.max(...l.map(n => n.height || 80)));
       const maxLW  = Math.max(...layerW, 200);
       const bndW   = maxLW + 2 * B_PAD;
-      const bndH   = layerH.reduce((s, h) => s + h, 0) + Math.max(0, layers.length - 1) * V_GAP + B_PAD + B_BOT;
+      const bndH   = layerH.reduce((s, h) => s + h, 0) + layers.reduce((s, _, i) => s + gapBefore(i), 0) + B_PAD + B_BOT;
 
-      // Position children relative to boundary
+      // Position children relative to boundary. Database rows override the
+      // standard centred layout: each db is placed at the x of its deepest
+      // connecting service so it sits directly underneath its owner; ties
+      // pack left-to-right from the leftmost parent's x.
       const childPos = {};
       let ry = B_PAD;
       for (let i = 0; i < layers.length; i++) {
-        let rx = (bndW - layerW[i]) / 2;
-        for (const n of layers[i]) {
-          childPos[n.id] = { x: rx, y: ry };
-          rx += (n.width || 200) + H_GAP;
+        ry += gapBefore(i);
+        const layer = layers[i];
+        const isDbRow = isDbLayer(layer);
+        if (isDbRow) {
+          const placements = layer.map(db => {
+            let deepest = null, deepestRow = -1;
+            for (const e of intEdges) {
+              const otherId = e.from === db.id ? e.to : (e.to === db.id ? e.from : null);
+              if (!otherId) continue;
+              const otherNode = children.find(c => c.id === otherId);
+              if (!otherNode || !childPos[otherNode.id]) continue;
+              const rowIdx = layers.findIndex(l => l.includes(otherNode));
+              if (rowIdx > deepestRow) { deepestRow = rowIdx; deepest = otherNode; }
+            }
+            const parentX = deepest && childPos[deepest.id] ? childPos[deepest.id].x : (bndW - (db.width || 200)) / 2;
+            return { db, parentX };
+          });
+          placements.sort((a, b) => a.parentX - b.parentX);
+          let nextX = -Infinity;
+          for (const p of placements) {
+            const x = Math.max(p.parentX, nextX);
+            childPos[p.db.id] = { x, y: ry };
+            nextX = x + (p.db.width || 200) + H_GAP;
+          }
+        } else if (layer.some(n => n._cornerAnchor)) {
+          // Corner-anchor row (e.g. high-connectivity message bus): right-align
+          // so the node hugs the bottom-right of the boundary rather than
+          // centring under the other rows.
+          let rx = bndW - B_PAD - layerW[i];
+          for (const n of layer) {
+            childPos[n.id] = { x: rx, y: ry };
+            rx += (n.width || 200) + H_GAP;
+          }
+        } else {
+          let rx = (bndW - layerW[i]) / 2;
+          for (const n of layer) {
+            childPos[n.id] = { x: rx, y: ry };
+            rx += (n.width || 200) + H_GAP;
+          }
         }
-        ry += layerH[i] + V_GAP;
+        ry += layerH[i];
       }
 
       // ── Phase 2b: Row widths and diagram dimensions ────────────────────────
@@ -212,120 +282,343 @@ const elk = new ELK();
         const n = extMap.get(id) || children.find(c => c.id === id);
         return n ? { w: n.width || 200, h: n.height || 80 } : { w: 200, h: 80 };
       }
+      function getNode(id) {
+        return extMap.get(id) || children.find(c => c.id === id);
+      }
 
       const leftSet  = new Set(leftNodes.map(n => n.id));
       const rightSet = new Set(rightNodes.map(n => n.id));
 
-      function routeEdge(e) {
+      function routeEdge(e, idx) {
         const sp = getAbs(e.from), tp = getAbs(e.to);
         const ss = getSz(e.from),  ts = getSz(e.to);
-        const scx = sp.x + ss.w / 2, tcx = tp.x + ts.w / 2;
+
+        // Distribute entry and exit points horizontally to prevent overlaps
+        const inEdges = incomingEdges.get(e.to) || [idx];
+        const inIdx = inEdges.indexOf(idx);
+        const inCount = inEdges.length;
+        const entryX = (inCount > 1 && inIdx !== -1) ? tp.x + (ts.w / (inCount + 1)) * (inIdx + 1) : (tp.x + ts.w / 2);
+
+        const outEdges = outgoingEdges.get(e.from) || [idx];
+        const outIdx = outEdges.indexOf(idx);
+        const outCount = outEdges.length;
+        const exitX = (outCount > 1 && outIdx !== -1) ? sp.x + (ss.w / (outCount + 1)) * (outIdx + 1) : (sp.x + ss.w / 2);
+
+        const scx = exitX;
+        const tcx = entryX;
         const sBot = sp.y + ss.h,    tTop = tp.y;
         const sTop = sp.y,           tBot = tp.y + ts.h;
         const sCy  = sp.y + ss.h / 2, tCy = tp.y + ts.h / 2;
 
-        // Horizontal Z/S-curve routing for left/right column nodes
-        if (leftSet.has(e.from) || rightSet.has(e.from) || leftSet.has(e.to) || rightSet.has(e.to)) {
-          const isLeft = leftSet.has(e.from) || leftSet.has(e.to);
-          const midX = isLeft ? (bndX - H_GAP / 2) : (bndX + bndW + H_GAP / 2);
-
-          if (sp.x + ss.w <= tp.x + 10) {
-            // Left→Right: exit right-center of source, enter left-center of target
-            const startX = sp.x + ss.w, startY = sCy;
-            const endX = tp.x, endY = tCy;
-            if (Math.abs(startY - endY) < 5)
-              return { startPoint: {x: startX, y: startY}, endPoint: {x: endX, y: endY}, bendPoints: [] };
-            return { startPoint: {x: startX, y: startY}, endPoint: {x: endX, y: endY},
-                     bendPoints: [{x: midX, y: startY}, {x: midX, y: endY}] };
-          } else {
-            // Right→Left: exit left-center of source, enter right-center of target
-            const startX = sp.x, startY = sCy;
-            const endX = tp.x + ts.w, endY = tCy;
-            if (Math.abs(startY - endY) < 5)
-              return { startPoint: {x: startX, y: startY}, endPoint: {x: endX, y: endY}, bendPoints: [] };
-            return { startPoint: {x: startX, y: startY}, endPoint: {x: endX, y: endY},
-                     bendPoints: [{x: midX, y: startY}, {x: midX, y: endY}] };
-          }
-        }
-
-        // Check if internal edge spans multiple layers
-        if (childIds.has(e.from) && childIds.has(e.to)) {
-          const srcLayer = nodeLayerIdx.get(e.from);
-          const tgtLayer = nodeLayerIdx.get(e.to);
-          if (srcLayer !== undefined && tgtLayer !== undefined) {
-            if (tgtLayer - srcLayer > 1) {
-              // Spans multiple layers downwards
-              if (Math.abs(scx - tcx) < 3) {
-                // Vertically aligned -> route horizontally around intermediate nodes
-                const offset = 120;
-                const gapY1 = bndY + childPos[e.from].y + ss.h + V_GAP / 2;
-                const gapY2 = bndY + childPos[e.to].y - V_GAP / 2;
-                return {
-                  startPoint: { x: scx, y: sBot },
-                  endPoint: { x: tcx, y: tTop },
-                  bendPoints: [
-                    { x: scx, y: gapY1 },
-                    { x: scx + offset, y: gapY1 },
-                    { x: scx + offset, y: gapY2 },
-                    { x: tcx, y: gapY2 }
-                  ]
-                };
-              } else {
-                // Route vertical down to target gap first, then horizontal jog
-                const gapY2 = bndY + childPos[e.to].y - V_GAP / 2;
-                return {
-                  startPoint: { x: scx, y: sBot },
-                  endPoint: { x: tcx, y: tTop },
-                  bendPoints: [{ x: scx, y: gapY2 }, { x: tcx, y: gapY2 }]
-                };
-              }
-            } else if (srcLayer - tgtLayer > 1) {
-              // Spans multiple layers upwards
-              if (Math.abs(scx - tcx) < 3) {
-                const offset = 120;
-                const gapY1 = bndY + childPos[e.from].y - V_GAP / 2;
-                const gapY2 = bndY + childPos[e.to].y + ts.h + V_GAP / 2;
-                return {
-                  startPoint: { x: scx, y: sTop },
-                  endPoint: { x: tcx, y: tBot },
-                  bendPoints: [
-                    { x: scx, y: gapY1 },
-                    { x: scx + offset, y: gapY1 },
-                    { x: scx + offset, y: gapY2 },
-                    { x: tcx, y: gapY2 }
-                  ]
-                };
-              } else {
-                // Route vertical up to target gap first, then horizontal jog
-                const gapY2 = bndY + childPos[e.to].y + ts.h + V_GAP / 2;
-                return {
-                  startPoint: { x: scx, y: sTop },
-                  endPoint: { x: tcx, y: tBot },
-                  bendPoints: [{ x: scx, y: gapY2 }, { x: tcx, y: gapY2 }]
-                };
+        function routeCrossingCount(route) {
+          let crossings = 0;
+          const pts = [route.startPoint, ...(route.bendPoints || []), route.endPoint];
+          for (let i = 0; i < pts.length - 1; i++) {
+            const p1 = pts[i], p2 = pts[i+1];
+            for (const child of children) {
+              if (child.id === e.from || child.id === e.to) continue;
+              const childAbsX = bndX + childPos[child.id].x;
+              const childAbsY = bndY + childPos[child.id].y;
+              const rect = { x: childAbsX, y: childAbsY, width: child.width || 200, height: child.height || 80 };
+              if (lineSegmentIntersectsRect(p1, p2, rect)) {
+                crossings++;
+                break;
               }
             }
           }
+          return crossings;
+        }
+        function checkCollision(route) {
+          return routeCrossingCount(route) > 0;
+        }
+        function routeLength(route) {
+          const pts = [route.startPoint, ...(route.bendPoints || []), route.endPoint];
+          let len = 0;
+          for (let i = 0; i < pts.length - 1; i++) {
+            const dx = pts[i + 1].x - pts[i].x;
+            const dy = pts[i + 1].y - pts[i].y;
+            len += Math.sqrt(dx * dx + dy * dy);
+          }
+          return len;
+        }
+        function horizontalLaneBelowSource() {
+          const nextTop = children
+            .filter(child => child.id !== e.from && child.id !== e.to)
+            .map(child => bndY + childPos[child.id].y)
+            .filter(y => y >= sBot)
+            .sort((a, b) => a - b)[0];
+          return nextTop === undefined ? sBot + V_GAP / 2 : (sBot + nextTop) / 2;
+        }
+        function horizontalLaneAboveTarget() {
+          const prevBottom = children
+            .filter(child => child.id !== e.from && child.id !== e.to)
+            .map(child => bndY + childPos[child.id].y + (child.height || 80))
+            .filter(y => y <= tTop)
+            .sort((a, b) => b - a)[0];
+          return prevBottom === undefined ? tTop - V_GAP / 2 : (prevBottom + tTop) / 2;
+        }
+        function horizontalLaneAboveSource() {
+          const prevBottom = children
+            .filter(child => child.id !== e.from && child.id !== e.to)
+            .map(child => bndY + childPos[child.id].y + (child.height || 80))
+            .filter(y => y <= sTop)
+            .sort((a, b) => b - a)[0];
+          return prevBottom === undefined ? sTop - V_GAP / 2 : (prevBottom + sTop) / 2;
+        }
+        function horizontalLaneBelowTarget() {
+          const nextTop = children
+            .filter(child => child.id !== e.from && child.id !== e.to)
+            .map(child => bndY + childPos[child.id].y)
+            .filter(y => y >= tBot)
+            .sort((a, b) => a - b)[0];
+          return nextTop === undefined ? tBot + V_GAP / 2 : (tBot + nextTop) / 2;
+        }
+        function chooseBestRoute(candidates) {
+          return candidates
+            .filter(Boolean)
+            .map((route, order) => ({
+              route,
+              order,
+              crossings: routeCrossingCount(route),
+              bends: route.bendPoints ? route.bendPoints.length : 0,
+              length: routeLength(route) + (route._scoreBias || 0)
+            }))
+            .sort((a, b) =>
+              a.crossings - b.crossings ||
+              a.bends - b.bends ||
+              a.length - b.length ||
+              a.order - b.order
+            )
+            .map(({ route }) => {
+              const { _scoreBias, ...cleanRoute } = route;
+              return cleanRoute;
+            })[0];
         }
 
-        if (tp.y >= sp.y + ss.h - 2) {
-          // Target below
-          if (Math.abs(scx - tcx) < 3) return { startPoint: {x: scx, y: sBot}, endPoint: {x: tcx, y: tTop}, bendPoints: [] };
-          const my = (sBot + tTop) / 2;
-          return { startPoint: {x: scx, y: sBot}, endPoint: {x: tcx, y: tTop}, bendPoints: [{x: scx, y: my}, {x: tcx, y: my}] };
+        // Horizontal Z/S-curve routing for left/right column nodes
+        const standardRoute = (() => {
+          const tgtNode = getNode(e.to);
+          // Parent→db direct vertical: if the source sits directly above a
+          // database target, route from the bottom-centre of the parent
+          // straight into the top-centre of the db, bypassing the standard
+          // edge-distribution logic so the pairing reads as a clean drop.
+          if (tgtNode && tgtNode.type === 'database' && tp.y >= sp.y + ss.h - 2) {
+            const srcCx = sp.x + ss.w / 2;
+            const tgtCx = tp.x + ts.w / 2;
+            if (Math.abs(srcCx - tgtCx) < Math.min(ss.w, ts.w) / 2) {
+              return {
+                startPoint: { x: srcCx, y: sBot },
+                endPoint: { x: tgtCx, y: tTop },
+                bendPoints: []
+              };
+            }
+          }
+          // Container→container directly below: snap to a clean vertical drop
+          // at the shared centre X when horizontal extents overlap, so stacked
+          // containers read as a straight line instead of an L-jog or diagonal.
+          // Skip when the drop would cut through an intermediate node (e.g.
+          // source and target span multiple layers) — fall through to standard
+          // routing in that case.
+          const srcNode = getNode(e.from);
+          if (
+            srcNode && tgtNode &&
+            srcNode.type === 'container' && tgtNode.type === 'container' &&
+            tp.y >= sp.y + ss.h - 2
+          ) {
+            const srcCx = sp.x + ss.w / 2;
+            const tgtCx = tp.x + ts.w / 2;
+            const overlapLeft = Math.max(sp.x, tp.x);
+            const overlapRight = Math.min(sp.x + ss.w, tp.x + ts.w);
+            if (overlapRight - overlapLeft > 0) {
+              const sharedX = (srcCx + tgtCx) / 2;
+              const clampedX = Math.min(overlapRight, Math.max(overlapLeft, sharedX));
+              const candidate = {
+                startPoint: { x: clampedX, y: sBot },
+                endPoint: { x: clampedX, y: tTop },
+                bendPoints: []
+              };
+              if (!checkCollision(candidate)) {
+                return candidate;
+              }
+            }
+          }
+          // If the target is a message bus, try side-entry to prevent label overlap
+          if (tgtNode && tgtNode.type === 'message_bus' && tp.y >= sp.y + ss.h - 2) {
+            const sideLeft = scx < tcx - 50;
+            const sideRoute = {
+              startPoint: { x: scx, y: sBot },
+              endPoint: { x: tp.x + (sideLeft ? 0 : ts.w), y: tCy },
+              bendPoints: [{ x: scx, y: tCy }]
+            };
+            if (!checkCollision(sideRoute)) {
+              return sideRoute;
+            }
+          }
+          if (leftSet.has(e.from) || rightSet.has(e.from) || leftSet.has(e.to) || rightSet.has(e.to)) {
+            const isLeft = leftSet.has(e.from) || leftSet.has(e.to);
+            const midX = isLeft ? (bndX - H_GAP / 2) : (bndX + bndW + H_GAP / 2);
+
+            if (sp.x + ss.w <= tp.x + 10) {
+              // Left→Right: exit right-center of source, enter left-center of target
+              const startX = sp.x + ss.w, startY = sCy;
+              const endX = tp.x, endY = tCy;
+              if (Math.abs(startY - endY) < 5)
+                return { startPoint: {x: startX, y: startY}, endPoint: {x: endX, y: endY}, bendPoints: [] };
+              return { startPoint: {x: startX, y: startY}, endPoint: {x: endX, y: endY},
+                       bendPoints: [{x: midX, y: startY}, {x: midX, y: endY}] };
+            } else {
+              // Right→Left: exit left-center of source, enter right-center of target
+              const startX = sp.x, startY = sCy;
+              const endX = tp.x + ts.w, endY = tCy;
+              if (Math.abs(startY - endY) < 5)
+                return { startPoint: {x: startX, y: startY}, endPoint: {x: endX, y: endY}, bendPoints: [] };
+              return { startPoint: {x: startX, y: startY}, endPoint: {x: endX, y: endY},
+                       bendPoints: [{x: midX, y: startY}, {x: midX, y: endY}] };
+            }
+          }
+
+          // Check if internal edge spans multiple layers
+          if (childIds.has(e.from) && childIds.has(e.to)) {
+            const srcLayer = nodeLayerIdx.get(e.from);
+            const tgtLayer = nodeLayerIdx.get(e.to);
+            if (srcLayer !== undefined && tgtLayer !== undefined) {
+              if (tgtLayer - srcLayer > 1) {
+                // Spans multiple layers downwards
+                if (Math.abs(scx - tcx) < 3) {
+                  // Vertically aligned -> route horizontally around intermediate nodes
+                  const offset = 120;
+                  const gapY1 = bndY + childPos[e.from].y + ss.h + V_GAP / 2;
+                  const gapY2 = bndY + childPos[e.to].y - V_GAP / 2;
+                  return {
+                    startPoint: { x: scx, y: sBot },
+                    endPoint: { x: tcx, y: tTop },
+                    bendPoints: [
+                      { x: scx, y: gapY1 },
+                      { x: scx + offset, y: gapY1 },
+                      { x: scx + offset, y: gapY2 },
+                      { x: tcx, y: gapY2 }
+                    ]
+                  };
+                } else {
+                  // Route vertical down to target gap first, then horizontal jog
+                  const gapY2 = bndY + childPos[e.to].y - V_GAP / 2;
+                  return {
+                    startPoint: { x: scx, y: sBot },
+                    endPoint: { x: tcx, y: tTop },
+                    bendPoints: [{ x: scx, y: gapY2 }, { x: tcx, y: gapY2 }]
+                  };
+                }
+              } else if (srcLayer - tgtLayer > 1) {
+                // Spans multiple layers upwards
+                if (Math.abs(scx - tcx) < 3) {
+                  const offset = 120;
+                  const gapY1 = bndY + childPos[e.from].y - V_GAP / 2;
+                  const gapY2 = bndY + childPos[e.to].y + ts.h + V_GAP / 2;
+                  return {
+                    startPoint: { x: scx, y: sTop },
+                    endPoint: { x: tcx, y: tBot },
+                    bendPoints: [
+                      { x: scx, y: gapY1 },
+                      { x: scx + offset, y: gapY1 },
+                      { x: scx + offset, y: gapY2 },
+                      { x: tcx, y: gapY2 }
+                    ]
+                  };
+                } else {
+                  // Route vertical up to target gap first, then horizontal jog
+                  const gapY2 = bndY + childPos[e.to].y + ts.h + V_GAP / 2;
+                  return {
+                    startPoint: { x: scx, y: sTop },
+                    endPoint: { x: tcx, y: tBot },
+                    bendPoints: [{ x: scx, y: gapY2 }, { x: tcx, y: gapY2 }]
+                  };
+                }
+              }
+            }
+          }
+
+          if (tp.y >= sp.y + ss.h - 2) {
+            // Target below
+            if (Math.abs(scx - tcx) < 3) return { startPoint: {x: scx, y: sBot}, endPoint: {x: tcx, y: tTop}, bendPoints: [] };
+            const my = (sBot + tTop) / 2;
+            return { startPoint: {x: scx, y: sBot}, endPoint: {x: tcx, y: tTop}, bendPoints: [{x: scx, y: my}, {x: tcx, y: my}] };
+          }
+          if (sp.y >= tp.y + ts.h - 2) {
+            // Target above
+            if (Math.abs(scx - tcx) < 3) return { startPoint: {x: scx, y: sTop}, endPoint: {x: tcx, y: tBot}, bendPoints: [] };
+            const my = (sTop + tBot) / 2;
+            return { startPoint: {x: scx, y: sTop}, endPoint: {x: tcx, y: tBot}, bendPoints: [{x: scx, y: my}, {x: tcx, y: my}] };
+          }
+          // Same row — horizontal
+          if (sp.x + ss.w <= tp.x) return { startPoint: {x: sp.x + ss.w, y: sCy}, endPoint: {x: tp.x, y: tCy}, bendPoints: [] };
+          if (tp.x + ts.w <= sp.x) return { startPoint: {x: sp.x, y: sCy},        endPoint: {x: tp.x + ts.w, y: tCy}, bendPoints: [] };
+          // Fallback: route above both
+          const routeY = Math.min(sp.y, tp.y) - 40;
+          return { startPoint: {x: scx, y: sTop}, endPoint: {x: tcx, y: tTop}, bendPoints: [{x: scx, y: routeY}, {x: tcx, y: routeY}] };
+        })();
+
+        if (checkCollision(standardRoute) && (leftSet.has(e.from) || rightSet.has(e.from) || leftSet.has(e.to) || rightSet.has(e.to))) {
+          const candidates = [standardRoute];
+          const xCandidates = [
+            bndX - H_GAP / 2,
+            bndX + bndW + H_GAP / 2,
+            sp.x < tp.x ? tp.x - 20 : tp.x + ts.w + 20,
+            sp.x < tp.x ? sp.x + ss.w + 20 : sp.x - 20
+          ];
+          const uniqueX = [...new Set(xCandidates.map(x => Math.round(x * 10) / 10))];
+          for (const midX of uniqueX) {
+            if (sp.x + ss.w <= tp.x + 10) {
+              const startX = sp.x + ss.w, startY = sCy;
+              const endX = tp.x, endY = tCy;
+              candidates.push({
+                startPoint: { x: startX, y: startY },
+                endPoint: { x: endX, y: endY },
+                bendPoints: [{ x: midX, y: startY }, { x: midX, y: endY }]
+              });
+            } else {
+              const startX = sp.x, startY = sCy;
+              const endX = tp.x + ts.w, endY = tCy;
+              candidates.push({
+                startPoint: { x: startX, y: startY },
+                endPoint: { x: endX, y: endY },
+                bendPoints: [{ x: midX, y: startY }, { x: midX, y: endY }]
+              });
+            }
+          }
+          return chooseBestRoute(candidates);
         }
-        if (sp.y >= tp.y + ts.h - 2) {
-          // Target above
-          if (Math.abs(scx - tcx) < 3) return { startPoint: {x: scx, y: sTop}, endPoint: {x: tcx, y: tBot}, bendPoints: [] };
-          const my = (sTop + tBot) / 2;
-          return { startPoint: {x: scx, y: sTop}, endPoint: {x: tcx, y: tBot}, bendPoints: [{x: scx, y: my}, {x: tcx, y: my}] };
+
+        if (childIds.has(e.from) && childIds.has(e.to)) {
+          const candidates = [standardRoute];
+          if (tp.y >= sp.y + ss.h - 2) {
+            const sourceLane = horizontalLaneBelowSource();
+            const targetLane = horizontalLaneAboveTarget();
+            const leftGutterX = bndX + 35;
+            const rightGutterX = bndX + bndW - 35;
+            const preferRight = scx > bndX + bndW / 2;
+            candidates.push(
+              { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: tTop }, bendPoints: [] },
+              { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: tTop }, bendPoints: [{ x: scx, y: targetLane }, { x: tcx, y: targetLane }] },
+              { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: tTop }, bendPoints: [{ x: scx, y: sourceLane }, { x: leftGutterX, y: sourceLane }, { x: leftGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? 120 : -120 },
+              { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: tTop }, bendPoints: [{ x: scx, y: sourceLane }, { x: rightGutterX, y: sourceLane }, { x: rightGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? -120 : 120 }
+            );
+          } else if (sp.y >= tp.y + ts.h - 2) {
+            const sourceLane = horizontalLaneAboveSource();
+            const targetLane = horizontalLaneBelowTarget();
+            const leftGutterX = bndX + 35;
+            const rightGutterX = bndX + bndW - 35;
+            const preferRight = scx > bndX + bndW / 2;
+            candidates.push(
+              { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: tBot }, bendPoints: [] },
+              { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: tBot }, bendPoints: [{ x: scx, y: targetLane }, { x: tcx, y: targetLane }] },
+              { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: tBot }, bendPoints: [{ x: scx, y: sourceLane }, { x: leftGutterX, y: sourceLane }, { x: leftGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? 120 : -120 },
+              { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: tBot }, bendPoints: [{ x: scx, y: sourceLane }, { x: rightGutterX, y: sourceLane }, { x: rightGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? -120 : 120 }
+            );
+          }
+          return chooseBestRoute(candidates);
         }
-        // Same row — horizontal
-        if (sp.x + ss.w <= tp.x) return { startPoint: {x: sp.x + ss.w, y: sCy}, endPoint: {x: tp.x, y: tCy}, bendPoints: [] };
-        if (tp.x + ts.w <= sp.x) return { startPoint: {x: sp.x, y: sCy},        endPoint: {x: tp.x + ts.w, y: tCy}, bendPoints: [] };
-        // Fallback: route above both
-        const routeY = Math.min(sp.y, tp.y) - 40;
-        return { startPoint: {x: scx, y: sTop}, endPoint: {x: tcx, y: tTop}, bendPoints: [{x: scx, y: routeY}, {x: tcx, y: routeY}] };
+
+        return standardRoute;
       }
 
       // ── Build output graph ─────────────────────────────────────────────────
@@ -344,7 +637,7 @@ const elk = new ELK();
 
       for (let idx = 0; idx < allEdges.length; idx++) {
         const e = allEdges[idx];
-        const section = routeEdge(e);
+        const section = routeEdge(e, idx);
         const labels = e.label ? (() => {
           const match = e.label.match(/^(.*?)\s*\[(.*?)\]$/);
           if (match) {
@@ -376,26 +669,39 @@ const elk = new ELK();
       const intEdges = allEdges.filter(e => childIds.has(e.from) && childIds.has(e.to));
       const extEdges = allEdges.filter(e => childIds.has(e.from) !== childIds.has(e.to));
 
+      // Exclude message buses and databases from the topological sort. Both
+      // node types get their own dedicated rows reinserted after the rest of
+      // the layout has settled: buses as a horizontal spine in the middle,
+      // databases as a dedicated row directly beneath their connecting
+      // service so storage sits visually paired with its owner.
+      const busIds = new Set(children.filter(n => n.type === 'message_bus').map(n => n.id));
+      const dbIds  = new Set(children.filter(n => n.type === 'database').map(n => n.id));
+      const excludeIds = new Set([...busIds, ...dbIds]);
+      const sortChildren = excludeIds.size > 0 ? children.filter(n => !excludeIds.has(n.id)) : children;
+      const sortEdges = excludeIds.size > 0
+        ? intEdges.filter(e => !excludeIds.has(e.from) && !excludeIds.has(e.to))
+        : intEdges;
+
       // Kahn topological layer assignment
       const hasExternalIn = new Set();
       for (const e of extEdges) { if (childIds.has(e.to)) hasExternalIn.add(e.to); }
-      const inDeg = new Map(children.map(n => [n.id, 0]));
-      const adj   = new Map(children.map(n => [n.id, []]));
-      for (const e of intEdges) {
+      const inDeg = new Map(sortChildren.map(n => [n.id, 0]));
+      const adj   = new Map(sortChildren.map(n => [n.id, []]));
+      for (const e of sortEdges) {
         inDeg.set(e.to, (inDeg.get(e.to) || 0) + 1);
         adj.get(e.from)?.push(e.to);
       }
       const layers = [];
       const done   = new Set();
-      const zeroIndeg = children.filter(n => inDeg.get(n.id) === 0);
+      const zeroIndeg = sortChildren.filter(n => inDeg.get(n.id) === 0);
       layers.push(zeroIndeg);
       for (const n of zeroIndeg) {
         done.add(n.id);
         for (const nxt of (adj.get(n.id) || [])) inDeg.set(nxt, inDeg.get(nxt) - 1);
       }
-      while (done.size < children.length) {
-        const layer = children.filter(n => !done.has(n.id) && inDeg.get(n.id) === 0);
-        if (layer.length === 0) { layers.push(children.filter(n => !done.has(n.id))); break; }
+      while (done.size < sortChildren.length) {
+        const layer = sortChildren.filter(n => !done.has(n.id) && inDeg.get(n.id) === 0);
+        if (layer.length === 0) { layers.push(sortChildren.filter(n => !done.has(n.id))); break; }
         layers.push(layer);
         for (const n of layer) {
           done.add(n.id);
@@ -409,7 +715,7 @@ const elk = new ELK();
       for (let i = 1; i < layers.length; i++) {
         const barycenter = (node) => {
           const positions = [];
-          for (const e of intEdges) {
+          for (const e of sortEdges) {
             if (e.to === node.id && colMap.has(e.from)) positions.push(colMap.get(e.from));
             if (e.from === node.id && colMap.has(e.to)) positions.push(colMap.get(e.to));
           }
@@ -418,6 +724,84 @@ const elk = new ELK();
         };
         layers[i] = [...layers[i]].sort((a, b) => barycenter(a) - barycenter(b));
         layers[i].forEach((n, idx) => colMap.set(n.id, idx));
+      }
+
+      // Give message buses their own dedicated layer between the upper
+      // (publisher) and lower (consumer) halves so they sit as a clear
+      // horizontal spine rather than competing with service containers in
+      // the same row. Position is the median layer of the bus's connections
+      // so a bus with mostly-low connections doesn't get marooned at the top.
+      // High-connectivity buses (≥4 connections) get pulled out into a
+      // corner-anchor row appended after all db rows — see below.
+      const cornerBusIds = new Set();
+      if (busIds.size > 0 && layers.length > 0) {
+        const busNodes = children.filter(n => busIds.has(n.id));
+        for (const bus of busNodes) {
+          const connCount = allEdges.reduce(
+            (n, e) => n + (e.from === bus.id || e.to === bus.id ? 1 : 0), 0);
+          bus._cornerAnchor = connCount >= 4;
+          if (bus._cornerAnchor) {
+            cornerBusIds.add(bus.id);
+          }
+        }
+        const spineBuses = busNodes.filter(b => !cornerBusIds.has(b.id));
+        if (spineBuses.length > 0) {
+          const nodeLayer = new Map();
+          layers.forEach((l, idx) => l.forEach(n => nodeLayer.set(n.id, idx)));
+          const connLayers = [];
+          for (const bus of spineBuses) {
+            for (const e of intEdges) {
+              const other = e.from === bus.id ? e.to : (e.to === bus.id ? e.from : null);
+              if (other && nodeLayer.has(other)) connLayers.push(nodeLayer.get(other));
+            }
+          }
+          let busInsertIdx;
+          if (connLayers.length === 0) {
+            busInsertIdx = Math.ceil(layers.length / 2);
+          } else {
+            connLayers.sort((a, b) => a - b);
+            busInsertIdx = connLayers[Math.floor(connLayers.length / 2)] + 1;
+          }
+          layers.splice(busInsertIdx, 0, spineBuses);
+          spineBuses.forEach((n, idx) => colMap.set(n.id, idx));
+        }
+      }
+
+      // Give each database its own dedicated row directly beneath the deepest
+      // service that connects to it, so storage is visually paired with its
+      // owner instead of being lumped into a service row.
+      if (dbIds.size > 0 && layers.length > 0) {
+        const dbNodes = children.filter(n => dbIds.has(n.id));
+        const nodeLayer = new Map();
+        layers.forEach((l, idx) => l.forEach(n => nodeLayer.set(n.id, idx)));
+        const grouped = new Map();
+        for (const db of dbNodes) {
+          let deepestLayer = -1;
+          for (const e of intEdges) {
+            const other = e.from === db.id ? e.to : (e.to === db.id ? e.from : null);
+            if (other && nodeLayer.has(other)) {
+              const l = nodeLayer.get(other);
+              if (l > deepestLayer) deepestLayer = l;
+            }
+          }
+          if (deepestLayer === -1) deepestLayer = layers.length - 1;
+          if (!grouped.has(deepestLayer)) grouped.set(deepestLayer, []);
+          grouped.get(deepestLayer).push(db);
+        }
+        const insertionPoints = [...grouped.keys()].sort((a, b) => b - a);
+        for (const k of insertionPoints) {
+          const dbs = grouped.get(k);
+          layers.splice(k + 1, 0, dbs);
+          dbs.forEach((n, idx) => colMap.set(n.id, idx));
+        }
+      }
+
+      // Corner-anchor buses go in the very last row, right-aligned (handled
+      // by the positioning pass). Appended after db rows so they sit beneath.
+      if (cornerBusIds.size > 0) {
+        const cornerBuses = children.filter(n => cornerBusIds.has(n.id));
+        layers.push(cornerBuses);
+        cornerBuses.forEach((n, idx) => colMap.set(n.id, idx));
       }
 
       // Layer and column index maps
@@ -560,7 +944,7 @@ const elk = new ELK();
       }
 
       return {
-        boundaryNode, children, childIds, allEdges,
+        boundaryNode, children, childIds, allEdges, intEdges,
         extNodes, extMap, layers, nodeLayerIdx, nodeColIdx,
         aboveNodes, belowNodes, leftNodes, rightNodes
       };
@@ -1234,36 +1618,12 @@ const elk = new ELK();
       const allEdgesPoints = flatEdges.map(fe => {
         const pStart = fe.sections[0].startPoint;
         const pEnd = fe.sections[0].endPoint;
-        const sourceId = fe.sources[0];
-        const targetId = fe.targets[0];
-        const getBaseNodeId = (id) => id.split('_port_')[0];
-        const srcNodeId = getBaseNodeId(sourceId);
-        const tgtNodeId = getBaseNodeId(targetId);
-
-        const collisionNodes = allComponents.filter(n => n.id !== srcNodeId && n.id !== tgtNodeId);
-        let hasCollision = false;
-        for (const comp of collisionNodes) {
-          if (lineSegmentIntersectsRect(pStart, pEnd, comp)) {
-            hasCollision = true;
-            break;
-          }
+        const points = [pStart];
+        if (fe.sections[0].bendPoints && fe.sections[0].bendPoints.length > 0) {
+          points.push(...fe.sections[0].bendPoints);
         }
-
-        const points = [];
-        if (hasCollision) {
-          points.push(pStart);
-          if (fe.sections[0].bendPoints) {
-            points.push(...fe.sections[0].bendPoints);
-          }
-          points.push(pEnd);
-        } else {
-          points.push(pStart, pEnd);
-        }
-
-        return {
-          id: fe.id,
-          points
-        };
+        points.push(pEnd);
+        return { id: fe.id, points };
       });
 
       // Helper to generate capitalized node type label, appending technology if present
@@ -1491,29 +1851,20 @@ const elk = new ELK();
             const pStart = { x: section.startPoint.x + absX, y: section.startPoint.y + absY };
             const pEnd = { x: section.endPoint.x + absX, y: section.endPoint.y + absY };
 
-            // Determine if a straight line would collide with any other nodes
             const sourceId = edge.sources[0];
             const targetId = edge.targets[0];
-            const getBaseNodeId = (id) => id.split('_port_')[0];
-            const srcNodeId = getBaseNodeId(sourceId);
-            const tgtNodeId = getBaseNodeId(targetId);
 
-            const collisionNodes = allComponents.filter(n => n.id !== srcNodeId && n.id !== tgtNodeId);
-            let hasCollision = false;
-            for (const comp of collisionNodes) {
-              if (lineSegmentIntersectsRect(pStart, pEnd, comp)) {
-                hasCollision = true;
-                break;
-              }
-            }
+            const hasBendPoints = section.bendPoints && section.bendPoints.length > 0;
 
             let pathD = '';
-            if (hasCollision) {
-              // Draw orthogonal path with rounded corners (original logic)
-              const CORNER_RADIUS = 10;
+            if (hasBendPoints) {
+              // Honour the chosen route while rounding turns generously so
+              // obstacle-avoiding paths read as soft routes rather than boxy
+              // right-angle wiring.
+              const CORNER_RADIUS = 32;
               const allPts = [
                 pStart,
-                ...(section.bendPoints || []).map(b => ({ x: b.x + absX, y: b.y + absY })),
+                ...section.bendPoints.map(b => ({ x: b.x + absX, y: b.y + absY })),
                 pEnd
               ];
               pathD = `M ${allPts[0].x} ${allPts[0].y}`;
@@ -1524,13 +1875,14 @@ const elk = new ELK();
                 const dxOut = next.x - cur.x, dyOut = next.y - cur.y;
                 const lenOut = Math.sqrt(dxOut * dxOut + dyOut * dyOut);
                 const r = Math.min(CORNER_RADIUS, lenIn / 2, lenOut / 2);
-                const ax = cur.x - (dxIn / lenIn) * r, ay = cur.y - (dyIn / lenIn) * r;
-                const bx = cur.x + (dxOut / lenOut) * r, by = cur.y + (dyOut / lenOut) * r;
+                const ax = lenIn > 0 ? cur.x - (dxIn / lenIn) * r : cur.x;
+                const ay = lenIn > 0 ? cur.y - (dyIn / lenIn) * r : cur.y;
+                const bx = lenOut > 0 ? cur.x + (dxOut / lenOut) * r : cur.x;
+                const by = lenOut > 0 ? cur.y + (dyOut / lenOut) * r : cur.y;
                 pathD += ` L ${ax} ${ay} Q ${cur.x} ${cur.y} ${bx} ${by}`;
               }
               pathD += ` L ${allPts[allPts.length - 1].x} ${allPts[allPts.length - 1].y}`;
             } else {
-              // Draw straight line path directly
               pathD = `M ${pStart.x} ${pStart.y} L ${pEnd.x} ${pEnd.y}`;
             }
 
@@ -1549,16 +1901,11 @@ const elk = new ELK();
               const textHeight = label.height;
 
               // Extract all points along the chosen edge line style
-              const points = [];
-              if (hasCollision) {
-                points.push(pStart);
-                if (section.bendPoints) {
-                  points.push(...section.bendPoints.map(b => ({ x: b.x + absX, y: b.y + absY })));
-                }
-                points.push(pEnd);
-              } else {
-                points.push(pStart, pEnd);
+              const points = [pStart];
+              if (hasBendPoints) {
+                points.push(...section.bendPoints.map(b => ({ x: b.x + absX, y: b.y + absY })));
               }
+              points.push(pEnd);
 
               // Calculate total length and segment lengths
               let totalLen = 0;
@@ -1687,7 +2034,7 @@ const elk = new ELK();
               const obstacles = [...allComponents, ...placedLabels];
 
               // First Pass: Try to place label avoiding BOTH component collisions and other connection line crossings
-              if (!hasCollision) {
+              if (!hasBendPoints) {
                 const candMid = getPointAtFraction(0.5);
                 if (!checkLabelCollision(candMid.x, candMid.y, textWidth, textHeight, obstacles) &&
                     !checkLabelEdgeCollision(candMid.x, candMid.y, textWidth, textHeight)) {
@@ -1739,7 +2086,7 @@ const elk = new ELK();
 
               // Second Pass (Fallback): Try placing label avoiding component collisions, even if it overlaps other connection lines
               if (!placed) {
-                if (!hasCollision) {
+                if (!hasBendPoints) {
                   const candMid = getPointAtFraction(0.5);
                   if (!checkLabelCollision(candMid.x, candMid.y, textWidth, textHeight, obstacles)) {
                     midX = candMid.x;
@@ -1789,7 +2136,7 @@ const elk = new ELK();
 
               // Rule 3: Fallback to Middle Gutter Clearance
               if (!placed) {
-                const nearbyNodes = allComponents.filter(n => n.id !== sourceId && n.id !== targetId);
+                const nearbyNodes = allComponents;
                 let bestSeg = null;
                 let bestScore = -Infinity;
                 for (let i = 0; i < points.length - 1; i++) {
@@ -1845,7 +2192,8 @@ const elk = new ELK();
                 const labelH = textHeight + 2 * V_PAD;
                 const labelW = textWidth + 2 * H_PAD;
                 const proposedBox = () => ({ x: midX - labelW / 2, y: midY - labelH / 2, width: labelW, height: labelH });
-                if (placedLabels.some(pl => boxesOverlap(proposedBox(), pl))) {
+                if (placedLabels.some(pl => boxesOverlap(proposedBox(), pl)) ||
+                    checkLabelCollision(midX, midY, textWidth, textHeight, allComponents)) {
                   const step = labelH + 4;
                   for (const dy of [-step, step, -2 * step, 2 * step, -3 * step, 3 * step]) {
                     const ty = midY + dy;

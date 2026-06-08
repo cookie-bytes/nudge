@@ -54,18 +54,40 @@ This prevents utility/support nodes (e.g. background lambdas with no callers) fr
 
 **Cycle handling:** If the Kahn queue empties before all nodes are processed (i.e. a cycle exists), the remaining unplaced nodes are dumped into one final layer.
 
+### 1a′: Dedicated rows for buses and databases
+
+Two node types are excluded from the topological sort and reinserted into purpose-built rows after Kahn + barycenter have settled. Without these overrides, Kahn treats both as sinks (everything points at them, nothing points out) and lumps them into the deepest layer alongside services they should be visually distinct from.
+
+**Message buses (`message_bus` / `ContainerQueue`):**
+- Excluded from Kahn's sort and from barycenter calculations.
+- Reinserted into a dedicated horizontal row positioned at the **median** layer index of the bus's connections + 1 — so the bus sits as a spine between publishers above and consumers below, rather than being marooned at the top or bottom.
+- **High-connectivity corner anchor:** a bus with ≥ 4 total connections is appended after database rows and right-aligned inside the boundary, using otherwise empty bottom-right space for a busy hub.
+- **Width step-up:** a bus with 3 connections doubles in width; a corner-anchored bus uses 3× width. Below the threshold it stays at the standard container width.
+
+**Databases (`database` / `ContainerDb`):**
+- Excluded from Kahn's sort and from barycenter calculations.
+- Reinserted into a dedicated row directly beneath the **deepest contributing service** layer. Dbs sharing the same deepest contributor layer share a single dedicated row.
+- **Column override:** databases break the standard "centre each layer" rule. Each db is placed at the x of its deepest connecting service so storage sits directly beneath its owner. When multiple dbs in the same row collide on column, they pack left-to-right starting from the leftmost parent's x.
+
+**Tighter spacing before a db row** (`DB_V_GAP = V_GAP / 2`): the gap between a service row and its paired db row is half the standard `V_GAP`, so the db visually pairs with its parent instead of floating in its own band of whitespace.
+
+**Parent→db direct vertical route:** when a parent service sits directly above its db (column-aligned within half the smaller node's width), the edge bypasses the standard distribution logic and runs from the bottom-centre of the parent straight into the top-centre of the db. Other outgoing edges from the same parent still use the distributed exit points.
+
 ### 1b: Boundary dimensions
 
 ```
 bndW = max(layer widths) + 2 × B_PAD     (B_PAD = 80px each side)
-bndH = sum(layer heights) + (layers-1) × V_GAP + B_PAD + B_BOT
+bndH = sum(layer heights) + sum(gapBefore(layer)) + B_PAD + B_BOT
 ```
+
+`gapBefore(i)` returns `0` for the top layer, `DB_V_GAP` when layer `i` is a database row, and `V_GAP` otherwise — so paired service+db rows are tighter than service-to-service spacing.
 
 Constants & Sizing Rules:
 | Constant / Rule | Value | Purpose |
 |-----------------|-------|---------|
 | `H_GAP`         | 80px  | Horizontal gap between nodes in the same layer |
 | `V_GAP`         | 80px  | Vertical gap between layers |
+| `DB_V_GAP`      | 40px (`V_GAP / 2`) | Vertical gap when the next layer is a database row |
 | `B_PAD`         | 80px  | Boundary padding — left, right, and top |
 | `B_BOT`         | 84px  | Bottom clearance for the boundary label area |
 | Default Width   | 200px | Standardized width for all nodes (database, person, container, external) to align them nicely in a grid |
@@ -75,6 +97,10 @@ Constants & Sizing Rules:
 ### 1c: Child positions (relative to boundary)
 
 Each layer is centred horizontally inside the boundary. Positions are stored in `childPos[id]` as offsets relative to the boundary's top-left corner.
+
+**Database row exception:** db rows skip the centring step. Each db is placed at the x of its deepest connecting service (looked up from `childPos`, which has already been computed for the parent's row since dbs always sit below their parent). If two dbs in the same row resolve to overlapping columns, they pack left-to-right starting from the leftmost parent's x.
+
+**Corner bus row exception:** high-connectivity message bus rows skip the centring step and right-align to `bndW - B_PAD`, keeping standard right padding while placing the bus in the boundary's bottom-right quadrant.
 
 ---
 
@@ -135,6 +161,12 @@ Left/right columns are as wide as their widest node plus `H_GAP`.
 
 Each edge is routed by `routeEdge(e)`, which uses absolute coordinates (converting boundary-relative child positions to absolute via `getAbs`).
 
+**Type-specific overrides** are evaluated first and short-circuit the spatial-relationship table below:
+- **Parent → database (column-aligned):** if the target is a database sitting directly below the source and their centres are within `min(srcWidth, tgtWidth) / 2`, route a straight line from source bottom-centre to target top-centre, bypassing the standard edge-distribution logic.
+- **Source → message bus (vertical entry blocked):** when the source sits above a bus, try side-entry first (route into the left or right end-cap of the bus) to keep the bus's top edge available for label placement.
+
+**Hybrid route scoring:** for internal boundary edges, the router compares the standard route, a direct route, a row-gap dogleg, and left/right gutter detours. Candidates are scored by node crossings first, then bend count, then path length. This keeps direct-looking lines when they are clean, while only using detours for routes that would cut through nodes.
+
 | Spatial relationship | Route shape |
 |----------------------|-------------|
 | Target directly below source | L-shape: source bottom → horizontal jog at midpoint → target top |
@@ -143,7 +175,7 @@ Each edge is routed by `routeEdge(e)`, which uses absolute coordinates (converti
 | Same horizontal band | Straight horizontal line from side edge to side edge |
 | Fallback (none of the above) | U-shape arcing above both nodes |
 
-Bend points are post-processed by `renderEdges` into SVG quadratic bezier curves with a 10px corner radius to remove sharp kinks.
+Bend points are post-processed by `renderEdges` into SVG quadratic bezier curves with a broad corner radius to remove sharp kinks.
 
 ---
 
