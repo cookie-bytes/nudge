@@ -638,7 +638,37 @@ const elk = new ELK();
         const outEdges = outgoingEdges.get(e.from) || [idx];
         const outIdx = outEdges.indexOf(idx);
         const outCount = outEdges.length;
-        const exitX = (outCount > 1 && outIdx !== -1) ? sp.x + (ss.w / (outCount + 1)) * (outIdx + 1) : (sp.x + ss.w / 2);
+        let exitX = (outCount > 1 && outIdx !== -1) ? sp.x + (ss.w / (outCount + 1)) * (outIdx + 1) : (sp.x + ss.w / 2);
+
+        const sourceCenterX = sp.x + ss.w / 2;
+        const centerReservedByDbEdges = outEdges.filter(edgeIdx => {
+          const outgoing = allEdges[edgeIdx];
+          const targetNode = getNode(outgoing.to);
+          if (!targetNode || targetNode.type !== 'database') return false;
+
+          const targetPos = getAbs(outgoing.to);
+          const targetSize = getSz(outgoing.to);
+          const targetCenterX = targetPos.x + targetSize.w / 2;
+          return targetPos.y >= sp.y + ss.h - 2 &&
+                 Math.abs(sourceCenterX - targetCenterX) < Math.min(ss.w, targetSize.w) / 2;
+        });
+
+        if (centerReservedByDbEdges.length > 0 && !centerReservedByDbEdges.includes(idx)) {
+          const sideEdgeIndices = outEdges.filter(edgeIdx => !centerReservedByDbEdges.includes(edgeIdx));
+          const sideIdx = sideEdgeIndices.indexOf(idx);
+          const sideSlots = sideEdgeIndices.length === 1
+            ? [(() => {
+                const targetPos = getAbs(e.to);
+                const targetSize = getSz(e.to);
+                const targetCenterX = targetPos.x + targetSize.w / 2;
+                return targetCenterX < sourceCenterX ? sp.x + ss.w * 0.25 : sp.x + ss.w * 0.75;
+              })()]
+            : sideEdgeIndices.map((_, slotIdx) => {
+                const t = sideEdgeIndices.length === 1 ? 0.5 : slotIdx / (sideEdgeIndices.length - 1);
+                return sp.x + ss.w * (0.25 + t * 0.5);
+              });
+          if (sideIdx !== -1) exitX = sideSlots[sideIdx];
+        }
 
         const scx = exitX;
         const tcx = entryX;
@@ -666,6 +696,22 @@ const elk = new ELK();
         }
         function checkCollision(route) {
           return routeCrossingCount(route) > 0;
+        }
+        function directDatabaseDropRoute() {
+          const tgtNode = getNode(e.to);
+          if (!tgtNode || tgtNode.type !== 'database' || tp.y < sp.y + ss.h - 2) return null;
+
+          const srcCx = sp.x + ss.w / 2;
+          const tgtCx = tp.x + ts.w / 2;
+          const centerTolerance = Math.min(ss.w, ts.w) / 2;
+          if (Math.abs(srcCx - tgtCx) >= centerTolerance) return null;
+
+          const candidate = {
+            startPoint: { x: srcCx, y: sBot },
+            endPoint: { x: tgtCx, y: tTop },
+            bendPoints: []
+          };
+          return checkCollision(candidate) ? null : candidate;
         }
         function routeLength(route) {
           const pts = [route.startPoint, ...(route.bendPoints || []), route.endPoint];
@@ -815,6 +861,9 @@ const elk = new ELK();
         // Horizontal Z/S-curve routing for left/right column nodes
         const standardRoute = (() => {
           const tgtNode = getNode(e.to);
+          const directDbRoute = directDatabaseDropRoute();
+          if (directDbRoute) return directDbRoute;
+
           // Parent→db direct vertical: if the source sits directly above a
           // database target, route from the bottom-centre of the parent
           // straight into the top-centre of the db, bypassing the standard
@@ -1014,6 +1063,9 @@ const elk = new ELK();
         }
 
         if (childIds.has(e.from) && childIds.has(e.to)) {
+          const directDbRoute = directDatabaseDropRoute();
+          if (directDbRoute) return directDbRoute;
+
           const candidates = [standardRoute];
           if (tp.y >= sp.y + ss.h - 2) {
             const sourceLane = horizontalLaneBelowSource();
