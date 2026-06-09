@@ -781,6 +781,19 @@ const elk = new ELK();
           let edgeCrossings = 0;
           let edgeOverlaps = 0;
           let edgeOverlapPx = 0;
+          let sourcePortReuses = 0;
+          const start = route.startPoint;
+          if (start) {
+            for (const existingSeg of routedEdgeSegments) {
+              if (
+                allEdges[existingSeg.edgeIndex]?.from === e.from &&
+                Math.hypot(start.x - existingSeg.a.x, start.y - existingSeg.a.y) < 6
+              ) {
+                sourcePortReuses++;
+                break;
+              }
+            }
+          }
           for (const candidateSeg of segments) {
             for (const existingSeg of routedEdgeSegments) {
               const overlapPx = routeSegmentOverlapLength(candidateSeg, existingSeg);
@@ -793,7 +806,7 @@ const elk = new ELK();
               }
             }
           }
-          return { edgeCrossings, edgeOverlaps, edgeOverlapPx };
+          return { edgeCrossings, edgeOverlaps, edgeOverlapPx, sourcePortReuses };
         }
         function horizontalLaneBelowSource() {
           const nextTop = children
@@ -827,6 +840,77 @@ const elk = new ELK();
             .sort((a, b) => a - b)[0];
           return nextTop === undefined ? tBot + V_GAP / 2 : (tBot + nextTop) / 2;
         }
+        function sourceTopSlot(slot = 0.75) {
+          return sp.x + ss.w * slot;
+        }
+        function sourceBottomSlot(slot = 0.75) {
+          return sp.x + ss.w * slot;
+        }
+        function sideExternalRouteCandidates() {
+          const candidates = [];
+          const targetOnRight = sp.x + ss.w <= tp.x + 10;
+          const targetOnLeft = tp.x + ts.w <= sp.x + 10;
+          if (!targetOnRight && !targetOnLeft) return candidates;
+
+          const endX = targetOnRight ? tp.x : tp.x + ts.w;
+          const sideY = tCy;
+          const horizontalPad = targetOnRight ? 32 : -32;
+          const sourceSideX = targetOnRight ? sp.x + ss.w : sp.x;
+          const sideLaneX = targetOnRight
+            ? Math.max(sourceSideX + 20, Math.min(tp.x - 20, endX + horizontalPad))
+            : Math.min(sourceSideX - 20, Math.max(tp.x + ts.w + 20, endX + horizontalPad));
+
+          const topSlot = targetOnRight ? 0.76 : 0.24;
+          const bottomSlot = targetOnRight ? 0.76 : 0.24;
+          const topX = sourceTopSlot(topSlot);
+          const bottomX = sourceBottomSlot(bottomSlot);
+
+          if (tCy <= sCy + 20) {
+            candidates.push({
+              startPoint: { x: topX, y: sTop },
+              endPoint: { x: endX, y: sideY },
+              bendPoints: [
+                { x: topX, y: sideY },
+                { x: endX, y: sideY }
+              ],
+              _scoreBias: -70
+            });
+            candidates.push({
+              startPoint: { x: topX, y: sTop },
+              endPoint: { x: endX, y: sideY },
+              bendPoints: [
+                { x: topX, y: sTop - V_GAP / 2 },
+                { x: sideLaneX, y: sTop - V_GAP / 2 },
+                { x: sideLaneX, y: sideY }
+              ],
+              _scoreBias: -25
+            });
+          }
+
+          if (tCy >= sCy - 20) {
+            candidates.push({
+              startPoint: { x: bottomX, y: sBot },
+              endPoint: { x: endX, y: sideY },
+              bendPoints: [
+                { x: bottomX, y: sideY },
+                { x: endX, y: sideY }
+              ],
+              _scoreBias: -70
+            });
+            candidates.push({
+              startPoint: { x: bottomX, y: sBot },
+              endPoint: { x: endX, y: sideY },
+              bendPoints: [
+                { x: bottomX, y: sBot + V_GAP / 2 },
+                { x: sideLaneX, y: sBot + V_GAP / 2 },
+                { x: sideLaneX, y: sideY }
+              ],
+              _scoreBias: -25
+            });
+          }
+
+          return candidates;
+        }
         function chooseBestRoute(candidates) {
           return candidates
             .filter(Boolean)
@@ -844,6 +928,7 @@ const elk = new ELK();
                 candidate.edgeOverlaps * 80 +
                 candidate.edgeOverlapPx * 0.5 +
                 candidate.edgeCrossings * 120 +
+                candidate.sourcePortReuses * 90 +
                 candidate.bends * 45 +
                 candidate.length
             }))
@@ -1032,7 +1117,7 @@ const elk = new ELK();
             standardRouteConflicts.edgeOverlaps > 0
           )
         ) {
-          const candidates = [standardRoute];
+          const candidates = [standardRoute, ...sideExternalRouteCandidates()];
           const xCandidates = [
             bndX - H_GAP / 2,
             bndX + bndW + H_GAP / 2,
@@ -1060,6 +1145,11 @@ const elk = new ELK();
             }
           }
           return chooseBestRoute(candidates);
+        }
+
+        if ((leftSet.has(e.to) || rightSet.has(e.to)) && childIds.has(e.from)) {
+          const candidates = [standardRoute, ...sideExternalRouteCandidates()];
+          if (candidates.length > 1) return chooseBestRoute(candidates);
         }
 
         if (childIds.has(e.from) && childIds.has(e.to)) {
