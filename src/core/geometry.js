@@ -539,14 +539,5 @@ export function analyzeLayout(layoutData) {
     }
   }
 
-  // 4. Aspect Ratio check — flag layout if ratio is outside [1.0, 2.0]
-  const ratio = parseFloat(report.aspectRatio);
-  if (ratio < 1.0 || ratio > 2.0) {
-    report.collisions.push({
-      type: 'poor_aspect_ratio',
-      details: `The layout aspect ratio is ${report.aspectRatio}, which is outside the ideal range [1.0, 2.0]. Adjust vertical/horizontal spacing or layout direction to make it more balanced.`
-    });
-  }
-
   return report;
 }

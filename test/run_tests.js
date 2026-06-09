@@ -214,9 +214,13 @@ async function runIntegrationTest() {
     const mermaidDiagram = `
       C4Context
         title Sample Context Diagram
-        Person(user, "User", "A user of the system")
+        Person(userA, "User A", "First user")
+        Person(userB, "User B", "Second user")
+        Person(userC, "User C", "Third user")
         System(system, "Software System", "The software system under test")
-        Rel(user, system, "Uses", "HTTPS")
+        Rel(userA, system, "Uses", "HTTPS")
+        Rel(userB, system, "Uses", "HTTPS")
+        Rel(userC, system, "Uses", "HTTPS")
     `;
     const model = parseMermaidC4(mermaidDiagram);
     model.layoutOptions["elk.spacing.nodeNode"] = "10";

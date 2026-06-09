@@ -30,6 +30,7 @@ export async function optimizeDiagram({
   signal = null,
   checkpointTimeout = 30000,
   optimizationTimeout = 120000,
+  skipLlm = !!process.env.NUDGE_NO_LLM,
 }) {
   fs.mkdirSync(outputDir, { recursive: true });
 
@@ -61,7 +62,7 @@ export async function optimizeDiagram({
           return { success: false, history: [], svgContent: null, pngPath: null };
         }
 
-        const zoneResult = await getLLMZoneVerification(apiUrl, initialPlan, { signal, timeout: checkpointTimeout });
+        const zoneResult = skipLlm ? null : await getLLMZoneVerification(apiUrl, initialPlan, { signal, timeout: checkpointTimeout });
         if (zoneResult) {
           if (zoneResult.zoneOverrides && Object.keys(zoneResult.zoneOverrides).length > 0)
             overrides.zoneOverrides = zoneResult.zoneOverrides;
@@ -77,7 +78,7 @@ export async function optimizeDiagram({
         const planForRouting = Object.keys(overrides).length > 0
           ? await page.evaluate((data) => window.computeContainerPlan(data), { ...diagramModel, _layoutOverrides: overrides })
           : initialPlan;
-        const routeResult = await getLLMRoutingVerification(apiUrl, planForRouting, { signal, timeout: checkpointTimeout });
+        const routeResult = skipLlm ? null : await getLLMRoutingVerification(apiUrl, planForRouting, { signal, timeout: checkpointTimeout });
         if (routeResult?.swapCommands?.length > 0)
           overrides.swapCommands = [...(overrides.swapCommands || []), ...routeResult.swapCommands];
 
@@ -177,7 +178,7 @@ export async function optimizeDiagram({
       }
 
       onLog('[Optimization] Requesting layout parameter patch from AI...');
-      const patch = await getLLMOptimizationPatch(apiUrl, currentOptions, report, { signal, timeout: optimizationTimeout });
+      const patch = skipLlm ? null : await getLLMOptimizationPatch(apiUrl, currentOptions, report, { signal, timeout: optimizationTimeout });
 
       if (signal?.aborted) {
         onLog(`[Optimizer] Optimization cancelled after LLM optimization call at iteration ${iteration}.`);

@@ -342,6 +342,85 @@ const elk = new ELK();
         return extMap.get(id) || children.find(c => c.id === id);
       }
 
+      // For each message_bus node, deterministically assign a face (TOP/BOTTOM/LEFT/RIGHT)
+      // and an ordered slot to every connected edge, based on the other node's position
+      // relative to the bus. Sorting within each face by source/target position along
+      // the face axis eliminates crossings at the hub by construction.
+      function computeHubPortAssignments() {
+        const assignments = new Map();
+        const busNodes = children.filter(n => n.type === 'message_bus');
+        for (const bus of busNodes) {
+          const bp = getAbs(bus.id);
+          const bs = getSz(bus.id);
+          const faceGroups = { TOP: [], BOTTOM: [], LEFT: [], RIGHT: [] };
+          allEdges.forEach((e, idx) => {
+            if (e.from !== bus.id && e.to !== bus.id) return;
+            const otherId = e.from === bus.id ? e.to : e.from;
+            const op = getAbs(otherId);
+            const os = getSz(otherId);
+            const otherCx = op.x + os.w / 2;
+            const otherCy = op.y + os.h / 2;
+            // Zone-aware: external nodes in the left/right zones approach the bus
+            // from the side, not from above — assign them to the matching face so
+            // their port slots don't displace the internal-node TOP face ordering.
+            if (rightSet.has(otherId)) {
+              faceGroups.RIGHT.push({ idx, sortKey: otherCy });
+            } else if (leftSet.has(otherId)) {
+              faceGroups.LEFT.push({ idx, sortKey: otherCy });
+            } else if (op.y + os.h <= bp.y + 4) {
+              faceGroups.TOP.push({ idx, sortKey: otherCx });
+            } else if (op.y >= bp.y + bs.h - 4) {
+              faceGroups.BOTTOM.push({ idx, sortKey: otherCx });
+            } else if (otherCx < bp.x + bs.w / 2) {
+              faceGroups.LEFT.push({ idx, sortKey: otherCy });
+            } else {
+              faceGroups.RIGHT.push({ idx, sortKey: otherCy });
+            }
+          });
+          for (const [face, edges] of Object.entries(faceGroups)) {
+            if (!edges.length) continue;
+            edges.sort((a, b) => a.sortKey - b.sortKey);
+
+            // TOP/BOTTOM: map node x-centres proportionally onto the bus face so each
+            // connection lands near its natural drop-point, minimising horizontal jog.
+            // A forward+backward pass enforces a minimum gap when nodes share x-centres.
+            let topBotPortX = null;
+            if (face === 'TOP' || face === 'BOTTOM') {
+              const busLo = bp.x + bs.w * 0.05;
+              const busHi = bp.x + bs.w * 0.95;
+              const minGap = (busHi - busLo) / (edges.length + 1);
+              const lo = edges[0].sortKey, hi = edges[edges.length - 1].sortKey;
+              topBotPortX = edges.map(e =>
+                hi === lo ? (busLo + busHi) / 2
+                          : busLo + ((e.sortKey - lo) / (hi - lo)) * (busHi - busLo)
+              );
+              for (let i = 1; i < topBotPortX.length; i++) {
+                if (topBotPortX[i] < topBotPortX[i - 1] + minGap)
+                  topBotPortX[i] = topBotPortX[i - 1] + minGap;
+              }
+              if (topBotPortX[topBotPortX.length - 1] > busHi) {
+                topBotPortX[topBotPortX.length - 1] = busHi;
+                for (let i = topBotPortX.length - 2; i >= 0; i--) {
+                  if (topBotPortX[i] > topBotPortX[i + 1] - minGap)
+                    topBotPortX[i] = topBotPortX[i + 1] - minGap;
+                }
+              }
+            }
+
+            edges.forEach(({ idx }, i) => {
+              const t = (i + 1) / (edges.length + 1);
+              let x, y;
+              if (face === 'TOP')    { x = topBotPortX[i]; y = bp.y; }
+              if (face === 'BOTTOM') { x = topBotPortX[i]; y = bp.y + bs.h; }
+              if (face === 'LEFT')   { x = bp.x;            y = bp.y + bs.h * t; }
+              if (face === 'RIGHT')  { x = bp.x + bs.w;     y = bp.y + bs.h * t; }
+              assignments.set(idx, { busId: bus.id, face, x, y });
+            });
+          }
+        }
+        return assignments;
+      }
+
       const leftSet  = new Set(leftNodes.map(n => n.id));
       const rightSet = new Set(rightNodes.map(n => n.id));
       const routedEdgeSegments = [];
@@ -690,20 +769,25 @@ const elk = new ELK();
         let entryX = tp.x + ts.w / 2;
         if (inEdges.length > 1) {
           if (targetNode && targetNode.type === 'message_bus') {
-            const orderedInEdges = [...inEdges].sort((a, b) => {
-              const edgeA = allEdges[a];
-              const edgeB = allEdges[b];
-              const posA = getAbs(edgeA.from);
-              const posB = getAbs(edgeB.from);
-              const sizeA = getSz(edgeA.from);
-              const sizeB = getSz(edgeB.from);
-              const cxA = posA.x + sizeA.w / 2;
-              const cxB = posB.x + sizeB.w / 2;
-              if (Math.abs(cxA - cxB) > 1) return cxA - cxB;
-              return posA.y - posB.y;
-            });
-            const inIdx = orderedInEdges.indexOf(idx);
-            if (inIdx !== -1) entryX = tp.x + (ts.w / (orderedInEdges.length + 1)) * (inIdx + 1);
+            const hubAssign = hubPortAssignments.get(idx);
+            if (hubAssign) {
+              entryX = hubAssign.x;
+            } else {
+              const orderedInEdges = [...inEdges].sort((a, b) => {
+                const edgeA = allEdges[a];
+                const edgeB = allEdges[b];
+                const posA = getAbs(edgeA.from);
+                const posB = getAbs(edgeB.from);
+                const sizeA = getSz(edgeA.from);
+                const sizeB = getSz(edgeB.from);
+                const cxA = posA.x + sizeA.w / 2;
+                const cxB = posB.x + sizeB.w / 2;
+                if (Math.abs(cxA - cxB) > 1) return cxA - cxB;
+                return posA.y - posB.y;
+              });
+              const inIdx = orderedInEdges.indexOf(idx);
+              if (inIdx !== -1) entryX = tp.x + (ts.w / (orderedInEdges.length + 1)) * (inIdx + 1);
+            }
           } else if (targetNode && targetNode.type === 'database' && inEdges.some(isDirectDatabaseEntry) && !isDirectDatabaseEntry(idx)) {
             const srcCenterX = sp.x + ss.w / 2;
             entryX = srcCenterX > targetCenterX
@@ -1291,6 +1375,7 @@ const elk = new ELK();
         children: children.map(n => ({ id: n.id, x: childPos[n.id].x, y: childPos[n.id].y, width: n.width || 200, height: n.height || 80, type: n.type, label: n.label, tech: n.tech || '', description: n.description || '', edges: [] }))
       });
 
+      const hubPortAssignments = computeHubPortAssignments();
       const routedSections = [];
       for (let idx = 0; idx < allEdges.length; idx++) {
         const e = allEdges[idx];

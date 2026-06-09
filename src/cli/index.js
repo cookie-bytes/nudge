@@ -49,6 +49,7 @@ const { success, history, svgContent, pngPath } = await optimizeDiagram({
   diagramModel,
   outputDir: OUTPUT_DIR,
   onLog: (msg) => console.log(msg),
+  skipLlm: true,
 });
 
 console.log('\n=================================');
