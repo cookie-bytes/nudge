@@ -1414,6 +1414,42 @@ const elk = new ELK();
             .map(x => Math.round(x * 10) / 10))]
             .filter(x => Math.abs(x - scx) > 4);
         }
+        function orderedMessageBusGutterX(preferRight) {
+          if (!targetNode || targetNode.type !== 'message_bus') {
+            return preferRight ? bndX + bndW - 35 : bndX + 35;
+          }
+
+          const busCenterX = tp.x + ts.w / 2;
+          const sameSideEdges = (incomingEdges.get(e.to) || [])
+            .filter(edgeIdx => {
+              const incoming = allEdges[edgeIdx];
+              if (!incoming || !childIds.has(incoming.from)) return false;
+              const incomingPos = getAbs(incoming.from);
+              const incomingSize = getSz(incoming.from);
+              const incomingCx = incomingPos.x + incomingSize.w / 2;
+              return preferRight ? incomingCx >= busCenterX : incomingCx < busCenterX;
+            })
+            .sort((a, b) => {
+              const edgeA = allEdges[a];
+              const edgeB = allEdges[b];
+              const posA = getAbs(edgeA.from);
+              const posB = getAbs(edgeB.from);
+              const sizeA = getSz(edgeA.from);
+              const sizeB = getSz(edgeB.from);
+              return (posA.y + sizeA.h / 2) - (posB.y + sizeB.h / 2);
+            });
+
+          const rank = Math.max(0, sameSideEdges.indexOf(idx));
+          const step = MIN_ROUTE_LINE_GAP;
+          const outer = preferRight ? bndX + bndW - 35 : bndX + 35;
+          const innerLimit = preferRight
+            ? tp.x + ts.w + ROUTE_BOUNDARY_CLEARANCE
+            : tp.x - ROUTE_BOUNDARY_CLEARANCE;
+          const lane = preferRight ? outer - rank * step : outer + rank * step;
+          return preferRight
+            ? Math.max(innerLimit, lane)
+            : Math.min(innerLimit, lane);
+        }
         function sideExternalRouteCandidates() {
           const candidates = [];
           const targetOnRight = sp.x + ss.w <= tp.x + 10;
@@ -1807,9 +1843,9 @@ const elk = new ELK();
             const sourceLane = horizontalLaneBelowSource();
             const targetLane = horizontalLaneAboveTarget();
             const endY = targetEntryY ?? tTop;
-            const leftGutterX = bndX + 35;
-            const rightGutterX = bndX + bndW - 35;
             const preferRight = scx > bndX + bndW / 2;
+            const leftGutterX = orderedMessageBusGutterX(false);
+            const rightGutterX = orderedMessageBusGutterX(true);
             candidates.push(
               { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [] },
               { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: targetLane }, { x: tcx, y: targetLane }] },
@@ -1826,9 +1862,9 @@ const elk = new ELK();
             const sourceLane = horizontalLaneAboveSource();
             const targetLane = horizontalLaneBelowTarget();
             const endY = targetEntryY ?? tBot;
-            const leftGutterX = bndX + 35;
-            const rightGutterX = bndX + bndW - 35;
             const preferRight = scx > bndX + bndW / 2;
+            const leftGutterX = orderedMessageBusGutterX(false);
+            const rightGutterX = orderedMessageBusGutterX(true);
             candidates.push(
               { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: endY }, bendPoints: [] },
               { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: targetLane }, { x: tcx, y: targetLane }] },
