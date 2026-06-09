@@ -146,27 +146,26 @@ const elk = new ELK();
         outgoingEdges.get(e.from).push(idx);
       });
 
-      // Step up the width of a message bus when it has 3+ connections, so a
-      // busy hub reads as a wide spine while a low-traffic bus stays at the
-      // standard container size. Corner-anchor buses (≥4 connections, placed
-      // in the bottom-right) get an extra bump to 3× so the hub reads clearly
-      // and gives edges from multiple directions room to land.
+      // Step up the width of a message bus based on its connection count, so a
+      // busy hub reads as a wide spine. Buses with 4+ connections are sized
+      // to 3× their base width, while those with 3+ connections are 2×.
       for (const layer of layers) {
         for (const n of layer) {
           if (n.type !== 'message_bus') continue;
           const connections = allEdges.reduce(
             (count, e) => count + (e.from === n.id || e.to === n.id ? 1 : 0), 0);
           if (n._layoutBaseWidth === undefined) n._layoutBaseWidth = n.width || 200;
-          if (n._cornerAnchor) n.width = n._layoutBaseWidth * 3;
+          if (connections >= 4) n.width = n._layoutBaseWidth * 3;
           else if (connections >= 3) n.width = n._layoutBaseWidth * 2;
           else n.width = n._layoutBaseWidth;
         }
       }
 
-      // Boundary dimensions. DB rows use the same vertical gap as service
-      // rows; visual pairing with the parent is established by x-centering.
+      // Boundary dimensions. DB rows (and local buses) use the same vertical 
+      // gap as service rows; visual pairing with the parent is established 
+      // by x-centering.
       const DB_V_GAP = V_GAP;
-      const isDbLayer = (l) => l.length > 0 && l.every(n => n.type === 'database');
+      const isPairedLayer = (l) => l.length > 0 && l.every(n => n.type === 'database' || (n.type === 'message_bus' && n.local));
       const layerW = layers.map(l => l.reduce((s, n) => s + (n.width || 200), 0) + Math.max(0, l.length - 1) * H_GAP);
       const layerH = layers.map(l => Math.max(...l.map(n => n.height || 80)));
       const maxLW  = Math.max(...layerW, 200);
@@ -197,9 +196,10 @@ const elk = new ELK();
           if (!srcNode || !tgtNode) return false;
           if (Math.abs(src.row - tgt.row) !== 1) return false;
           const tolerance = Math.min(src.width, tgt.width) / 2;
+          const isPaired = (node) => node.type === 'database' || (node.type === 'message_bus' && node.local);
           return Math.abs(src.x - tgt.x) < tolerance &&
-                 (srcNode.type === 'container' || srcNode.type === 'database') &&
-                 (tgtNode.type === 'container' || tgtNode.type === 'database');
+                 (srcNode.type === 'container' || isPaired(srcNode)) &&
+                 (tgtNode.type === 'container' || isPaired(tgtNode));
         }
 
         for (const edge of intEdges) {
@@ -226,7 +226,7 @@ const elk = new ELK();
       const MAX_CONNECTOR_GAP_EXTRA = 80;
       const gapBefore = (i) => {
         if (i === 0) return 0;
-        const baseGap = isDbLayer(layers[i]) ? DB_V_GAP : V_GAP;
+        const baseGap = isPairedLayer(layers[i]) ? DB_V_GAP : V_GAP;
         const laneCount = connectorLaneCounts[i] || 0;
         if (laneCount <= 1) return baseGap;
 
@@ -267,47 +267,46 @@ const elk = new ELK();
       const bndW   = contentW + leftPad + rightPad;
       const bndH   = layerH.reduce((s, h) => s + h, 0) + layers.reduce((s, _, i) => s + gapBefore(i), 0) + B_PAD + B_BOT;
 
-      // Position children relative to boundary. Database rows are centred
-      // around the centroid of their parent nodes' centres so the cluster
-      // reads as "belonging to" those services regardless of how many dbs
-      // share the same parent. The cluster is clamped to stay within the
-      // boundary so overflow is impossible.
+      // Position children relative to boundary. Database rows (and local buses) 
+      // are centred around the centroid of their parent nodes' centres so the 
+      // cluster reads as "belonging to" those services regardless of how many 
+      // share the same parent.
       const childPos = {};
       let ry = B_PAD;
       for (let i = 0; i < layers.length; i++) {
         ry += gapBefore(i);
         const layer = layers[i];
-        const isDbRow = isDbLayer(layer);
-        if (isDbRow) {
-          const placements = layer.map(db => {
+        const isPairedRow = layer.length > 0 && layer.every(n => n.type === 'database' || (n.type === 'message_bus' && n.local));
+        if (isPairedRow) {
+          const placements = layer.map(node => {
             let deepest = null, deepestRow = -1;
             for (const e of intEdges) {
-              const otherId = e.from === db.id ? e.to : (e.to === db.id ? e.from : null);
+              const otherId = e.from === node.id ? e.to : (e.to === node.id ? e.from : null);
               if (!otherId) continue;
               const otherNode = children.find(c => c.id === otherId);
               if (!otherNode || !childPos[otherNode.id]) continue;
               const rowIdx = layers.findIndex(l => l.includes(otherNode));
               if (rowIdx > deepestRow) { deepestRow = rowIdx; deepest = otherNode; }
             }
-            const parentX = deepest && childPos[deepest.id] ? childPos[deepest.id].x : contentLeft + (contentW - (db.width || 200)) / 2;
+            const parentX = deepest && childPos[deepest.id] ? childPos[deepest.id].x : contentLeft + (contentW - (node.width || 200)) / 2;
             const parentCenter = parentX + (deepest ? (deepest.width || 200) : 200) / 2;
-            return { db, parentX, parentCenter };
+            return { node, parentX, parentCenter };
           });
           placements.sort((a, b) => a.parentX - b.parentX);
 
-          // Pack dbs left-to-right from each parent's x (preserves relative order)
+          // Pack nodes left-to-right from each parent's x (preserves relative order)
           const rawPositions = [];
           let nextX = -Infinity;
           for (const p of placements) {
             const x = Math.max(p.parentX, nextX);
-            rawPositions.push({ db: p.db, x });
-            nextX = x + (p.db.width || 200) + H_GAP;
+            rawPositions.push({ node: p.node, x });
+            nextX = x + (p.node.width || 200) + H_GAP;
           }
 
           // Shift the packed cluster so it is centred on the parent centroid,
-          // then clamp so no db can escape the boundary.
+          // then clamp so no node can escape the boundary.
           const clusterLeft  = rawPositions[0].x;
-          const clusterRight = rawPositions[rawPositions.length - 1].x + (rawPositions[rawPositions.length - 1].db.width || 200);
+          const clusterRight = rawPositions[rawPositions.length - 1].x + (rawPositions[rawPositions.length - 1].node.width || 200);
           const clusterWidth = clusterRight - clusterLeft;
           const parentCentroid = placements.reduce((s, p) => s + p.parentCenter, 0) / placements.length;
           const desiredStart  = parentCentroid - clusterWidth / 2;
@@ -315,10 +314,10 @@ const elk = new ELK();
           const shift = clampedStart - clusterLeft;
 
           for (const p of rawPositions) {
-            childPos[p.db.id] = { x: p.x + shift, y: ry };
+            childPos[p.node.id] = { x: p.x + shift, y: ry };
           }
         } else if (layer.some(n => n._cornerAnchor)) {
-          // Corner-anchor row (e.g. high-connectivity message bus): right-align
+          // Corner-anchor row (e.g. message bus): right-align
           // so the node hugs the bottom-right of the boundary rather than
           // centring under the other rows.
           let rx = contentRight - layerW[i];
@@ -1091,10 +1090,11 @@ const elk = new ELK();
         const targetNode = getNode(e.to);
         const targetCenterX = tp.x + ts.w / 2;
 
-        function isDirectDatabaseEntry(edgeIdx) {
+        const isPaired = (node) => node && (node.type === 'database' || (node.type === 'message_bus' && node.local));
+        function isDirectPairedEntry(edgeIdx) {
           const incoming = allEdges[edgeIdx];
           const incomingTarget = getNode(incoming.to);
-          if (!incomingTarget || incomingTarget.type !== 'database') return false;
+          if (!isPaired(incomingTarget)) return false;
 
           const srcPos = getAbs(incoming.from);
           const srcSize = getSz(incoming.from);
@@ -1108,7 +1108,7 @@ const elk = new ELK();
 
         let entryX = tp.x + ts.w / 2;
         if (inEdges.length > 1) {
-          if (targetNode && targetNode.type === 'message_bus') {
+          if (targetNode && targetNode.type === 'message_bus' && !targetNode.local) {
             const hubAssign = hubPortAssignments.get(idx);
             if (hubAssign) {
               entryX = hubAssign.x;
@@ -1128,7 +1128,7 @@ const elk = new ELK();
               const inIdx = orderedInEdges.indexOf(idx);
               if (inIdx !== -1) entryX = tp.x + (ts.w / (orderedInEdges.length + 1)) * (inIdx + 1);
             }
-          } else if (targetNode && targetNode.type === 'database' && inEdges.some(isDirectDatabaseEntry) && !isDirectDatabaseEntry(idx)) {
+          } else if (isPaired(targetNode) && inEdges.some(isDirectPairedEntry) && !isDirectPairedEntry(idx)) {
             const srcCenterX = sp.x + ss.w / 2;
             entryX = srcCenterX > targetCenterX
               ? tp.x + ts.w / 3
@@ -1995,59 +1995,40 @@ const elk = new ELK();
         layers[i].forEach((n, idx) => colMap.set(n.id, idx));
       }
 
-      // Give message buses their own dedicated layer between the upper
-      // (publisher) and lower (consumer) halves so they sit as a clear
-      // horizontal spine rather than competing with service containers in
-      // the same row. Position is the median layer of the bus's connections
-      // so a bus with mostly-low connections doesn't get marooned at the top.
-      // High-connectivity buses (≥4 connections) get pulled out into a
-      // corner-anchor row appended after all db rows — see below.
+      // Give message buses their own dedicated layer at the very bottom
+      // of the boundary (corner-anchored) rather than competing with service
+      // containers in the same row. This keeps the message bus as a clear
+      // terminal hub in the bottom-right.
+      // 'Local' message buses are excluded from corner-anchoring and instead
+      // behave like databases (paired with their parent service).
       const cornerBusIds = new Set();
       if (busIds.size > 0 && layers.length > 0) {
         const busNodes = children.filter(n => busIds.has(n.id));
         for (const bus of busNodes) {
+          if (bus.local) continue;
           const connCount = allEdges.reduce(
             (n, e) => n + (e.from === bus.id || e.to === bus.id ? 1 : 0), 0);
-          bus._cornerAnchor = connCount >= 4;
+          bus._cornerAnchor = true;
           if (bus._cornerAnchor) {
             cornerBusIds.add(bus.id);
           }
         }
-        const spineBuses = busNodes.filter(b => !cornerBusIds.has(b.id));
-        if (spineBuses.length > 0) {
-          const nodeLayer = new Map();
-          layers.forEach((l, idx) => l.forEach(n => nodeLayer.set(n.id, idx)));
-          const connLayers = [];
-          for (const bus of spineBuses) {
-            for (const e of intEdges) {
-              const other = e.from === bus.id ? e.to : (e.to === bus.id ? e.from : null);
-              if (other && nodeLayer.has(other)) connLayers.push(nodeLayer.get(other));
-            }
-          }
-          let busInsertIdx;
-          if (connLayers.length === 0) {
-            busInsertIdx = Math.ceil(layers.length / 2);
-          } else {
-            connLayers.sort((a, b) => a - b);
-            busInsertIdx = connLayers[Math.floor(connLayers.length / 2)] + 1;
-          }
-          layers.splice(busInsertIdx, 0, spineBuses);
-          spineBuses.forEach((n, idx) => colMap.set(n.id, idx));
-        }
       }
 
-      // Give each database its own dedicated row directly beneath the deepest
-      // service that connects to it, so storage is visually paired with its
-      // owner instead of being lumped into a service row.
-      if (dbIds.size > 0 && layers.length > 0) {
-        const dbNodes = children.filter(n => dbIds.has(n.id));
+      // Give each database (and 'local' message bus) its own dedicated row
+      // directly beneath the deepest service that connects to it, so storage
+      // is visually paired with its owner instead of being lumped into a
+      // service row.
+      const pairedIds = new Set([...dbIds, ...children.filter(n => n.type === 'message_bus' && n.local).map(n => n.id)]);
+      if (pairedIds.size > 0 && layers.length > 0) {
+        const pairedNodes = children.filter(n => pairedIds.has(n.id));
         const nodeLayer = new Map();
         layers.forEach((l, idx) => l.forEach(n => nodeLayer.set(n.id, idx)));
         const grouped = new Map();
-        for (const db of dbNodes) {
+        for (const node of pairedNodes) {
           let deepestLayer = -1;
           for (const e of intEdges) {
-            const other = e.from === db.id ? e.to : (e.to === db.id ? e.from : null);
+            const other = e.from === node.id ? e.to : (e.to === node.id ? e.from : null);
             if (other && nodeLayer.has(other)) {
               const l = nodeLayer.get(other);
               if (l > deepestLayer) deepestLayer = l;
@@ -2055,13 +2036,13 @@ const elk = new ELK();
           }
           if (deepestLayer === -1) deepestLayer = layers.length - 1;
           if (!grouped.has(deepestLayer)) grouped.set(deepestLayer, []);
-          grouped.get(deepestLayer).push(db);
+          grouped.get(deepestLayer).push(node);
         }
         const insertionPoints = [...grouped.keys()].sort((a, b) => b - a);
         for (const k of insertionPoints) {
-          const dbs = grouped.get(k);
-          layers.splice(k + 1, 0, dbs);
-          dbs.forEach((n, idx) => colMap.set(n.id, idx));
+          const nodes = grouped.get(k);
+          layers.splice(k + 1, 0, nodes);
+          nodes.forEach((n, idx) => colMap.set(n.id, idx));
         }
       }
 

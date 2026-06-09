@@ -60,9 +60,8 @@ Two node types are excluded from the topological sort and reinserted into purpos
 
 **Message buses (`message_bus` / `ContainerQueue`):**
 - Excluded from Kahn's sort and from barycenter calculations.
-- Reinserted into a dedicated horizontal row positioned at the **median** layer index of the bus's connections + 1 — so the bus sits as a spine between publishers above and consumers below, rather than being marooned at the top or bottom.
-- **High-connectivity corner anchor:** a bus with ≥ 4 total connections is appended after database rows and right-aligned inside the boundary, using otherwise empty bottom-right space for a busy hub.
-- **Width step-up:** a bus with 3 connections doubles in width; a corner-anchored bus uses 3× width. Below the threshold it stays at the standard container width.
+- **Bottom-right corner anchor:** all message buses are appended after database rows and right-aligned inside the boundary, using otherwise empty bottom-right space.
+- **Width step-up:** a bus with 3 connections doubles in width; a bus with 4+ connections uses 3× width. Below the threshold it stays at the standard container width.
 
 **Databases (`database` / `ContainerDb`):**
 - Excluded from Kahn's sort and from barycenter calculations.
@@ -103,7 +102,7 @@ Each layer is centred horizontally inside the boundary's content band. Positions
 
 **Database row exception:** db rows skip the standard centring step. Each db is first given a tentative x equal to its deepest connecting service's x (looked up from `childPos`). The row is then packed left-to-right to resolve collisions, producing a cluster. The whole cluster is then shifted so its centre aligns with the centroid of all parent node centres in the row, then clamped to the content band so no db can escape into reserved route corridors. This guarantees the db cluster sits visually beneath its owning services without ever overflowing.
 
-**Corner bus row exception:** high-connectivity message bus rows skip the centring step and right-align to the content band's right edge, keeping reserved route-corridor padding available while placing the bus in the boundary's bottom-right quadrant.
+**Corner bus row exception:** message bus rows skip the centring step and right-align to the content band's right edge, keeping reserved route-corridor padding available while placing the bus in the boundary's bottom-right quadrant.
 
 ---
 

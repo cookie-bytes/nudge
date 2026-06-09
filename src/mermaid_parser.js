@@ -152,12 +152,18 @@ export function parseMermaidC4(mermaidString) {
           description = descOrTech || '';
         }
 
+        const isLocal = tech.toLowerCase().includes('local');
+        if (isLocal) {
+          tech = tech.replace(/local/i, '').replace(/,\s*,/, ',').replace(/^,|,$/, '').trim();
+        }
+
         const componentNode = {
           id,
           label,
           type: mappedType,
           tech,
           description,
+          local: isLocal,
           width: 200,
           height: mappedType === 'person' ? 200 : (mappedType === 'database' || mappedType === 'container' || mappedType === 'external') ? 140 : mappedType === 'message_bus' ? 120 : 80
         };
