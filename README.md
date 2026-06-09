@@ -14,9 +14,11 @@ Nudge runs as a **CLI tool** for direct use from the terminal, and as a local **
 
 ## Example Output
 
-| Before (Native Mermaid Layout) | After (Nudge AI-Optimized) |
+| Before (Mermaid C4 Baseline) | After (Nudge Optimized) |
 | :---: | :---: |
-| ![Mermaid Default Layout](docs/MermaidBefore.png) | ![Nudge Optimized Layout](docs/search_service_container.png?v=2) |
+| ![Core banking Mermaid baseline](docs/core-banking-single-boundary-before.png) | ![Core banking Nudge optimized layout](docs/core-banking-single-boundary.png) |
+
+See the full comparison source in [docs/core-banking-single-boundary-comparison.md](docs/core-banking-single-boundary-comparison.md).
 
 ---
 
@@ -144,9 +146,9 @@ You can customize Nudge's layout tuning behavior and LLM connections using envir
   export NUDGE_LLM_API_KEY=sk-or-...
   ```
 
-**Optimize the included Search Service container diagram** (the example shown in the screenshot above):
+**Optimize the included Core Banking container diagram** (the example shown in the comparison above):
 ```bash
-npm start
+node src/cli/index.js test/core-banking-single-boundary.mermaid
 ```
 
 **Run on any Mermaid or YAML file:**

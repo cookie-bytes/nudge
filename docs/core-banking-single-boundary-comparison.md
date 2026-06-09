@@ -1,0 +1,62 @@
+# Core Banking Single Boundary Comparison
+
+| Before (Mermaid C4 Baseline) | After (Nudge Optimized) |
+| :---: | :---: |
+| ![Core banking Mermaid baseline](./core-banking-single-boundary-before.png) | ![Core banking Nudge optimized layout](./core-banking-single-boundary.png) |
+
+Optimized SVG version: [core-banking-single-boundary.svg](./core-banking-single-boundary.svg)
+
+Source Mermaid:
+
+```mermaid
+C4Container
+    title Core Banking System - Container View
+
+    Person(customer, "Retail Customer", "Uses mobile and web banking")
+    Person(teller, "Branch Teller", "Internal staff")
+    System_Ext(swift, "SWIFT Network", "Interbank messaging")
+    System_Ext(card, "Card Scheme", "Visa/Mastercard rails")
+    System_Ext(kyc, "KYC/AML Provider", "Identity & sanctions screening")
+    System_Ext(regulator, "Regulatory Reporting Gateway", "Central bank submissions")
+
+    System_Boundary(bank, "Core Banking System") {
+        Container(mobile, "Mobile App", "Swift/Kotlin", "Customer mobile banking")
+        Container(web, "Web Portal", "React", "Customer web banking")
+        Container(bff, "Channel BFF", "Node.js", "Backend-for-frontend aggregation")
+        Container(authz, "AuthZ Service", "Go", "OAuth2/OIDC token issuance")
+        Container(accounts, "Account Service", "Java/Spring", "Account lifecycle")
+        Container(ledger, "Ledger Engine", "Rust", "Double-entry posting")
+        Container(payments, "Payments Orchestrator", "Go", "Payment routing & saga")
+        Container(fraud, "Fraud Engine", "Python", "Real-time scoring")
+        Container(screening, "Screening Service", "Java", "Sanctions/PEP checks")
+        Container(reporting, "Reg Reporting Service", "Scala", "Builds regulatory extracts")
+        ContainerQueue(eventbus, "Event Bus", "Kafka", "Domain events")
+        ContainerDb(txndb, "Ledger Store", "PostgreSQL", "Immutable journal")
+        ContainerDb(acctdb, "Account Store", "PostgreSQL", "Account master")
+    }
+
+    Rel(customer, mobile, "Uses", "HTTPS")
+    Rel(customer, web, "Uses", "HTTPS")
+    Rel(teller, web, "Uses", "HTTPS")
+    Rel(mobile, bff, "Calls", "REST/JSON")
+    Rel(web, bff, "Calls", "REST/JSON")
+    Rel(bff, authz, "Validates token", "OIDC")
+    Rel(bff, accounts, "Reads/writes", "gRPC")
+    Rel(bff, payments, "Initiates payment", "gRPC")
+    Rel(accounts, acctdb, "Persists", "SQL")
+    Rel(accounts, ledger, "Requests posting", "gRPC")
+    Rel(ledger, txndb, "Appends journal", "SQL")
+    Rel(payments, ledger, "Posts settlement", "gRPC")
+    Rel(payments, fraud, "Scores txn", "gRPC")
+    Rel(payments, screening, "Screens party", "REST")
+    Rel(payments, swift, "Sends message", "MQ")
+    Rel(payments, card, "Authorizes", "ISO8583")
+    Rel(screening, kyc, "Checks", "REST")
+    Rel(accounts, eventbus, "Publishes events", "Kafka")
+    Rel(ledger, eventbus, "Publishes postings", "Kafka")
+    Rel(payments, eventbus, "Publishes events", "Kafka")
+    Rel(fraud, eventbus, "Consumes events", "Kafka")
+    Rel(reporting, eventbus, "Consumes events", "Kafka")
+    Rel(reporting, txndb, "Reads journal", "SQL")
+    Rel(reporting, regulator, "Submits", "SFTP")
+```
