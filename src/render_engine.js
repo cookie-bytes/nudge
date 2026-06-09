@@ -170,7 +170,45 @@ const elk = new ELK();
       const layerW = layers.map(l => l.reduce((s, n) => s + (n.width || 200), 0) + Math.max(0, l.length - 1) * H_GAP);
       const layerH = layers.map(l => Math.max(...l.map(n => n.height || 80)));
       const maxLW  = Math.max(...layerW, 200);
-      const bndW   = maxLW + 2 * B_PAD;
+      const contentW = maxLW;
+
+      function estimateInternalRoutePressure() {
+        const centers = new Map();
+        for (let i = 0; i < layers.length; i++) {
+          const layer = layers[i];
+          const rowX = layer.some(n => n._cornerAnchor)
+            ? contentW - layerW[i]
+            : (contentW - layerW[i]) / 2;
+          let x = rowX;
+          for (const n of layer) {
+            centers.set(n.id, { x: x + (n.width || 200) / 2, row: i });
+            x += (n.width || 200) + H_GAP;
+          }
+        }
+
+        const pressure = { left: 0, right: 0 };
+        for (const e of intEdges) {
+          const src = centers.get(e.from);
+          const tgt = centers.get(e.to);
+          if (!src || !tgt) continue;
+          const rowDistance = Math.abs(src.row - tgt.row);
+          if (rowDistance < 2) continue;
+
+          const sideX = Math.max(src.x, tgt.x);
+          const leftX = Math.min(src.x, tgt.x);
+          if (sideX > contentW * 0.62) pressure.right += rowDistance;
+          if (leftX < contentW * 0.38) pressure.left += rowDistance;
+        }
+        return pressure;
+      }
+
+      const routePressure = estimateInternalRoutePressure();
+      const ROUTE_CORRIDOR_EXTRA = 80;
+      const leftPad = B_PAD + (routePressure.left >= 4 ? ROUTE_CORRIDOR_EXTRA : 0);
+      const rightPad = B_PAD + (routePressure.right >= 4 ? ROUTE_CORRIDOR_EXTRA : 0);
+      const contentLeft = leftPad;
+      const contentRight = contentLeft + contentW;
+      const bndW   = contentW + leftPad + rightPad;
       const bndH   = layerH.reduce((s, h) => s + h, 0) + layers.reduce((s, _, i) => s + gapBefore(i), 0) + B_PAD + B_BOT;
 
       // Position children relative to boundary. Database rows are centred
@@ -195,7 +233,7 @@ const elk = new ELK();
               const rowIdx = layers.findIndex(l => l.includes(otherNode));
               if (rowIdx > deepestRow) { deepestRow = rowIdx; deepest = otherNode; }
             }
-            const parentX = deepest && childPos[deepest.id] ? childPos[deepest.id].x : (bndW - (db.width || 200)) / 2;
+            const parentX = deepest && childPos[deepest.id] ? childPos[deepest.id].x : contentLeft + (contentW - (db.width || 200)) / 2;
             const parentCenter = parentX + (deepest ? (deepest.width || 200) : 200) / 2;
             return { db, parentX, parentCenter };
           });
@@ -217,7 +255,7 @@ const elk = new ELK();
           const clusterWidth = clusterRight - clusterLeft;
           const parentCentroid = placements.reduce((s, p) => s + p.parentCenter, 0) / placements.length;
           const desiredStart  = parentCentroid - clusterWidth / 2;
-          const clampedStart  = Math.max(0, Math.min(bndW - clusterWidth, desiredStart));
+          const clampedStart  = Math.max(contentLeft, Math.min(contentRight - clusterWidth, desiredStart));
           const shift = clampedStart - clusterLeft;
 
           for (const p of rawPositions) {
@@ -227,13 +265,13 @@ const elk = new ELK();
           // Corner-anchor row (e.g. high-connectivity message bus): right-align
           // so the node hugs the bottom-right of the boundary rather than
           // centring under the other rows.
-          let rx = bndW - B_PAD - layerW[i];
+          let rx = contentRight - layerW[i];
           for (const n of layer) {
             childPos[n.id] = { x: rx, y: ry };
             rx += (n.width || 200) + H_GAP;
           }
         } else {
-          let rx = (bndW - layerW[i]) / 2;
+          let rx = contentLeft + (contentW - layerW[i]) / 2;
           for (const n of layer) {
             childPos[n.id] = { x: rx, y: ry };
             rx += (n.width || 200) + H_GAP;
