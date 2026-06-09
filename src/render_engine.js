@@ -281,17 +281,25 @@ const elk = new ELK();
       }
 
       // ── Phase 2b: Row widths and diagram dimensions ────────────────────────
+      const MIN_CORRIDOR_SPACING = 20;
+      {
+        const _rc = new Set(rightNodes.map(n => n.id));
+        const _lc = new Set(leftNodes.map(n => n.id));
+        var rightEdgeN = allEdges.filter(e => _rc.has(e.from) || _rc.has(e.to)).length;
+        var leftEdgeN  = allEdges.filter(e => _lc.has(e.from) || _lc.has(e.to)).length;
+      }
+      const rightCorrGap = Math.max(H_GAP, (rightEdgeN + 1) * MIN_CORRIDOR_SPACING);
+      const leftCorrGap  = Math.max(H_GAP, (leftEdgeN  + 1) * MIN_CORRIDOR_SPACING);
+
       const rowW = arr => arr.length
         ? arr.reduce((s, n) => s + (n.width || 200), 0) + (arr.length - 1) * H_GAP
         : 0;
       const rowH = arr => arr.length ? Math.max(...arr.map(n => n.height || 80)) : 0;
       const aboveW = rowW(aboveNodes), aboveH = rowH(aboveNodes);
       const belowW = rowW(belowNodes), belowH = rowH(belowNodes);
-      const sideW  = n => n.length ? Math.max(...n.map(x => x.width || 200)) + H_GAP : 0;
-
       const innerW   = Math.max(aboveW, bndW, belowW);
-      const leftOff  = sideW(leftNodes);
-      const totalW   = innerW + leftOff + sideW(rightNodes);
+      const leftOff  = leftNodes.length  ? Math.max(...leftNodes.map(x => x.width  || 200)) + leftCorrGap  : 0;
+      const totalW   = innerW + leftOff + (rightNodes.length ? Math.max(...rightNodes.map(x => x.width || 200)) + rightCorrGap : 0);
 
       const aboveGap = aboveNodes.length ? EXT_GAP : 0;
       const belowGap = belowNodes.length ? EXT_GAP : 0;
@@ -326,8 +334,8 @@ const elk = new ELK();
       }
 
       // Left/right overflow nodes: stacked beside boundary
-      { let y = bndY; for (const n of leftNodes)  { absPos[n.id] = { x: bndX - (n.width || 200) - H_GAP, y }; y += (n.height || 80) + V_GAP; } }
-      { let y = bndY; for (const n of rightNodes) { absPos[n.id] = { x: bndX + bndW + H_GAP, y }; y += (n.height || 80) + V_GAP; } }
+      { let y = bndY; for (const n of leftNodes)  { absPos[n.id] = { x: bndX - (n.width || 200) - leftCorrGap,  y }; y += (n.height || 80) + V_GAP; } }
+      { let y = bndY; for (const n of rightNodes) { absPos[n.id] = { x: bndX + bndW + rightCorrGap, y }; y += (n.height || 80) + V_GAP; } }
 
       // ── Phase 2d: Edge routing ─────────────────────────────────────────────
       function getAbs(id) {
@@ -418,6 +426,63 @@ const elk = new ELK();
             });
           }
         }
+        return assignments;
+      }
+
+      function computeSideCorridorAssignments() {
+        const assignments = new Map(); // edgeIdx → { corridorX, startY }
+
+        function sideNodeId(e) {
+          return (rightSet.has(e.from) || leftSet.has(e.from)) ? e.from : e.to;
+        }
+
+        function processGroup(edgeIndices, corridorStart, direction, corrGap) {
+          const N = edgeIndices.length;
+          if (N <= 1) return;
+          // Sort by the y-centre of the side (right/left) node so corridor slots
+          // and exit y-positions stay consistently ordered, avoiding crossings.
+          const sorted = [...edgeIndices].sort((a, b) => {
+            const pa = getAbs(sideNodeId(allEdges[a])), pb = getAbs(sideNodeId(allEdges[b]));
+            const sa = getSz(sideNodeId(allEdges[a])),  sb = getSz(sideNodeId(allEdges[b]));
+            return (pa.y + sa.h / 2) - (pb.y + sb.h / 2);
+          });
+          const step = corrGap / (N + 1);
+          sorted.forEach((idx, i) => {
+            assignments.set(idx, { corridorX: corridorStart + direction * step * (i + 1), startY: null });
+          });
+
+          // When multiple inside→side edges share the same inside source, their
+          // horizontal exit segments (source-right-edge → corridorX) would overlap
+          // at sCy. Distribute the exit y-positions across the source's right face
+          // so each segment is at a distinct y, eliminating the overlap.
+          const bySource = new Map();
+          sorted.forEach(idx => {
+            const e = allEdges[idx];
+            const insideId = childIds.has(e.from) ? e.from : null;
+            if (!insideId) return;
+            if (!bySource.has(insideId)) bySource.set(insideId, []);
+            bySource.get(insideId).push(idx);
+          });
+          for (const [insideId, edgeIds] of bySource) {
+            if (edgeIds.length <= 1) continue;
+            const sp = getAbs(insideId), ss = getSz(insideId);
+            // edgeIds are already in side-node-y order (from sorted above)
+            edgeIds.forEach((idx, i) => {
+              const existing = assignments.get(idx);
+              assignments.set(idx, { ...existing, startY: sp.y + ss.h * (i + 1) / (edgeIds.length + 1) });
+            });
+          }
+        }
+
+        const rightEdgeIndices = [];
+        const leftEdgeIndices  = [];
+        allEdges.forEach((e, idx) => {
+          if (rightSet.has(e.from) || rightSet.has(e.to)) rightEdgeIndices.push(idx);
+          else if (leftSet.has(e.from) || leftSet.has(e.to)) leftEdgeIndices.push(idx);
+        });
+        processGroup(rightEdgeIndices, bndX + bndW, +1, rightCorrGap);
+        processGroup(leftEdgeIndices,  bndX,        -1, leftCorrGap);
+
         return assignments;
       }
 
@@ -1084,6 +1149,73 @@ const elk = new ELK();
 
           return candidates;
         }
+        function targetFacingRouteCandidates() {
+          const candidates = [];
+          const targetOnRight = sp.x + ss.w <= tp.x + 10;
+          const targetOnLeft = tp.x + ts.w <= sp.x + 10;
+          if (!targetOnRight && !targetOnLeft) return candidates;
+
+          const naturalSide = targetOnRight ? 'left' : 'right';
+          const sourceSlot = targetOnRight ? 0.76 : 0.24;
+          const sourceX = sp.x + ss.w * sourceSlot;
+          const sideY = tCy;
+
+          function routeToTargetSide(side, scoreBias) {
+            const sideEndX = side === 'left' ? tp.x : tp.x + ts.w;
+            const sideLaneX = side === 'left' ? tp.x - 24 : tp.x + ts.w + 24;
+
+            if (tp.y >= sp.y + ss.h - 2) {
+              const sourceLane = horizontalLaneBelowSource();
+              return {
+                startPoint: { x: sourceX, y: sBot },
+                endPoint: { x: sideEndX, y: sideY },
+                bendPoints: [
+                  { x: sourceX, y: sourceLane },
+                  { x: sideLaneX, y: sourceLane },
+                  { x: sideLaneX, y: sideY }
+                ],
+                _scoreBias: scoreBias
+              };
+            }
+
+            if (sp.y >= tp.y + ts.h - 2) {
+              const sourceLane = horizontalLaneAboveSource();
+              return {
+                startPoint: { x: sourceX, y: sTop },
+                endPoint: { x: sideEndX, y: sideY },
+                bendPoints: [
+                  { x: sourceX, y: sourceLane },
+                  { x: sideLaneX, y: sourceLane },
+                  { x: sideLaneX, y: sideY }
+                ],
+                _scoreBias: scoreBias
+              };
+            }
+
+            const sourceSideX = targetOnRight ? sp.x + ss.w : sp.x;
+            return {
+              startPoint: { x: sourceSideX, y: sCy },
+              endPoint: { x: sideEndX, y: sideY },
+              bendPoints: [{ x: sideLaneX, y: sCy }, { x: sideLaneX, y: sideY }],
+              _scoreBias: scoreBias + 20
+            };
+          }
+
+          const naturalRoute = routeToTargetSide(naturalSide, -60);
+          candidates.push(naturalRoute);
+
+          const naturalConflicts = routeEdgeConflictStats(naturalRoute);
+          if (
+            checkCollision(naturalRoute) ||
+            naturalConflicts.edgeCrossings > 0 ||
+            naturalConflicts.edgeOverlaps > 0
+          ) {
+            const alternateSide = naturalSide === 'left' ? 'right' : 'left';
+            candidates.push(routeToTargetSide(alternateSide, -45));
+          }
+
+          return candidates;
+        }
         function chooseBestRoute(candidates) {
           return candidates
             .filter(Boolean)
@@ -1180,11 +1312,15 @@ const elk = new ELK();
           }
           if (leftSet.has(e.from) || rightSet.has(e.from) || leftSet.has(e.to) || rightSet.has(e.to)) {
             const isLeft = leftSet.has(e.from) || leftSet.has(e.to);
-            const midX = isLeft ? (bndX - H_GAP / 2) : (bndX + bndW + H_GAP / 2);
+            const _corrAssign = sideCorridorAssignments.get(idx);
+            const midX = _corrAssign
+              ? _corrAssign.corridorX
+              : (isLeft ? (bndX - leftCorrGap / 2) : (bndX + bndW + rightCorrGap / 2));
 
             if (sp.x + ss.w <= tp.x + 10) {
               // Left→Right: exit right-center of source, enter left-center of target
-              const startX = sp.x + ss.w, startY = sCy;
+              const startX = sp.x + ss.w;
+              const startY = (_corrAssign && _corrAssign.startY !== null) ? _corrAssign.startY : sCy;
               const endX = tp.x, endY = tCy;
               if (Math.abs(startY - endY) < 5)
                 return { startPoint: {x: startX, y: startY}, endPoint: {x: endX, y: endY}, bendPoints: [] };
@@ -1292,8 +1428,8 @@ const elk = new ELK();
         ) {
           const candidates = [standardRoute, ...sideExternalRouteCandidates()];
           const xCandidates = [
-            bndX - H_GAP / 2,
-            bndX + bndW + H_GAP / 2,
+            bndX - leftCorrGap / 2,
+            bndX + bndW + rightCorrGap / 2,
             sp.x < tp.x ? tp.x - 20 : tp.x + ts.w + 20,
             sp.x < tp.x ? sp.x + ss.w + 20 : sp.x - 20
           ];
@@ -1321,6 +1457,7 @@ const elk = new ELK();
         }
 
         if ((leftSet.has(e.to) || rightSet.has(e.to)) && childIds.has(e.from)) {
+          if (sideCorridorAssignments.has(idx)) return standardRoute;
           const candidates = [standardRoute, ...sideExternalRouteCandidates()];
           if (candidates.length > 1) return chooseBestRoute(candidates);
         }
@@ -1329,7 +1466,7 @@ const elk = new ELK();
           const directDbRoute = directDatabaseDropRoute();
           if (directDbRoute) return directDbRoute;
 
-          const candidates = [standardRoute];
+          const candidates = [standardRoute, ...targetFacingRouteCandidates()];
           if (tp.y >= sp.y + ss.h - 2) {
             const sourceLane = horizontalLaneBelowSource();
             const targetLane = horizontalLaneAboveTarget();
@@ -1376,6 +1513,7 @@ const elk = new ELK();
       });
 
       const hubPortAssignments = computeHubPortAssignments();
+      const sideCorridorAssignments = computeSideCorridorAssignments();
       const routedSections = [];
       for (let idx = 0; idx < allEdges.length; idx++) {
         const e = allEdges[idx];
