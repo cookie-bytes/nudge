@@ -76,11 +76,13 @@ Two node types are excluded from the topological sort and reinserted into purpos
 ### 1b: Boundary dimensions
 
 ```
-bndW = max(layer widths) + 2 × B_PAD     (B_PAD = 80px each side)
+bndW = max(layer widths) + leftPad + rightPad
 bndH = sum(layer heights) + sum(gapBefore(layer)) + B_PAD + B_BOT
 ```
 
 `gapBefore(i)` returns `0` for the top layer, `DB_V_GAP` when layer `i` is a database row, and `V_GAP` otherwise — so paired service+db rows are tighter than service-to-service spacing.
+
+`leftPad` and `rightPad` start at `B_PAD` and may grow independently when the internal edge router predicts heavy long-route pressure on that side. This reserves an in-boundary route corridor beside the content band instead of sizing the boundary from container boxes alone. Child layers are positioned inside the stable content band (`contentLeft ... contentRight`), so extra corridor space is genuinely available for long gutter routes rather than being lost to recentring.
 
 Constants & Sizing Rules:
 | Constant / Rule | Value | Purpose |
@@ -89,6 +91,7 @@ Constants & Sizing Rules:
 | `V_GAP`         | 80px  | Vertical gap between layers |
 | `DB_V_GAP`      | same as `V_GAP`    | Vertical gap before a database row (same as standard) |
 | `B_PAD`         | 80px  | Boundary padding — left, right, and top |
+| Route corridor extra | 80px per busy side | Extra left/right boundary padding when long internal routes need a side corridor |
 | `B_BOT`         | 84px  | Bottom clearance for the boundary label area |
 | Default Width   | 200px | Standardized width for all nodes (database, person, container, external) to align them nicely in a grid |
 | Default Height  | 80px / 140px | Standardized heights: 140px for database, person, container, and external systems; 80px for other types |
@@ -96,11 +99,11 @@ Constants & Sizing Rules:
 
 ### 1c: Child positions (relative to boundary)
 
-Each layer is centred horizontally inside the boundary. Positions are stored in `childPos[id]` as offsets relative to the boundary's top-left corner.
+Each layer is centred horizontally inside the boundary's content band. Positions are stored in `childPos[id]` as offsets relative to the boundary's top-left corner.
 
-**Database row exception:** db rows skip the standard centring step. Each db is first given a tentative x equal to its deepest connecting service's x (looked up from `childPos`). The row is then packed left-to-right to resolve collisions, producing a cluster. The whole cluster is then shifted so its centre aligns with the centroid of all parent node centres in the row, then clamped to `[0, bndW − clusterWidth]` so no db can escape the boundary. This guarantees the db cluster sits visually beneath its owning services without ever overflowing.
+**Database row exception:** db rows skip the standard centring step. Each db is first given a tentative x equal to its deepest connecting service's x (looked up from `childPos`). The row is then packed left-to-right to resolve collisions, producing a cluster. The whole cluster is then shifted so its centre aligns with the centroid of all parent node centres in the row, then clamped to the content band so no db can escape into reserved route corridors. This guarantees the db cluster sits visually beneath its owning services without ever overflowing.
 
-**Corner bus row exception:** high-connectivity message bus rows skip the centring step and right-align to `bndW - B_PAD`, keeping standard right padding while placing the bus in the boundary's bottom-right quadrant.
+**Corner bus row exception:** high-connectivity message bus rows skip the centring step and right-align to the content band's right edge, keeping reserved route-corridor padding available while placing the bus in the boundary's bottom-right quadrant.
 
 ---
 
@@ -164,6 +167,8 @@ Each edge is routed by `routeEdge(e)`, which uses absolute coordinates (converti
 **Type-specific overrides** are evaluated first and short-circuit the spatial-relationship table below:
 - **Parent → database (column-aligned):** if the target is a database sitting directly below the source and their centres are within `min(srcWidth, tgtWidth) / 2`, route a straight line from source bottom-centre to target top-centre, bypassing the standard edge-distribution logic.
 - **Source → message bus (vertical entry blocked):** when the source sits above a bus, try side-entry first (route into the left or right end-cap of the bus) to keep the bus's top edge available for label placement.
+
+**Source and target slot ordering:** when a node has multiple outgoing edges, source exit slots are ordered by target centre X so left-going edges leave from the left side of the source and right-going edges leave from the right side. Message-bus entry slots are ordered by source approach X, so routes arriving from the right corridor enter toward the right side of the bus instead of crossing back across the bus row. Databases with a direct vertical parent drop keep that centre drop clear; other incoming database edges are biased to the opposite/nearest side to avoid crossing the direct persistence line.
 
 **Hybrid route scoring:** for internal boundary edges, the router compares the standard route, a direct route, a row-gap dogleg, and left/right gutter detours. Candidates are scored by node crossings first, then a weighted mix of existing edge overlaps/crossings, bend count, and path length. This keeps direct-looking lines when they are clean, while only using detours for routes that would cut through nodes or pile onto existing line corridors.
 

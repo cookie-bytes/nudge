@@ -669,13 +669,64 @@ const elk = new ELK();
 
         // Distribute entry and exit points horizontally to prevent overlaps
         const inEdges = incomingEdges.get(e.to) || [idx];
-        const inIdx = inEdges.indexOf(idx);
-        const inCount = inEdges.length;
-        const entryX = (inCount > 1 && inIdx !== -1) ? tp.x + (ts.w / (inCount + 1)) * (inIdx + 1) : (tp.x + ts.w / 2);
+        const targetNode = getNode(e.to);
+        const targetCenterX = tp.x + ts.w / 2;
+
+        function isDirectDatabaseEntry(edgeIdx) {
+          const incoming = allEdges[edgeIdx];
+          const incomingTarget = getNode(incoming.to);
+          if (!incomingTarget || incomingTarget.type !== 'database') return false;
+
+          const srcPos = getAbs(incoming.from);
+          const srcSize = getSz(incoming.from);
+          const tgtPos = getAbs(incoming.to);
+          const tgtSize = getSz(incoming.to);
+          const srcCx = srcPos.x + srcSize.w / 2;
+          const tgtCx = tgtPos.x + tgtSize.w / 2;
+          return tgtPos.y >= srcPos.y + srcSize.h - 2 &&
+                 Math.abs(srcCx - tgtCx) < Math.min(srcSize.w, tgtSize.w) / 2;
+        }
+
+        let entryX = tp.x + ts.w / 2;
+        if (inEdges.length > 1) {
+          if (targetNode && targetNode.type === 'message_bus') {
+            const orderedInEdges = [...inEdges].sort((a, b) => {
+              const edgeA = allEdges[a];
+              const edgeB = allEdges[b];
+              const posA = getAbs(edgeA.from);
+              const posB = getAbs(edgeB.from);
+              const sizeA = getSz(edgeA.from);
+              const sizeB = getSz(edgeB.from);
+              const cxA = posA.x + sizeA.w / 2;
+              const cxB = posB.x + sizeB.w / 2;
+              if (Math.abs(cxA - cxB) > 1) return cxA - cxB;
+              return posA.y - posB.y;
+            });
+            const inIdx = orderedInEdges.indexOf(idx);
+            if (inIdx !== -1) entryX = tp.x + (ts.w / (orderedInEdges.length + 1)) * (inIdx + 1);
+          } else if (targetNode && targetNode.type === 'database' && inEdges.some(isDirectDatabaseEntry) && !isDirectDatabaseEntry(idx)) {
+            const srcCenterX = sp.x + ss.w / 2;
+            entryX = srcCenterX > targetCenterX
+              ? tp.x + ts.w / 3
+              : tp.x + ts.w * 2 / 3;
+          } else {
+            const inIdx = inEdges.indexOf(idx);
+            if (inIdx !== -1) entryX = tp.x + (ts.w / (inEdges.length + 1)) * (inIdx + 1);
+          }
+        }
 
         const outEdges = outgoingEdges.get(e.from) || [idx];
-        const outIdx = outEdges.indexOf(idx);
-        const outCount = outEdges.length;
+        const orderedOutEdges = [...outEdges].sort((a, b) => {
+          const edgeA = allEdges[a];
+          const edgeB = allEdges[b];
+          const posA = getAbs(edgeA.to);
+          const posB = getAbs(edgeB.to);
+          const sizeA = getSz(edgeA.to);
+          const sizeB = getSz(edgeB.to);
+          return (posA.x + sizeA.w / 2) - (posB.x + sizeB.w / 2);
+        });
+        const outIdx = orderedOutEdges.indexOf(idx);
+        const outCount = orderedOutEdges.length;
         let exitX = (outCount > 1 && outIdx !== -1) ? sp.x + (ss.w / (outCount + 1)) * (outIdx + 1) : (sp.x + ss.w / 2);
 
         const sourceCenterX = sp.x + ss.w / 2;
