@@ -2047,7 +2047,19 @@ const elk = new ELK();
       svg.style.width = `${finalWidth}px`;
       svg.style.height = `${graph.height + 50 + DIAGRAM_B_PAD}px`;
 
-      const allComponents = flattenNodes(graph, DIAGRAM_H_PAD, 50).filter(n => n.type !== 'boundary');
+      const flatNodes = flattenNodes(graph, DIAGRAM_H_PAD, 50);
+      const allComponents = flatNodes.filter(n => n.type !== 'boundary');
+      const boundaryBorderObstacles = flatNodes
+        .filter(n => n.type === 'boundary')
+        .flatMap(n => {
+          const clearance = 12;
+          return [
+            { x: n.x - clearance, y: n.y - clearance, width: n.width + clearance * 2, height: clearance * 2 },
+            { x: n.x - clearance, y: n.y + n.height - clearance, width: n.width + clearance * 2, height: clearance * 2 },
+            { x: n.x - clearance, y: n.y - clearance, width: clearance * 2, height: n.height + clearance * 2 },
+            { x: n.x + n.width - clearance, y: n.y - clearance, width: clearance * 2, height: n.height + clearance * 2 }
+          ];
+        });
       const placedLabels = [];
 
       // Gather all edges and their exact drawn points to check for label-edge crossings
@@ -2499,7 +2511,7 @@ const elk = new ELK();
               let midX, midY;
               let placed = false;
 
-              const obstacles = [...allComponents, ...placedLabels];
+              const obstacles = [...allComponents, ...boundaryBorderObstacles, ...placedLabels];
 
               // First Pass: Try to place label avoiding BOTH component collisions and other connection line crossings
               if (!hasBendPoints) {
@@ -2667,13 +2679,13 @@ const elk = new ELK();
                 const labelW = textWidth + 2 * H_PAD;
                 const proposedBox = () => ({ x: midX - labelW / 2, y: midY - labelH / 2, width: labelW, height: labelH });
                 if (placedLabels.some(pl => boxesOverlap(proposedBox(), pl)) ||
-                    checkLabelCollision(midX, midY, textWidth, textHeight, allComponents)) {
+                    checkLabelCollision(midX, midY, textWidth, textHeight, [...allComponents, ...boundaryBorderObstacles])) {
                   const step = labelH + 4;
                   for (const dy of [-step, step, -2 * step, 2 * step, -3 * step, 3 * step]) {
                     const ty = midY + dy;
                     const testBox = { x: midX - labelW / 2, y: ty - labelH / 2, width: labelW, height: labelH };
                     if (!placedLabels.some(pl => boxesOverlap(testBox, pl)) &&
-                        !checkLabelCollision(midX, ty, textWidth, textHeight, allComponents)) {
+                        !checkLabelCollision(midX, ty, textWidth, textHeight, [...allComponents, ...boundaryBorderObstacles])) {
                       midY = ty;
                       break;
                     }
