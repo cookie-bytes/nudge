@@ -310,6 +310,31 @@ const elk = new ELK();
       const LANE_OFFSETS = [0, -10, 10, -18, 18, -26, 26];
       const LANE_OVERLAP_THRESHOLD = 24;
 
+      function normalizeBundleLabel(edge) {
+        return (edge.label || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      }
+
+      function nodeRouteZone(id) {
+        if (leftSet.has(id)) return 'left';
+        if (rightSet.has(id)) return 'right';
+        if (aboveNodes.some(n => n.id === id)) return 'above';
+        if (belowNodes.some(n => n.id === id)) return 'below';
+        if (childIds.has(id)) return 'inside';
+        return 'unknown';
+      }
+
+      function canBundleEdges(edgeA, edgeB) {
+        if (!edgeA || !edgeB || edgeA === edgeB) return false;
+        const label = normalizeBundleLabel(edgeA);
+        if (!label || label !== normalizeBundleLabel(edgeB)) return false;
+        if (edgeA.from !== edgeB.from || edgeA.to === edgeB.to) return false;
+
+        const targetZone = nodeRouteZone(edgeA.to);
+        return targetZone !== 'inside' &&
+               targetZone !== 'unknown' &&
+               targetZone === nodeRouteZone(edgeB.to);
+      }
+
       function sectionToPoints(section) {
         return [
           { x: section.startPoint.x, y: section.startPoint.y },
@@ -326,10 +351,11 @@ const elk = new ELK();
         };
       }
 
-      function pointsToSegments(points) {
+      function pointsToSegments(points, edgeIndex = -1) {
         return points.slice(0, -1).map((p, i) => ({
           a: p,
-          b: points[i + 1]
+          b: points[i + 1],
+          edgeIndex
         })).filter(seg => Math.hypot(seg.b.x - seg.a.x, seg.b.y - seg.a.y) > 0.5);
       }
 
@@ -402,6 +428,7 @@ const elk = new ELK();
           for (const existing of routedEdgeSegments) {
             const overlap = segmentOverlapLength(segment, existing);
             if (overlap > 20) {
+              if (canBundleEdges(edge, allEdges[existing.edgeIndex])) continue;
               overlaps++;
               overlapPx += overlap;
             } else if (segmentsCross(segment, existing)) {
@@ -502,7 +529,7 @@ const elk = new ELK();
         routedEdgeSegments.length = 0;
         sections.forEach((section, idx) => {
           if (!section || idx === excludeIndex) return;
-          routedEdgeSegments.push(...pointsToSegments(sectionToPoints(section)));
+          routedEdgeSegments.push(...pointsToSegments(sectionToPoints(section), idx));
         });
       }
 
@@ -523,6 +550,7 @@ const elk = new ELK();
               for (const segB of segmentsByEdge[j]) {
                 const overlapPx = segmentOverlapLength(segA, segB);
                 if (overlapPx > 20) {
+                  if (canBundleEdges(allEdges[i], allEdges[j])) continue;
                   edgeScores[i].edgeOverlaps++;
                   edgeScores[j].edgeOverlaps++;
                   edgeScores[i].edgeOverlapPx += overlapPx;
@@ -711,6 +739,7 @@ const elk = new ELK();
             for (const existingSeg of routedEdgeSegments) {
               const overlapPx = routeSegmentOverlapLength(candidateSeg, existingSeg);
               if (overlapPx > 20) {
+                if (canBundleEdges(e, allEdges[existingSeg.edgeIndex])) continue;
                 edgeOverlaps++;
                 edgeOverlapPx += overlapPx;
               } else if (routeSegmentCrosses(candidateSeg, existingSeg)) {
@@ -1036,7 +1065,7 @@ const elk = new ELK();
         const e = allEdges[idx];
         const section = reserveRouteLanes(routeEdge(e, idx), e);
         routedSections[idx] = section;
-        routedEdgeSegments.push(...pointsToSegments(sectionToPoints(section)));
+        routedEdgeSegments.push(...pointsToSegments(sectionToPoints(section), idx));
       }
 
       improveRoutedSections(routedSections);

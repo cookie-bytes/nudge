@@ -122,6 +122,18 @@ function getEdgeSegments(edge) {
   })).filter(seg => Math.hypot(seg.b.x - seg.a.x, seg.b.y - seg.a.y) > 0.5);
 }
 
+function normalizeBundleLabel(edge) {
+  return (edge.labels?.[0]?.text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function canBundleEdges(edgeA, edgeB) {
+  if (!edgeA || !edgeB || edgeA.id === edgeB.id) return false;
+  const label = normalizeBundleLabel(edgeA);
+  if (!label || label !== normalizeBundleLabel(edgeB)) return false;
+  return edgeA.sources?.[0] === edgeB.sources?.[0] &&
+         edgeA.targets?.[0] !== edgeB.targets?.[0];
+}
+
 function segmentLength(seg) {
   return Math.hypot(seg.b.x - seg.a.x, seg.b.y - seg.a.y);
 }
@@ -237,6 +249,7 @@ function analyzeEdgeQuality(edges) {
 
       const overlapPx = segmentOverlapLength(segA, segB);
       if (overlapPx > 20) {
+        if (canBundleEdges(segA.edge, segB.edge)) continue;
         quality.edgeOverlapCount++;
         quality.edgeOverlapPx += overlapPx;
       } else if (segmentsCross(segA, segB)) {
