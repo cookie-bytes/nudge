@@ -129,6 +129,7 @@ const elk = new ELK();
       const B_PAD   = 80;   // boundary left/right/top padding
       const B_BOT   = 84;   // boundary bottom clearance (label area)
       const EXT_GAP = Number(options["elk.layered.spacing.nodeNodeBetweenLayers"] || 80);
+      const MIN_ROUTE_LINE_GAP = Math.max(18, Number(options["nudge.routing.minLineGap"] || 18));
 
       const plan = buildContainerZonePlan(diagramData);
       if (!plan) return null;
@@ -166,13 +167,12 @@ const elk = new ELK();
       // rows; visual pairing with the parent is established by x-centering.
       const DB_V_GAP = V_GAP;
       const isDbLayer = (l) => l.length > 0 && l.every(n => n.type === 'database');
-      const gapBefore = (i) => i === 0 ? 0 : (isDbLayer(layers[i]) ? DB_V_GAP : V_GAP);
       const layerW = layers.map(l => l.reduce((s, n) => s + (n.width || 200), 0) + Math.max(0, l.length - 1) * H_GAP);
       const layerH = layers.map(l => Math.max(...l.map(n => n.height || 80)));
       const maxLW  = Math.max(...layerW, 200);
       const contentW = maxLW;
 
-      function estimateInternalRoutePressure() {
+      function estimateLayerCenters() {
         const centers = new Map();
         for (let i = 0; i < layers.length; i++) {
           const layer = layers[i];
@@ -181,10 +181,62 @@ const elk = new ELK();
             : (contentW - layerW[i]) / 2;
           let x = rowX;
           for (const n of layer) {
-            centers.set(n.id, { x: x + (n.width || 200) / 2, row: i });
+            centers.set(n.id, { x: x + (n.width || 200) / 2, row: i, width: n.width || 200 });
             x += (n.width || 200) + H_GAP;
           }
         }
+        return centers;
+      }
+
+      function estimateConnectorLaneCounts(centers) {
+        const laneCounts = Array(layers.length).fill(0);
+
+        function likelyDirectVertical(edge, src, tgt) {
+          const srcNode = children.find(n => n.id === edge.from);
+          const tgtNode = children.find(n => n.id === edge.to);
+          if (!srcNode || !tgtNode) return false;
+          if (Math.abs(src.row - tgt.row) !== 1) return false;
+          const tolerance = Math.min(src.width, tgt.width) / 2;
+          return Math.abs(src.x - tgt.x) < tolerance &&
+                 (srcNode.type === 'container' || srcNode.type === 'database') &&
+                 (tgtNode.type === 'container' || tgtNode.type === 'database');
+        }
+
+        for (const edge of intEdges) {
+          const src = centers.get(edge.from);
+          const tgt = centers.get(edge.to);
+          if (!src || !tgt || src.row === tgt.row) continue;
+          if (likelyDirectVertical(edge, src, tgt)) continue;
+
+          const isDown = tgt.row > src.row;
+          const firstGap = isDown ? src.row + 1 : src.row;
+          if (firstGap > 0 && firstGap < laneCounts.length) laneCounts[firstGap]++;
+
+          const targetGap = isDown ? tgt.row : tgt.row + 1;
+          if (Math.abs(tgt.row - src.row) > 1 && targetGap > 0 && targetGap < laneCounts.length) {
+            laneCounts[targetGap]++;
+          }
+        }
+
+        return laneCounts;
+      }
+
+      const connectorLaneCounts = estimateConnectorLaneCounts(estimateLayerCenters());
+      const ROUTE_BAND_MARGIN = 18;
+      const MAX_CONNECTOR_GAP_EXTRA = 80;
+      const gapBefore = (i) => {
+        if (i === 0) return 0;
+        const baseGap = isDbLayer(layers[i]) ? DB_V_GAP : V_GAP;
+        const laneCount = connectorLaneCounts[i] || 0;
+        if (laneCount <= 1) return baseGap;
+
+        const requiredGap = ROUTE_BAND_MARGIN * 2 + laneCount * MIN_ROUTE_LINE_GAP;
+        const extra = Math.min(MAX_CONNECTOR_GAP_EXTRA, Math.max(0, requiredGap - baseGap));
+        return baseGap + extra;
+      };
+
+      function estimateInternalRoutePressure() {
+        const centers = estimateLayerCenters();
 
         const pressure = { left: 0, right: 0 };
         for (const e of intEdges) {
@@ -489,7 +541,15 @@ const elk = new ELK();
       const leftSet  = new Set(leftNodes.map(n => n.id));
       const rightSet = new Set(rightNodes.map(n => n.id));
       const routedEdgeSegments = [];
-      const LANE_OFFSETS = [0, -10, 10, -18, 18, -26, 26];
+      const LANE_OFFSETS = [
+        0,
+        -MIN_ROUTE_LINE_GAP,
+        MIN_ROUTE_LINE_GAP,
+        -MIN_ROUTE_LINE_GAP * 2,
+        MIN_ROUTE_LINE_GAP * 2,
+        -MIN_ROUTE_LINE_GAP * 3,
+        MIN_ROUTE_LINE_GAP * 3
+      ];
       const LANE_OVERLAP_THRESHOLD = 24;
 
       function normalizeBundleLabel(edge) {
@@ -564,6 +624,29 @@ const elk = new ELK();
         return 0;
       }
 
+      function segmentParallelProximity(segA, segB) {
+        const a = segA.a, b = segA.b, c = segB.a, d = segB.b;
+        const aHorizontal = Math.abs(a.y - b.y) < 2;
+        const bHorizontal = Math.abs(c.y - d.y) < 2;
+        const aVertical = Math.abs(a.x - b.x) < 2;
+        const bVertical = Math.abs(c.x - d.x) < 2;
+        if (aHorizontal && bHorizontal) {
+          const distance = Math.abs(a.y - c.y);
+          if (distance < 6 || distance >= MIN_ROUTE_LINE_GAP) return 0;
+          const lo = Math.max(Math.min(a.x, b.x), Math.min(c.x, d.x));
+          const hi = Math.min(Math.max(a.x, b.x), Math.max(c.x, d.x));
+          return Math.max(0, hi - lo);
+        }
+        if (aVertical && bVertical) {
+          const distance = Math.abs(a.x - c.x);
+          if (distance < 6 || distance >= MIN_ROUTE_LINE_GAP) return 0;
+          const lo = Math.max(Math.min(a.y, b.y), Math.min(c.y, d.y));
+          const hi = Math.min(Math.max(a.y, b.y), Math.max(c.y, d.y));
+          return Math.max(0, hi - lo);
+        }
+        return 0;
+      }
+
       function segmentOrientation(a, b, c) {
         return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
       }
@@ -604,6 +687,8 @@ const elk = new ELK();
         let crossings = 0;
         let overlaps = 0;
         let overlapPx = 0;
+        let closeParallels = 0;
+        let closePx = 0;
         let nodeCrossings = 0;
 
         for (const segment of segments) {
@@ -615,6 +700,13 @@ const elk = new ELK();
               overlapPx += overlap;
             } else if (segmentsCross(segment, existing)) {
               crossings++;
+            } else {
+              const close = segmentParallelProximity(segment, existing);
+              if (close > 20) {
+                if (canBundleEdges(edge, allEdges[existing.edgeIndex])) continue;
+                closeParallels++;
+                closePx += close;
+              }
             }
           }
 
@@ -634,8 +726,16 @@ const elk = new ELK();
           crossings,
           overlaps,
           overlapPx,
+          closeParallels,
+          closePx,
           nodeCrossings,
-          score: nodeCrossings * 10000 + overlaps * 120 + overlapPx + crossings * 180
+          score:
+            nodeCrossings * 10000 +
+            overlaps * 120 +
+            overlapPx +
+            closeParallels * 90 +
+            closePx * 0.8 +
+            crossings * 180
         };
       }
 
@@ -664,7 +764,12 @@ const elk = new ELK();
           if (!isAxisAligned) continue;
 
           const currentStats = edgeConflictScore(points, edge);
-          if (currentStats.overlaps === 0 || currentStats.overlapPx < LANE_OVERLAP_THRESHOLD) continue;
+          if (currentStats.overlaps === 0 && currentStats.closeParallels === 0 && currentStats.crossings === 0) continue;
+          if (
+            currentStats.crossings === 0 &&
+            currentStats.overlapPx < LANE_OVERLAP_THRESHOLD &&
+            currentStats.closePx < LANE_OVERLAP_THRESHOLD
+          ) continue;
 
           let best = { points, score: currentStats.score, offset: 0 };
           for (const offset of LANE_OFFSETS.slice(1)) {
@@ -722,6 +827,8 @@ const elk = new ELK();
           edgeCrossings: 0,
           edgeOverlaps: 0,
           edgeOverlapPx: 0,
+          closeParallels: 0,
+          closePx: 0,
           routeLength: sectionRouteLength(section)
         }));
         const segmentsByEdge = sections.map(section => pointsToSegments(sectionToPoints(section)));
@@ -740,6 +847,15 @@ const elk = new ELK();
                 } else if (segmentsCross(segA, segB)) {
                   edgeScores[i].edgeCrossings++;
                   edgeScores[j].edgeCrossings++;
+                } else {
+                  const closePx = segmentParallelProximity(segA, segB);
+                  if (closePx > 20) {
+                    if (canBundleEdges(allEdges[i], allEdges[j])) continue;
+                    edgeScores[i].closeParallels++;
+                    edgeScores[j].closeParallels++;
+                    edgeScores[i].closePx += closePx;
+                    edgeScores[j].closePx += closePx;
+                  }
                 }
               }
             }
@@ -751,11 +867,15 @@ const elk = new ELK();
           acc.edgeCrossings += edgeScore.edgeCrossings;
           acc.edgeOverlaps += edgeScore.edgeOverlaps;
           acc.edgeOverlapPx += edgeScore.edgeOverlapPx;
+          acc.closeParallels += edgeScore.closeParallels;
+          acc.closePx += edgeScore.closePx;
           acc.totalRouteLength += edgeScore.routeLength;
           edgeScore.score =
             edgeScore.nodeCrossings * 100000 +
             edgeScore.edgeOverlaps * 600 +
             edgeScore.edgeOverlapPx * 2 +
+            edgeScore.closeParallels * 450 +
+            edgeScore.closePx +
             edgeScore.edgeCrossings * 180 +
             edgeScore.routeLength * 0.01;
           return acc;
@@ -764,6 +884,8 @@ const elk = new ELK();
           edgeCrossings: 0,
           edgeOverlaps: 0,
           edgeOverlapPx: 0,
+          closeParallels: 0,
+          closePx: 0,
           totalRouteLength: 0
         });
 
@@ -772,6 +894,8 @@ const elk = new ELK();
           totals.nodeCrossings * 100000 +
           totals.edgeOverlaps * 600 +
           totals.edgeOverlapPx * 2 +
+          totals.closeParallels * 450 +
+          totals.closePx +
           totals.edgeCrossings * 180 +
           totals.totalRouteLength * 0.01;
         return totals;
@@ -781,7 +905,12 @@ const elk = new ELK();
         let current = evaluateRouteSet(sections);
         const maxReroutes = Math.min(5, Math.ceil(allEdges.length * 0.2));
         const candidates = [...current.edgeScores]
-          .filter(edgeScore => edgeScore.edgeCrossings > 0 || edgeScore.edgeOverlaps > 0 || edgeScore.nodeCrossings > 0)
+          .filter(edgeScore =>
+            edgeScore.edgeCrossings > 0 ||
+            edgeScore.edgeOverlaps > 0 ||
+            edgeScore.closeParallels > 0 ||
+            edgeScore.nodeCrossings > 0
+          )
           .sort((a, b) => b.score - a.score)
           .slice(0, maxReroutes);
 
@@ -1014,11 +1143,35 @@ const elk = new ELK();
           }
           return 0;
         }
+        function routeSegmentParallelProximity(segA, segB) {
+          const a = segA.a, b = segA.b, c = segB.a, d = segB.b;
+          const aHorizontal = Math.abs(a.y - b.y) < 2;
+          const bHorizontal = Math.abs(c.y - d.y) < 2;
+          const aVertical = Math.abs(a.x - b.x) < 2;
+          const bVertical = Math.abs(c.x - d.x) < 2;
+          if (aHorizontal && bHorizontal) {
+            const distance = Math.abs(a.y - c.y);
+            if (distance < 6 || distance >= MIN_ROUTE_LINE_GAP) return 0;
+            const lo = Math.max(Math.min(a.x, b.x), Math.min(c.x, d.x));
+            const hi = Math.min(Math.max(a.x, b.x), Math.max(c.x, d.x));
+            return Math.max(0, hi - lo);
+          }
+          if (aVertical && bVertical) {
+            const distance = Math.abs(a.x - c.x);
+            if (distance < 6 || distance >= MIN_ROUTE_LINE_GAP) return 0;
+            const lo = Math.max(Math.min(a.y, b.y), Math.min(c.y, d.y));
+            const hi = Math.min(Math.max(a.y, b.y), Math.max(c.y, d.y));
+            return Math.max(0, hi - lo);
+          }
+          return 0;
+        }
         function routeEdgeConflictStats(route) {
           const segments = routeSegments(route);
           let edgeCrossings = 0;
           let edgeOverlaps = 0;
           let edgeOverlapPx = 0;
+          let closeParallels = 0;
+          let closePx = 0;
           let sourcePortReuses = 0;
           const start = route.startPoint;
           if (start) {
@@ -1041,10 +1194,17 @@ const elk = new ELK();
                 edgeOverlapPx += overlapPx;
               } else if (routeSegmentCrosses(candidateSeg, existingSeg)) {
                 edgeCrossings++;
+              } else {
+                const close = routeSegmentParallelProximity(candidateSeg, existingSeg);
+                if (close > 20) {
+                  if (canBundleEdges(e, allEdges[existingSeg.edgeIndex])) continue;
+                  closeParallels++;
+                  closePx += close;
+                }
               }
             }
           }
-          return { edgeCrossings, edgeOverlaps, edgeOverlapPx, sourcePortReuses };
+          return { edgeCrossings, edgeOverlaps, edgeOverlapPx, closeParallels, closePx, sourcePortReuses };
         }
         function horizontalLaneBelowSource() {
           const nextTop = children
@@ -1232,6 +1392,8 @@ const elk = new ELK();
               score:
                 candidate.edgeOverlaps * 80 +
                 candidate.edgeOverlapPx * 0.5 +
+                candidate.closeParallels * 65 +
+                candidate.closePx * 0.35 +
                 candidate.edgeCrossings * 120 +
                 candidate.sourcePortReuses * 90 +
                 candidate.bends * 45 +
@@ -3044,6 +3206,7 @@ const elk = new ELK();
                   const p1 = points[i];
                   const p2 = points[i + 1];
                   const len = segLens[i];
+                  const isHorizontal = Math.abs(p1.y - p2.y) < 2;
                   if (len < 1) {
                     accumulated += len;
                     continue;
@@ -3059,6 +3222,8 @@ const elk = new ELK();
                       x,
                       y,
                       routeDistance: distanceAlongRoute,
+                      sourceDistance: Math.hypot(x - pStart.x, y - pStart.y),
+                      isHorizontal,
                       ...labelCandidateScore(x, y, len)
                     };
                     if (candidate.nodeCollision === 0 && candidate.labelHits === 0) {
@@ -3070,6 +3235,8 @@ const elk = new ELK();
                 }
 
                 candidates.sort((a, b) =>
+                  Number(b.isHorizontal) - Number(a.isHorizontal) ||
+                  a.sourceDistance - b.sourceDistance ||
                   a.edgeHits - b.edgeHits ||
                   a.score - b.score ||
                   a.routeDistance - b.routeDistance
@@ -3093,8 +3260,13 @@ const elk = new ELK();
                 }
               }
 
-              for (const anchor of anchorOrder) {
-                if (!placed) placed = tryPlaceAnchor(anchor);
+              if (preferSourceSideLabel) {
+                if (!placed) placed = tryPlaceAnchor('source');
+                if (!placed) placed = tryPlaceSourceSideRouteBand();
+              } else {
+                for (const anchor of anchorOrder) {
+                  if (!placed) placed = tryPlaceAnchor(anchor);
+                }
               }
 
               // Second Pass (Fallback): prefer edge-clear anchor positions, then relax only if needed.
@@ -3110,7 +3282,7 @@ const elk = new ELK();
                 }
               }
 
-              if (!placed) {
+              if (!placed && !preferSourceSideLabel) {
                 placed = tryPlaceSourceSideRouteBand();
               }
 
