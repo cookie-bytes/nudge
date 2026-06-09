@@ -709,6 +709,81 @@ const elk = new ELK();
         return hits;
       }
 
+      function sourceReservedBottomDrops(edge) {
+        if (!edge || !childIds.has(edge.from)) return [];
+
+        const sourcePos = getAbs(edge.from);
+        const sourceSize = getSz(edge.from);
+        const sourceCx = sourcePos.x + sourceSize.w / 2;
+        const sourceBot = sourcePos.y + sourceSize.h;
+        const outgoing = outgoingEdges.get(edge.from) || [];
+        const drops = [];
+
+        for (const edgeIdx of outgoing) {
+          const outgoingEdge = allEdges[edgeIdx];
+          if (!outgoingEdge || outgoingEdge === edge) continue;
+
+          const targetNode = getNode(outgoingEdge.to);
+          if (!targetNode || (targetNode.type !== 'database' && targetNode.type !== 'container')) continue;
+
+          const targetPos = getAbs(outgoingEdge.to);
+          const targetSize = getSz(outgoingEdge.to);
+          if (targetPos.y < sourceBot - 2) continue;
+
+          const targetCx = targetPos.x + targetSize.w / 2;
+          let dropX = null;
+          if (targetNode.type === 'database') {
+            if (Math.abs(sourceCx - targetCx) < Math.min(sourceSize.w, targetSize.w) / 2) {
+              dropX = sourceCx;
+            }
+          } else {
+            const overlapLeft = Math.max(sourcePos.x, targetPos.x);
+            const overlapRight = Math.min(sourcePos.x + sourceSize.w, targetPos.x + targetSize.w);
+            if (overlapRight - overlapLeft > 0) {
+              const sharedX = (sourceCx + targetCx) / 2;
+              dropX = Math.min(overlapRight, Math.max(overlapLeft, sharedX));
+            }
+          }
+
+          if (dropX === null) continue;
+          drops.push({
+            a: { x: dropX, y: sourceBot },
+            b: { x: dropX, y: targetPos.y }
+          });
+        }
+
+        return drops;
+      }
+
+      function sourceReservedDropCrossings(segments, edge) {
+        const drops = sourceReservedBottomDrops(edge);
+        if (drops.length === 0) return 0;
+
+        let crossings = 0;
+        for (const segment of segments) {
+          const horizontal = Math.abs(segment.a.y - segment.b.y) < 2;
+          if (!horizontal) continue;
+
+          const y = segment.a.y;
+          const minX = Math.min(segment.a.x, segment.b.x);
+          const maxX = Math.max(segment.a.x, segment.b.x);
+          for (const drop of drops) {
+            const minY = Math.min(drop.a.y, drop.b.y);
+            const maxY = Math.max(drop.a.y, drop.b.y);
+            if (
+              y > minY + 4 &&
+              y < maxY - 4 &&
+              minX < drop.a.x - 4 &&
+              maxX > drop.a.x + 4
+            ) {
+              crossings++;
+            }
+          }
+        }
+
+        return crossings;
+      }
+
       function edgeConflictScore(points, edge) {
         const segments = pointsToSegments(points);
         let crossings = 0;
@@ -717,6 +792,7 @@ const elk = new ELK();
         let closeParallels = 0;
         let closePx = 0;
         const boundaryHits = internalBoundaryClearanceHits(segments, edge);
+        const sourceDropCrossings = sourceReservedDropCrossings(segments, edge);
         let nodeCrossings = 0;
 
         for (const segment of segments) {
@@ -757,10 +833,12 @@ const elk = new ELK();
           closeParallels,
           closePx,
           boundaryHits,
+          sourceDropCrossings,
           nodeCrossings,
           score:
             nodeCrossings * 10000 +
             boundaryHits * 5000 +
+            sourceDropCrossings * 900 +
             overlaps * 120 +
             overlapPx +
             closeParallels * 90 +
@@ -798,11 +876,13 @@ const elk = new ELK();
             currentStats.overlaps === 0 &&
             currentStats.closeParallels === 0 &&
             currentStats.crossings === 0 &&
-            currentStats.boundaryHits === 0
+            currentStats.boundaryHits === 0 &&
+            currentStats.sourceDropCrossings === 0
           ) continue;
           if (
             currentStats.crossings === 0 &&
             currentStats.boundaryHits === 0 &&
+            currentStats.sourceDropCrossings === 0 &&
             currentStats.overlapPx < LANE_OVERLAP_THRESHOLD &&
             currentStats.closePx < LANE_OVERLAP_THRESHOLD
           ) continue;
@@ -866,12 +946,14 @@ const elk = new ELK();
           closeParallels: 0,
           closePx: 0,
           boundaryHits: 0,
+          sourceDropCrossings: 0,
           routeLength: sectionRouteLength(section)
         }));
         const segmentsByEdge = sections.map(section => pointsToSegments(sectionToPoints(section)));
 
         for (let i = 0; i < segmentsByEdge.length; i++) {
           edgeScores[i].boundaryHits = internalBoundaryClearanceHits(segmentsByEdge[i], allEdges[i]);
+          edgeScores[i].sourceDropCrossings = sourceReservedDropCrossings(segmentsByEdge[i], allEdges[i]);
         }
 
         for (let i = 0; i < segmentsByEdge.length; i++) {
@@ -911,10 +993,12 @@ const elk = new ELK();
           acc.closeParallels += edgeScore.closeParallels;
           acc.closePx += edgeScore.closePx;
           acc.boundaryHits += edgeScore.boundaryHits;
+          acc.sourceDropCrossings += edgeScore.sourceDropCrossings;
           acc.totalRouteLength += edgeScore.routeLength;
           edgeScore.score =
             edgeScore.nodeCrossings * 100000 +
             edgeScore.boundaryHits * 5000 +
+            edgeScore.sourceDropCrossings * 900 +
             edgeScore.edgeOverlaps * 600 +
             edgeScore.edgeOverlapPx * 2 +
             edgeScore.closeParallels * 450 +
@@ -930,6 +1014,7 @@ const elk = new ELK();
           closeParallels: 0,
           closePx: 0,
           boundaryHits: 0,
+          sourceDropCrossings: 0,
           totalRouteLength: 0
         });
 
@@ -937,6 +1022,7 @@ const elk = new ELK();
         totals.score =
           totals.nodeCrossings * 100000 +
           totals.boundaryHits * 5000 +
+          totals.sourceDropCrossings * 900 +
           totals.edgeOverlaps * 600 +
           totals.edgeOverlapPx * 2 +
           totals.closeParallels * 450 +
@@ -955,6 +1041,7 @@ const elk = new ELK();
             edgeScore.edgeOverlaps > 0 ||
             edgeScore.closeParallels > 0 ||
             edgeScore.boundaryHits > 0 ||
+            edgeScore.sourceDropCrossings > 0 ||
             edgeScore.nodeCrossings > 0
           )
           .sort((a, b) => b.score - a.score)
@@ -1219,6 +1306,7 @@ const elk = new ELK();
           let closeParallels = 0;
           let closePx = 0;
           const boundaryHits = internalBoundaryClearanceHits(segments, e);
+          const sourceDropCrossings = sourceReservedDropCrossings(segments, e);
           let sourcePortReuses = 0;
           const start = route.startPoint;
           if (start) {
@@ -1251,7 +1339,7 @@ const elk = new ELK();
               }
             }
           }
-          return { edgeCrossings, edgeOverlaps, edgeOverlapPx, closeParallels, closePx, boundaryHits, sourcePortReuses };
+          return { edgeCrossings, edgeOverlaps, edgeOverlapPx, closeParallels, closePx, boundaryHits, sourceDropCrossings, sourcePortReuses };
         }
         function horizontalLaneBelowSource() {
           const nextTop = children
@@ -1290,6 +1378,24 @@ const elk = new ELK();
         }
         function sourceBottomSlot(slot = 0.75) {
           return sp.x + ss.w * slot;
+        }
+        function sourceSafeBottomExitXs(preferRight) {
+          const drops = sourceReservedBottomDrops(e);
+          if (drops.length === 0) return [];
+
+          const candidates = [];
+          const minX = sp.x + ss.w * 0.15;
+          const maxX = sp.x + ss.w * 0.85;
+          for (const drop of drops) {
+            const offset = MIN_ROUTE_LINE_GAP * 2;
+            candidates.push(preferRight ? drop.a.x + offset : drop.a.x - offset);
+            candidates.push(preferRight ? drop.a.x - offset : drop.a.x + offset);
+          }
+
+          return [...new Set(candidates
+            .map(x => Math.min(maxX, Math.max(minX, x)))
+            .map(x => Math.round(x * 10) / 10))]
+            .filter(x => Math.abs(x - scx) > 4);
         }
         function sideExternalRouteCandidates() {
           const candidates = [];
@@ -1442,6 +1548,7 @@ const elk = new ELK();
                 candidate.closeParallels * 65 +
                 candidate.closePx * 0.35 +
                 candidate.boundaryHits * 900 +
+                candidate.sourceDropCrossings * 900 +
                 candidate.edgeCrossings * 120 +
                 candidate.sourcePortReuses * 90 +
                 candidate.bends * 45 +
@@ -1689,6 +1796,12 @@ const elk = new ELK();
               { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: tTop }, bendPoints: [{ x: scx, y: sourceLane }, { x: leftGutterX, y: sourceLane }, { x: leftGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? 120 : -120 },
               { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: tTop }, bendPoints: [{ x: scx, y: sourceLane }, { x: rightGutterX, y: sourceLane }, { x: rightGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? -120 : 120 }
             );
+            for (const safeX of sourceSafeBottomExitXs(preferRight)) {
+              candidates.push(
+                { startPoint: { x: safeX, y: sBot }, endPoint: { x: tcx, y: tTop }, bendPoints: [{ x: safeX, y: sourceLane }, { x: leftGutterX, y: sourceLane }, { x: leftGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? 135 : -105 },
+                { startPoint: { x: safeX, y: sBot }, endPoint: { x: tcx, y: tTop }, bendPoints: [{ x: safeX, y: sourceLane }, { x: rightGutterX, y: sourceLane }, { x: rightGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? -105 : 135 }
+              );
+            }
           } else if (sp.y >= tp.y + ts.h - 2) {
             const sourceLane = horizontalLaneAboveSource();
             const targetLane = horizontalLaneBelowTarget();
