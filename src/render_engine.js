@@ -2502,6 +2502,7 @@ const elk = new ELK();
       svg.style.height = `${graph.height + 50 + DIAGRAM_B_PAD}px`;
 
       const flatNodes = flattenNodes(graph, DIAGRAM_H_PAD, 50);
+      const flatNodeById = new Map(flatNodes.map(n => [n.id, n]));
       const allComponents = flatNodes.filter(n => n.type !== 'boundary');
       const boundaryBorderObstacles = flatNodes
         .filter(n => n.type === 'boundary')
@@ -2743,6 +2744,20 @@ const elk = new ELK();
         const absX = absoluteParentX + (node.x || 0);
         const absY = absoluteParentY + (node.y || 0);
 
+        function shouldArrowPointToStart(edge) {
+          const sourceId = edge.sources && edge.sources[0];
+          const targetId = edge.targets && edge.targets[0];
+          const sourceNode = flatNodeById.get(sourceId);
+          const targetNode = flatNodeById.get(targetId);
+          const labelText = (edge.labels || []).map(label => label.text || '').join(' ').toLowerCase();
+
+          if (!labelText.includes('consume')) return false;
+
+          const sourceIsBus = sourceNode && sourceNode.type === 'message_bus';
+          const targetIsBus = targetNode && targetNode.type === 'message_bus';
+          return targetIsBus && !sourceIsBus;
+        }
+
         if (node.edges) {
           const edgesLayer = document.getElementById("edges-layer");
           const labelsLayer = document.getElementById("edge-labels-layer");
@@ -2793,7 +2808,11 @@ const elk = new ELK();
             const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
             path.setAttribute("d", pathD);
             path.setAttribute("class", "edge-line");
-            path.setAttribute("marker-end", "url(#arrow)");
+            if (shouldArrowPointToStart(edge)) {
+              path.setAttribute("marker-start", "url(#arrow)");
+            } else {
+              path.setAttribute("marker-end", "url(#arrow)");
+            }
             edgesLayer.appendChild(path);
 
             // Draw labels on the segment with the most clearance from nearby nodes
