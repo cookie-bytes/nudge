@@ -10,6 +10,12 @@
   "scripts": {
     "postinstall": "node -e \"const fs=require('fs');fs.mkdirSync('src/vendor',{recursive:true});fs.copyFileSync(require.resolve('elkjs/lib/elk.bundled.js'),'src/vendor/elk.bundled.js');\"",
     "start": "node src/cli/index.js examples/search_service_container.mermaid",
+    "probe:apply-port-hints": "node scripts/port_hint_apply_probe.js",
+    "probe:port-hints": "node scripts/port_hint_probe.js",
+    "probe:apply-diagonal-routes": "node scripts/diagonal_route_apply_probe.js",
+    "probe:diagonal-routes": "node scripts/diagonal_route_probe.js",
+    "probe:apply-top-order": "node scripts/top_order_apply_probe.js",
+    "probe:top-order": "node scripts/top_order_probe.js",
     "test": "node test/run_tests.js",
     "test:visual": "NUDGE_VISUAL_TEST=true node test/run_tests.js"
   },

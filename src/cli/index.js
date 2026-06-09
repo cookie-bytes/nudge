@@ -49,7 +49,8 @@ const { success, history, svgContent, pngPath } = await optimizeDiagram({
   diagramModel,
   outputDir: OUTPUT_DIR,
   onLog: (msg) => console.log(msg),
-  skipLlm: true,
+  checkpointTimeout: Number(process.env.NUDGE_CHECKPOINT_TIMEOUT || 90000),
+  skipLlm: !!process.env.NUDGE_NO_LLM,
 });
 
 console.log('\n=================================');

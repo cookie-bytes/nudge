@@ -124,6 +124,12 @@ const elk = new ELK();
     //          all edges with simple orthogonal paths.
     async function layoutContainerDiagram(diagramData) {
       const options = diagramData.layoutOptions || {};
+      const portHints = (diagramData._layoutOverrides && diagramData._layoutOverrides.portHints) ||
+                        diagramData._portHints ||
+                        {};
+      const routeHints = (diagramData._layoutOverrides && diagramData._layoutOverrides.routeHints) ||
+                         diagramData._routeHints ||
+                         {};
       const H_GAP   = Number(options["elk.spacing.nodeNode"] || 80);
       const V_GAP   = Number(options["elk.layered.spacing.nodeNodeBetweenLayers"] || 80);
       const B_PAD   = 80;   // boundary left/right/top padding
@@ -423,6 +429,14 @@ const elk = new ELK();
             const os = getSz(otherId);
             const otherCx = op.x + os.w / 2;
             const otherCy = op.y + os.h / 2;
+            const hint = portHints[`edge_${idx}`] || portHints[idx] || {};
+            const hintedFace = e.from === bus.id ? hint.sourceSide : hint.targetSide;
+            if (['TOP', 'BOTTOM', 'LEFT', 'RIGHT'].includes(hintedFace)) {
+              const sortKey = (hintedFace === 'TOP' || hintedFace === 'BOTTOM') ? otherCx : otherCy;
+              faceGroups[hintedFace].push({ idx, sortKey, sideSortKey: otherCy, hinted: true });
+              return;
+            }
+
             // Zone-aware: external nodes in the left/right zones approach the bus
             // from the side, not from above — assign them to the matching face so
             // their port slots don't displace the internal-node TOP face ordering.
@@ -1185,6 +1199,8 @@ const elk = new ELK();
 
         const scx = exitX;
         const tcx = entryX;
+        const routeHint = routeHints[`edge_${idx}`] || routeHints[idx] || {};
+        const routeIntent = routeHint.routeIntent || routeHint.intent || null;
         const sBot = sp.y + ss.h,    tTop = tp.y;
         const sTop = sp.y,           tBot = tp.y + ts.h;
         const sCy  = sp.y + ss.h / 2, tCy = tp.y + ts.h / 2;
@@ -1237,6 +1253,18 @@ const elk = new ELK();
             const dx = pts[i + 1].x - pts[i].x;
             const dy = pts[i + 1].y - pts[i].y;
             len += Math.sqrt(dx * dx + dy * dy);
+          }
+          return len;
+        }
+        function routeDiagonalLength(route) {
+          const pts = [route.startPoint, ...(route.bendPoints || []), route.endPoint];
+          let len = 0;
+          for (let i = 0; i < pts.length - 1; i++) {
+            const dx = pts[i + 1].x - pts[i].x;
+            const dy = pts[i + 1].y - pts[i].y;
+            if (Math.abs(dx) > 2 && Math.abs(dy) > 2) {
+              len += Math.sqrt(dx * dx + dy * dy);
+            }
           }
           return len;
         }
@@ -1582,7 +1610,80 @@ const elk = new ELK();
 
           return candidates;
         }
+        function hintedOrthogonalRouteCandidates(sourceY, endY, sourceLane, targetLane, sourcePortXs = [scx]) {
+          const candidates = [];
+          if (!routeIntent) return candidates;
+          if (targetNode && targetNode.type === 'database') return candidates;
+
+          const wantsLeftLane = routeIntent === 'LEFT_LANE';
+          const wantsRightLane = routeIntent === 'RIGHT_LANE';
+          const wantsTargetOrthogonal = routeIntent === 'ORTHOGONAL_NEAR_TARGET';
+          if (!wantsLeftLane && !wantsRightLane && !wantsTargetOrthogonal) return candidates;
+
+          const sourceAboveTarget = sourceY > endY;
+          const sourcePortY = sourceY;
+          const leftGutterX = orderedMessageBusGutterX(false);
+          const rightGutterX = orderedMessageBusGutterX(true);
+          const laneBias = -720;
+          const targetBias = -520;
+
+          const uniqueSourceXs = [...new Set(sourcePortXs
+            .filter(Number.isFinite)
+            .map(x => Math.round(x * 10) / 10))];
+
+          function pushViaGutter(gutterX, scoreBias) {
+            for (const sourceX of uniqueSourceXs) {
+              candidates.push({
+                startPoint: { x: sourceX, y: sourcePortY },
+                endPoint: { x: tcx, y: endY },
+                bendPoints: [
+                  { x: sourceX, y: sourceLane },
+                  { x: gutterX, y: sourceLane },
+                  { x: gutterX, y: targetLane },
+                  { x: tcx, y: targetLane }
+                ],
+                _scoreBias: scoreBias
+              });
+            }
+          }
+
+          if (wantsLeftLane) pushViaGutter(leftGutterX, laneBias);
+          if (wantsRightLane) pushViaGutter(rightGutterX, laneBias);
+
+          if (wantsTargetOrthogonal) {
+            for (const sourceX of uniqueSourceXs) {
+              candidates.push({
+                startPoint: { x: sourceX, y: sourcePortY },
+                endPoint: { x: tcx, y: endY },
+                bendPoints: [
+                  { x: sourceX, y: targetLane },
+                  { x: tcx, y: targetLane }
+                ],
+                _scoreBias: targetBias
+              });
+              const targetSideX = tcx >= sourceX ? tp.x + ts.w + 24 : tp.x - 24;
+              candidates.push({
+                startPoint: { x: sourceX, y: sourcePortY },
+                endPoint: { x: tcx, y: endY },
+                bendPoints: [
+                  { x: sourceX, y: sourceLane },
+                  { x: targetSideX, y: sourceLane },
+                  { x: targetSideX, y: targetLane },
+                  { x: tcx, y: targetLane }
+                ],
+                _scoreBias: targetBias + (sourceAboveTarget ? -40 : 0)
+              });
+            }
+          }
+
+          return candidates;
+        }
         function chooseBestRoute(candidates) {
+          const orthogonalHintActive = !(targetNode && targetNode.type === 'database') && (
+            routeIntent === 'LEFT_LANE' ||
+            routeIntent === 'RIGHT_LANE' ||
+            routeIntent === 'ORTHOGONAL_NEAR_TARGET'
+          );
           return candidates
             .filter(Boolean)
             .map((route, order) => ({
@@ -1591,7 +1692,8 @@ const elk = new ELK();
               crossings: routeCrossingCount(route),
               ...routeEdgeConflictStats(route),
               bends: route.bendPoints ? route.bendPoints.length : 0,
-              length: routeLength(route) + (route._scoreBias || 0)
+              length: routeLength(route) + (route._scoreBias || 0),
+              diagonalLength: orthogonalHintActive ? routeDiagonalLength(route) : 0
             }))
             .map(candidate => ({
               ...candidate,
@@ -1604,6 +1706,7 @@ const elk = new ELK();
                 candidate.sourceDropCrossings * 900 +
                 candidate.edgeCrossings * 120 +
                 candidate.sourcePortReuses * 90 +
+                candidate.diagonalLength * 1.3 +
                 candidate.bends * 45 +
                 candidate.length
             }))
@@ -1616,6 +1719,23 @@ const elk = new ELK();
               const { _scoreBias, ...cleanRoute } = route;
               return cleanRoute;
             })[0];
+        }
+        function chooseBestRouteWithStandardGuard(candidates, standard) {
+          const chosen = chooseBestRoute(candidates);
+          if (!routeIntent || !chosen || chosen === standard) return chosen;
+
+          const chosenConflicts = routeEdgeConflictStats(chosen);
+          const standardConflicts = routeEdgeConflictStats(standard);
+          if (
+            routeCrossingCount(chosen) > routeCrossingCount(standard) ||
+            chosenConflicts.edgeCrossings > standardConflicts.edgeCrossings ||
+            chosenConflicts.edgeOverlaps > standardConflicts.edgeOverlaps ||
+            chosenConflicts.boundaryHits > standardConflicts.boundaryHits ||
+            chosenConflicts.sourceDropCrossings > standardConflicts.sourceDropCrossings
+          ) {
+            return standard;
+          }
+          return chosen;
         }
 
         // Horizontal Z/S-curve routing for left/right column nodes
@@ -1825,7 +1945,7 @@ const elk = new ELK();
               });
             }
           }
-          return chooseBestRoute(candidates);
+          return chooseBestRouteWithStandardGuard(candidates, standardRoute);
         }
 
         if ((leftSet.has(e.to) || rightSet.has(e.to)) && childIds.has(e.from)) {
@@ -1846,16 +1966,21 @@ const elk = new ELK();
             const preferRight = scx > bndX + bndW / 2;
             const leftGutterX = orderedMessageBusGutterX(false);
             const rightGutterX = orderedMessageBusGutterX(true);
+            const leftLaneBias = routeIntent === 'LEFT_LANE' ? -420 : preferRight ? 120 : -120;
+            const rightLaneBias = routeIntent === 'RIGHT_LANE' ? -420 : preferRight ? -120 : 120;
+            const targetLaneBias = routeIntent === 'ORTHOGONAL_NEAR_TARGET' ? -260 : 0;
+            const hintedSourceXs = [scx, ...sourceSafeBottomExitXs(preferRight)];
             candidates.push(
               { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [] },
-              { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: targetLane }, { x: tcx, y: targetLane }] },
-              { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: sourceLane }, { x: leftGutterX, y: sourceLane }, { x: leftGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? 120 : -120 },
-              { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: sourceLane }, { x: rightGutterX, y: sourceLane }, { x: rightGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? -120 : 120 }
+              { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: targetLaneBias },
+              { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: sourceLane }, { x: leftGutterX, y: sourceLane }, { x: leftGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: leftLaneBias },
+              { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: sourceLane }, { x: rightGutterX, y: sourceLane }, { x: rightGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: rightLaneBias }
             );
-            for (const safeX of sourceSafeBottomExitXs(preferRight)) {
+            candidates.push(...hintedOrthogonalRouteCandidates(sBot, endY, sourceLane, targetLane, hintedSourceXs));
+            for (const safeX of hintedSourceXs.filter(x => Math.abs(x - scx) > 4)) {
               candidates.push(
-                { startPoint: { x: safeX, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: safeX, y: sourceLane }, { x: leftGutterX, y: sourceLane }, { x: leftGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? 135 : -105 },
-                { startPoint: { x: safeX, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: safeX, y: sourceLane }, { x: rightGutterX, y: sourceLane }, { x: rightGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? -105 : 135 }
+                { startPoint: { x: safeX, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: safeX, y: sourceLane }, { x: leftGutterX, y: sourceLane }, { x: leftGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: leftLaneBias + 15 },
+                { startPoint: { x: safeX, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: safeX, y: sourceLane }, { x: rightGutterX, y: sourceLane }, { x: rightGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: rightLaneBias + 15 }
               );
             }
           } else if (sp.y >= tp.y + ts.h - 2) {
@@ -1865,14 +1990,18 @@ const elk = new ELK();
             const preferRight = scx > bndX + bndW / 2;
             const leftGutterX = orderedMessageBusGutterX(false);
             const rightGutterX = orderedMessageBusGutterX(true);
+            const leftLaneBias = routeIntent === 'LEFT_LANE' ? -420 : preferRight ? 120 : -120;
+            const rightLaneBias = routeIntent === 'RIGHT_LANE' ? -420 : preferRight ? -120 : 120;
+            const targetLaneBias = routeIntent === 'ORTHOGONAL_NEAR_TARGET' ? -260 : 0;
             candidates.push(
               { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: endY }, bendPoints: [] },
-              { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: targetLane }, { x: tcx, y: targetLane }] },
-              { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: sourceLane }, { x: leftGutterX, y: sourceLane }, { x: leftGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? 120 : -120 },
-              { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: sourceLane }, { x: rightGutterX, y: sourceLane }, { x: rightGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? -120 : 120 }
+              { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: targetLaneBias },
+              { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: sourceLane }, { x: leftGutterX, y: sourceLane }, { x: leftGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: leftLaneBias },
+              { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: sourceLane }, { x: rightGutterX, y: sourceLane }, { x: rightGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: rightLaneBias }
             );
+            candidates.push(...hintedOrthogonalRouteCandidates(sTop, endY, sourceLane, targetLane));
           }
-          return chooseBestRoute(candidates);
+          return chooseBestRouteWithStandardGuard(candidates, standardRoute);
         }
 
         return standardRoute;
@@ -1978,21 +2107,66 @@ const elk = new ELK();
         }
       }
 
-      // Barycenter sort within each layer to reduce edge crossings
+      // Barycenter sort within each layer to reduce edge crossings.
+      // Two-pass sweep: 
+      // 1. Downward (1 to N): pull each layer toward its parents above.
+      // 2. Upward (N-1 to 0): pull each layer toward its children below.
       const colMap = new Map();
+      const nodeToLayerIdx = new Map();
+      layers.forEach((l, idx) => l.forEach(n => nodeToLayerIdx.set(n.id, idx)));
+
+      const runSweep = (reverse) => {
+        const start = reverse ? layers.length - 2 : 1;
+        const end = reverse ? -1 : layers.length;
+        const step = reverse ? -1 : 1;
+
+        for (let i = start; i !== end; i += step) {
+          const originalIndices = new Map(layers[i].map((n, idx) => [n.id, idx]));
+          const barycenter = (node) => {
+            const positions = [];
+            for (const e of sortEdges) {
+              const other = (e.to === node.id) ? e.from : (e.from === node.id ? e.to : null);
+              if (other && colMap.has(other)) {
+                const otherLayerIdx = nodeToLayerIdx.get(other);
+                if (reverse ? (otherLayerIdx > i) : (otherLayerIdx < i)) {
+                  positions.push(colMap.get(other));
+                }
+              }
+            }
+            if (positions.length === 0) return colMap.get(node.id);
+            return positions.reduce((a, b) => a + b, 0) / positions.length;
+          };
+
+          layers[i] = [...layers[i]].sort((a, b) => {
+            const bA = barycenter(a);
+            const bB = barycenter(b);
+            if (Math.abs(bA - bB) > 0.001) return bA - bB;
+            return originalIndices.get(a.id) - originalIndices.get(b.id);
+          });
+          layers[i].forEach((n, idx) => colMap.set(n.id, idx));
+        }
+      };
+
+      // Initial map from Layer 0
       layers[0].forEach((n, idx) => colMap.set(n.id, idx));
-      for (let i = 1; i < layers.length; i++) {
-        const barycenter = (node) => {
-          const positions = [];
-          for (const e of sortEdges) {
-            if (e.to === node.id && colMap.has(e.from)) positions.push(colMap.get(e.from));
-            if (e.from === node.id && colMap.has(e.to)) positions.push(colMap.get(e.to));
-          }
-          if (positions.length === 0) return Infinity;
-          return positions.reduce((a, b) => a + b, 0) / positions.length;
-        };
-        layers[i] = [...layers[i]].sort((a, b) => barycenter(a) - barycenter(b));
-        layers[i].forEach((n, idx) => colMap.set(n.id, idx));
+      runSweep(false); // Downward
+      runSweep(true);  // Upward
+
+      const internalOrder = diagramData._layoutOverrides?.internalOrder || diagramData._internalOrder || {};
+      for (const [layerKey, orderedIds] of Object.entries(internalOrder)) {
+        if (!Array.isArray(orderedIds)) continue;
+        const layerIdx = Number(layerKey);
+        if (!Number.isInteger(layerIdx) || !layers[layerIdx]) continue;
+
+        const orderRank = new Map(orderedIds.map((id, idx) => [id, idx]));
+        if (!layers[layerIdx].some(node => orderRank.has(node.id))) continue;
+
+        const originalRank = new Map(layers[layerIdx].map((node, idx) => [node.id, idx]));
+        layers[layerIdx] = [...layers[layerIdx]].sort((a, b) => {
+          const rankA = orderRank.has(a.id) ? orderRank.get(a.id) : orderedIds.length + originalRank.get(a.id);
+          const rankB = orderRank.has(b.id) ? orderRank.get(b.id) : orderedIds.length + originalRank.get(b.id);
+          return rankA - rankB;
+        });
       }
 
       // Give message buses their own dedicated layer at the very bottom
@@ -3330,11 +3504,29 @@ const elk = new ELK();
                 return hits;
               }
 
+              function sharedTargetDatabaseLabelPressure(labelBox) {
+                if (!targetNode || targetNode.type !== 'database') return 0;
+                let pressure = 0;
+                for (const placed of placedLabels) {
+                  if (placed.targetId !== targetId) continue;
+                  if (boxesOverlap(labelBox, placed)) {
+                    pressure += 1000;
+                    continue;
+                  }
+                  const dx = Math.max(0, Math.max(placed.x - (labelBox.x + labelBox.width), labelBox.x - (placed.x + placed.width)));
+                  const dy = Math.max(0, Math.max(placed.y - (labelBox.y + labelBox.height), labelBox.y - (placed.y + placed.height)));
+                  const distance = Math.sqrt(dx * dx + dy * dy);
+                  if (distance < 42) pressure += 42 - distance;
+                }
+                return pressure;
+              }
+
               function labelCandidateScore(cx, cy, segLen = 0) {
                 const labelBox = labelBoxAt(cx, cy, textWidth, textHeight);
                 const nodeCollision = checkLabelCollision(cx, cy, textWidth, textHeight, obstacles) ? 1 : 0;
                 const edgeHits = labelEdgeHitCount(labelBox);
                 const labelHits = placedLabels.filter(pl => boxesOverlap(labelBox, pl)).length;
+                const sharedTargetPressure = sharedTargetDatabaseLabelPressure(labelBox);
                 const centerClearance = allComponents.length > 0
                   ? Math.min(...allComponents.map(n => pointToBoxDist(cx, cy, n)))
                   : 200;
@@ -3349,6 +3541,7 @@ const elk = new ELK();
                     nodeCollision * 100000 +
                     labelHits * 50000 +
                     edgeHits * 9000 -
+                    sharedTargetPressure * 260 -
                     Math.min(centerClearance, 180) * 12 -
                     segLen * 0.3 +
                     sourceDistanceBias
@@ -3595,6 +3788,53 @@ const elk = new ELK();
                 }
               }
 
+              if (targetNode && targetNode.type === 'database') {
+                const labelH = textHeight + 2 * V_PAD;
+                const labelW = textWidth + 2 * H_PAD;
+                const sameTargetLabels = placedLabels.filter(pl => pl.targetId === targetId);
+                if (sameTargetLabels.length > 0) {
+                  const boxAt = (cx, cy) => ({ x: cx - labelW / 2, y: cy - labelH / 2, width: labelW, height: labelH });
+                  const expanded = (box, pad) => ({
+                    x: box.x - pad,
+                    y: box.y - pad,
+                    width: box.width + pad * 2,
+                    height: box.height + pad * 2
+                  });
+                  const sameTargetScore = (cx, cy) => {
+                    const box = boxAt(cx, cy);
+                    const nodeCollision = checkLabelCollision(cx, cy, textWidth, textHeight, [...allComponents, ...boundaryBorderObstacles]) ? 1 : 0;
+                    const labelOverlapCount = placedLabels.filter(pl => boxesOverlap(box, pl)).length;
+                    const sameTargetCloseCount = sameTargetLabels.filter(pl => boxesOverlap(expanded(box, 28), expanded(pl, 28))).length;
+                    return (
+                      nodeCollision * 100000 +
+                      labelOverlapCount * 50000 +
+                      sameTargetCloseCount * 12000 +
+                      labelEdgeHitCount(box) * 2500 +
+                      Math.hypot(cx - midX, cy - midY) * 3
+                    );
+                  };
+
+                  const stepX = Math.max(labelW * 0.75, 78);
+                  const stepY = labelH + 12;
+                  const candidates = [{ x: midX, y: midY }];
+                  for (const dx of [-stepX, stepX, -2 * stepX, 2 * stepX, -3 * stepX, 3 * stepX]) {
+                    candidates.push({ x: midX + dx, y: midY });
+                  }
+                  for (const dy of [-stepY, stepY, -2 * stepY, 2 * stepY]) {
+                    candidates.push({ x: midX, y: midY + dy });
+                    candidates.push({ x: midX - stepX, y: midY + dy });
+                    candidates.push({ x: midX + stepX, y: midY + dy });
+                  }
+
+                  candidates.sort((a, b) => sameTargetScore(a.x, a.y) - sameTargetScore(b.x, b.y));
+                  const best = candidates[0];
+                  if (best) {
+                    midX = best.x;
+                    midY = best.y;
+                  }
+                }
+              }
+
               const bgRect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
               label.x = midX - absX;
               label.y = midY - absY;
@@ -3650,7 +3890,10 @@ const elk = new ELK();
                 x: midX - (textWidth + 2 * H_PAD) / 2,
                 y: midY - (textHeight + 2 * V_PAD) / 2,
                 width: textWidth + 2 * H_PAD,
-                height: textHeight + 2 * V_PAD
+                height: textHeight + 2 * V_PAD,
+                sourceId,
+                targetId,
+                targetType: targetNode && targetNode.type
               });
             }
           }

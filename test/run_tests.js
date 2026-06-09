@@ -253,7 +253,8 @@ async function runIntegrationTest() {
   }
 
   // --- C4Container sub-test ---
-  // Verifies the LM checkpoint pipeline fires and both zone/routing mocks are hit.
+  // Verifies the visual-hint pipeline renders each deterministic stage and
+  // exports final assets. Tiny diagrams may not produce useful LM hint payloads.
   {
     const outputDir = path.resolve('test_outputs/integration_test/container');
     if (fs.existsSync(outputDir)) fs.rmSync(outputDir, { recursive: true, force: true });
@@ -286,9 +287,11 @@ async function runIntegrationTest() {
 
       console.log(`  Container test: success=${result.success}, iterations=${result.history.length}, fetches=${callLog.total}`);
 
-      if (callLog.zoneVerification === 0) throw new Error("C4Container integration test: zone verification mock was never called — user-message contract may have changed.");
-      if (callLog.routingVerification === 0) throw new Error("C4Container integration test: routing verification mock was never called — user-message contract may have changed.");
+      for (const file of ['step_0_initial.png', 'step_1_top_order.png', 'step_2_port_hints.png', 'step_3_diagonal_routes.png']) {
+        if (!fs.existsSync(path.join(outputDir, file))) throw new Error(`C4Container integration test: ${file} was not created.`);
+      }
       if (!fs.existsSync(path.join(outputDir, 'optimized.svg'))) throw new Error("C4Container integration test: optimized.svg was not created.");
+      if (!fs.existsSync(path.join(outputDir, 'optimized.png'))) throw new Error("C4Container integration test: optimized.png was not created.");
     } finally {
       globalThis.fetch = originalFetch;
     }

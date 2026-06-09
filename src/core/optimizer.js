@@ -2,7 +2,12 @@ import path from 'path';
 import fs from 'fs';
 import { chromium } from 'playwright';
 import { analyzeLayout } from './geometry.js';
-import { getLLMOptimizationPatch, getLLMZoneVerification, getLLMRoutingVerification } from './llm_client.js';
+import {
+  getLLMOptimizationPatch,
+  getLLMPortHints,
+  getLLMTopOrder,
+  getLLMDiagonalRouteHints
+} from './llm_client.js';
 
 async function captureSvg(page, width, height) {
   const [svgMarkup, styles] = await Promise.all([
@@ -52,43 +57,200 @@ export async function optimizeDiagram({
 
     const hasBoundary = (diagramModel.nodes || []).some(n => n.type === 'boundary');
     if (hasBoundary) {
-      onLog('[Checkpoint] Container diagram — running pre-render LM zone verification...');
-      const initialPlan = await page.evaluate((data) => window.computeContainerPlan(data), diagramModel);
-      if (initialPlan) {
-        const overrides = {};
+      let overrides = { ...(diagramModel._layoutOverrides || {}) };
+      const visualHints = {};
 
-        if (signal?.aborted) {
-          onLog('[Optimizer] Optimization cancelled before zone verification.');
-          return { success: false, history: [], svgContent: null, pngPath: null };
+      const scoreContainerStep = (result) => {
+        const report = analyzeLayout(result);
+        const edge = report.edgeQuality || {};
+        return {
+          report,
+          score:
+            report.overlapCount * 100000 +
+            report.intersectionCount * 100000 +
+            (edge.edgeCrossingCount || 0) * 500 +
+            (edge.edgeOverlapCount || 0) * 500 +
+            (edge.edgeOverlapPx || 0) * 2 +
+            (edge.labelEdgeIntersectionCount || 0) * 250 +
+            (edge.totalBends || 0) * 4 +
+            (edge.totalRouteLength || 0) * 0.02
+        };
+      };
+
+      const renderContainerStep = async (stepName, overridesForStep = overrides) => {
+        const result = await page.evaluate(async (data) => window.renderDiagram(data), {
+          ...diagramModel,
+          _layoutOverrides: overridesForStep
+        });
+        if (!result?.success) {
+          onLog(`[Render] ${stepName} failed: ${result?.error || 'unknown render error'}`);
+          return null;
+        }
+        await page.setViewportSize({
+          width: Math.ceil(result.width) + 100,
+          height: Math.ceil(result.height) + 100,
+        });
+        const screenshotPath = path.join(outputDir, `${stepName}.png`);
+        const svgElement = await page.$('#svg-root');
+        await svgElement.screenshot({ path: screenshotPath });
+        onLog(`[Snapshot] Saved ${stepName} visual state to: ${screenshotPath}`);
+        return { result, screenshotPath };
+      };
+
+      const renderAndMaybeAccept = async (stepName, candidateOverrides, currentStep, description) => {
+        const candidateStep = await renderContainerStep(stepName, candidateOverrides);
+        if (!candidateStep) return { accepted: false, step: null, overrides };
+
+        const currentScore = scoreContainerStep(currentStep.result).score;
+        const candidateScore = scoreContainerStep(candidateStep.result).score;
+        if (candidateScore <= currentScore) {
+          overrides = candidateOverrides;
+          onLog(`[Visual Hint] Accepted ${description}: ${Math.round(currentScore * 10) / 10} -> ${Math.round(candidateScore * 10) / 10}`);
+          return { accepted: true, step: candidateStep, overrides };
         }
 
-        const zoneResult = skipLlm ? null : await getLLMZoneVerification(apiUrl, initialPlan, { signal, timeout: checkpointTimeout });
-        if (zoneResult) {
-          if (zoneResult.zoneOverrides && Object.keys(zoneResult.zoneOverrides).length > 0)
-            overrides.zoneOverrides = zoneResult.zoneOverrides;
-          if (zoneResult.swapCommands?.length > 0)
-            overrides.swapCommands = [...zoneResult.swapCommands];
-        }
+        onLog(`[Visual Hint] Rejected ${description}: ${Math.round(currentScore * 10) / 10} -> ${Math.round(candidateScore * 10) / 10}`);
+        return { accepted: false, step: currentStep, overrides };
+      };
 
-        if (signal?.aborted) {
-          onLog('[Optimizer] Optimization cancelled after zone verification.');
-          return { success: false, history: [], svgContent: null, pngPath: null };
-        }
+      onLog('[Visual Hint] Container diagram — running top-order → port → diagonal pipeline...');
 
-        const planForRouting = Object.keys(overrides).length > 0
-          ? await page.evaluate((data) => window.computeContainerPlan(data), { ...diagramModel, _layoutOverrides: overrides })
-          : initialPlan;
-        const routeResult = skipLlm ? null : await getLLMRoutingVerification(apiUrl, planForRouting, { signal, timeout: checkpointTimeout });
-        if (routeResult?.swapCommands?.length > 0)
-          overrides.swapCommands = [...(overrides.swapCommands || []), ...routeResult.swapCommands];
+      const initialStep = await renderContainerStep('step_0_initial');
+      if (!initialStep) return { success: false, history: [], svgContent: null, pngPath: null };
+      let acceptedStep = initialStep;
 
-        if (Object.keys(overrides).length > 0) {
-          onLog(`[Checkpoint] Applying LM layout overrides: ${JSON.stringify(overrides, null, 2)}`);
-          diagramModel._layoutOverrides = overrides;
+      if (!skipLlm && !signal?.aborted) {
+        const orderResult = await getLLMTopOrder(apiUrl, diagramModel, initialStep.result, { signal, timeout: checkpointTimeout });
+        if (orderResult) visualHints.topOrder = orderResult;
+        if (Array.isArray(orderResult?.suggestedOrder) && orderResult.suggestedOrder.length > 0) {
+          const candidateOverrides = {
+            ...overrides,
+            internalOrder: {
+              ...(overrides.internalOrder || {}),
+              [orderResult.layerIndex ?? 0]: orderResult.suggestedOrder
+            }
+          };
+          const accepted = await renderAndMaybeAccept('step_1_top_order', candidateOverrides, acceptedStep, 'top-row order');
+          acceptedStep = accepted.step || acceptedStep;
+          if (accepted.accepted) {
+            onLog(`[Visual Hint] Accepted top-row order: ${orderResult.suggestedOrder.join(', ')}`);
+          }
         } else {
-          onLog('[Checkpoint] LM verified layout — no overrides needed.');
+          const topOrderStep = await renderContainerStep('step_1_top_order');
+          if (!topOrderStep) return { success: false, history: [], svgContent: null, pngPath: null };
+          acceptedStep = topOrderStep;
         }
+      } else {
+        const topOrderStep = await renderContainerStep('step_1_top_order');
+        if (!topOrderStep) return { success: false, history: [], svgContent: null, pngPath: null };
+        acceptedStep = topOrderStep;
       }
+
+      if (!fs.existsSync(path.join(outputDir, 'step_1_top_order.png'))) {
+        const topOrderStep = await renderContainerStep('step_1_top_order');
+        if (!topOrderStep) return { success: false, history: [], svgContent: null, pngPath: null };
+      }
+
+      if (!skipLlm && !signal?.aborted) {
+        const portResult = await getLLMPortHints(apiUrl, diagramModel, acceptedStep.result, { signal, timeout: checkpointTimeout });
+        if (portResult) visualHints.port = portResult;
+        const portHints = {};
+        for (const suggestion of portResult?.suggestions || []) {
+          if (!suggestion.edgeId) continue;
+          const hint = {};
+          if (suggestion.sourceSide) hint.sourceSide = suggestion.sourceSide;
+          if (suggestion.targetSide) hint.targetSide = suggestion.targetSide;
+          if (Object.keys(hint).length > 0) portHints[suggestion.edgeId] = hint;
+        }
+        if (Object.keys(portHints).length > 0) {
+          const candidateOverrides = {
+            ...overrides,
+            portHints: {
+              ...(overrides.portHints || {}),
+              ...portHints
+            }
+          };
+          const accepted = await renderAndMaybeAccept('step_2_port_hints', candidateOverrides, acceptedStep, `port hints ${Object.keys(portHints).join(', ')}`);
+          acceptedStep = accepted.step || acceptedStep;
+        } else {
+          const portStep = await renderContainerStep('step_2_port_hints');
+          if (!portStep) return { success: false, history: [], svgContent: null, pngPath: null };
+          acceptedStep = portStep;
+        }
+      } else {
+        const portStep = await renderContainerStep('step_2_port_hints');
+        if (!portStep) return { success: false, history: [], svgContent: null, pngPath: null };
+        acceptedStep = portStep;
+      }
+
+      if (!fs.existsSync(path.join(outputDir, 'step_2_port_hints.png'))) {
+        const portStep = await renderContainerStep('step_2_port_hints');
+        if (!portStep) return { success: false, history: [], svgContent: null, pngPath: null };
+      }
+
+      if (!skipLlm && !signal?.aborted) {
+        const routeResult = await getLLMDiagonalRouteHints(apiUrl, diagramModel, acceptedStep.result, { signal, timeout: checkpointTimeout });
+        if (routeResult) visualHints.diagonalRoutes = routeResult;
+        const routeHints = {};
+        for (const suggestion of routeResult?.suggestions || []) {
+          if (!suggestion.edgeId || !suggestion.routeIntent || suggestion.routeIntent === 'KEEP_DIAGONAL') continue;
+          routeHints[suggestion.edgeId] = { routeIntent: suggestion.routeIntent };
+        }
+        if (Object.keys(routeHints).length > 0) {
+          const candidateOverrides = {
+            ...overrides,
+            routeHints: {
+              ...(overrides.routeHints || {}),
+              ...routeHints
+            }
+          };
+          const accepted = await renderAndMaybeAccept('step_3_diagonal_routes', candidateOverrides, acceptedStep, `diagonal route hints ${Object.keys(routeHints).join(', ')}`);
+          acceptedStep = accepted.step || acceptedStep;
+        } else {
+          const routeStep = await renderContainerStep('step_3_diagonal_routes');
+          if (!routeStep) return { success: false, history: [], svgContent: null, pngPath: null };
+          acceptedStep = routeStep;
+        }
+      } else {
+        const routeStep = await renderContainerStep('step_3_diagonal_routes');
+        if (!routeStep) return { success: false, history: [], svgContent: null, pngPath: null };
+        acceptedStep = routeStep;
+      }
+
+      if (!fs.existsSync(path.join(outputDir, 'step_3_diagonal_routes.png'))) {
+        const routeStep = await renderContainerStep('step_3_diagonal_routes');
+        if (!routeStep) return { success: false, history: [], svgContent: null, pngPath: null };
+      }
+
+      const finalStep = acceptedStep;
+
+      diagramModel._layoutOverrides = overrides;
+      if (Object.keys(visualHints).length > 0) {
+        fs.writeFileSync(path.join(outputDir, 'visual_hints.json'), JSON.stringify(visualHints, null, 2));
+      }
+
+      onLog('[Critique] Running geometric collision analysis...');
+      const report = analyzeLayout(finalStep.result);
+      onLog(`[Critique] Aspect Ratio: ${report.aspectRatio}`);
+      onLog(`[Critique] Collisions: ${report.collisions.length} (${report.overlapCount} overlaps, ${report.intersectionCount} edge crossings)`);
+
+      const svg = await captureSvg(page, finalStep.result.width, finalStep.result.height);
+      fs.writeFileSync(path.join(outputDir, 'optimized.svg'), svg);
+      const finalPngPath = path.join(outputDir, 'optimized.png');
+      fs.copyFileSync(finalStep.screenshotPath, finalPngPath);
+
+      const history = [{
+        iteration: 1,
+        options: { ...diagramModel.layoutOptions },
+        collisions: report.collisions.length,
+        overlaps: report.overlapCount,
+        crossings: report.intersectionCount,
+        aspectRatio: report.aspectRatio,
+        screenshot: finalStep.screenshotPath,
+      }];
+
+      const success = report.overlapCount === 0 && report.intersectionCount === 0;
+      return { success, history, svgContent: svg, pngPath: finalPngPath };
     }
 
     let currentOptions = { ...diagramModel.layoutOptions };
