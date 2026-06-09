@@ -428,17 +428,17 @@ const elk = new ELK();
             // from the side, not from above — assign them to the matching face so
             // their port slots don't displace the internal-node TOP face ordering.
             if (rightSet.has(otherId)) {
-              faceGroups.RIGHT.push({ idx, sortKey: otherCy });
+              faceGroups.RIGHT.push({ idx, sortKey: otherCy, sideSortKey: otherCy });
             } else if (leftSet.has(otherId)) {
-              faceGroups.LEFT.push({ idx, sortKey: otherCy });
+              faceGroups.LEFT.push({ idx, sortKey: otherCy, sideSortKey: otherCy });
             } else if (op.y + os.h <= bp.y + 4) {
-              faceGroups.TOP.push({ idx, sortKey: otherCx });
+              faceGroups.TOP.push({ idx, sortKey: otherCx, sideSortKey: otherCy });
             } else if (op.y >= bp.y + bs.h - 4) {
-              faceGroups.BOTTOM.push({ idx, sortKey: otherCx });
+              faceGroups.BOTTOM.push({ idx, sortKey: otherCx, sideSortKey: otherCy });
             } else if (otherCx < bp.x + bs.w / 2) {
-              faceGroups.LEFT.push({ idx, sortKey: otherCy });
+              faceGroups.LEFT.push({ idx, sortKey: otherCy, sideSortKey: otherCy });
             } else {
-              faceGroups.RIGHT.push({ idx, sortKey: otherCy });
+              faceGroups.RIGHT.push({ idx, sortKey: otherCy, sideSortKey: otherCy });
             }
           });
           for (const [face, edges] of Object.entries(faceGroups)) {
@@ -471,10 +471,23 @@ const elk = new ELK();
               }
             }
 
-            edges.forEach(({ idx }, i) => {
+            const rightCapThreshold = bp.x + bs.w - Math.max(MIN_ROUTE_LINE_GAP * 2, bs.w * 0.08);
+            edges.forEach((edge, i) => {
+              const { idx } = edge;
               const t = (i + 1) / (edges.length + 1);
               let x, y;
-              if (face === 'TOP')    { x = topBotPortX[i]; y = bp.y; }
+              if (face === 'TOP') {
+                x = topBotPortX[i];
+                y = bp.y;
+                if (x >= rightCapThreshold) {
+                  faceGroups.RIGHT.push({
+                    idx,
+                    sortKey: edge.sideSortKey ?? edge.sortKey,
+                    sideSortKey: edge.sideSortKey ?? edge.sortKey
+                  });
+                  return;
+                }
+              }
               if (face === 'BOTTOM') { x = topBotPortX[i]; y = bp.y + bs.h; }
               if (face === 'LEFT')   { x = bp.x;            y = bp.y + bs.h * t; }
               if (face === 'RIGHT')  { x = bp.x + bs.w;     y = bp.y + bs.h * t; }
@@ -1175,6 +1188,10 @@ const elk = new ELK();
         const sBot = sp.y + ss.h,    tTop = tp.y;
         const sTop = sp.y,           tBot = tp.y + ts.h;
         const sCy  = sp.y + ss.h / 2, tCy = tp.y + ts.h / 2;
+        const targetHubAssign = targetNode && targetNode.type === 'message_bus'
+          ? hubPortAssignments.get(idx)
+          : null;
+        const targetEntryY = targetHubAssign ? targetHubAssign.y : null;
 
         function routeCrossingCount(route) {
           let crossings = 0;
@@ -1716,15 +1733,17 @@ const elk = new ELK();
 
           if (tp.y >= sp.y + ss.h - 2) {
             // Target below
-            if (Math.abs(scx - tcx) < 3) return { startPoint: {x: scx, y: sBot}, endPoint: {x: tcx, y: tTop}, bendPoints: [] };
-            const my = (sBot + tTop) / 2;
-            return { startPoint: {x: scx, y: sBot}, endPoint: {x: tcx, y: tTop}, bendPoints: [{x: scx, y: my}, {x: tcx, y: my}] };
+            const endY = targetEntryY ?? tTop;
+            if (Math.abs(scx - tcx) < 3) return { startPoint: {x: scx, y: sBot}, endPoint: {x: tcx, y: endY}, bendPoints: [] };
+            const my = (sBot + endY) / 2;
+            return { startPoint: {x: scx, y: sBot}, endPoint: {x: tcx, y: endY}, bendPoints: [{x: scx, y: my}, {x: tcx, y: my}] };
           }
           if (sp.y >= tp.y + ts.h - 2) {
             // Target above
-            if (Math.abs(scx - tcx) < 3) return { startPoint: {x: scx, y: sTop}, endPoint: {x: tcx, y: tBot}, bendPoints: [] };
-            const my = (sTop + tBot) / 2;
-            return { startPoint: {x: scx, y: sTop}, endPoint: {x: tcx, y: tBot}, bendPoints: [{x: scx, y: my}, {x: tcx, y: my}] };
+            const endY = targetEntryY ?? tBot;
+            if (Math.abs(scx - tcx) < 3) return { startPoint: {x: scx, y: sTop}, endPoint: {x: tcx, y: endY}, bendPoints: [] };
+            const my = (sTop + endY) / 2;
+            return { startPoint: {x: scx, y: sTop}, endPoint: {x: tcx, y: endY}, bendPoints: [{x: scx, y: my}, {x: tcx, y: my}] };
           }
           // Same row — horizontal
           if (sp.x + ss.w <= tp.x) return { startPoint: {x: sp.x + ss.w, y: sCy}, endPoint: {x: tp.x, y: tCy}, bendPoints: [] };
@@ -1787,32 +1806,34 @@ const elk = new ELK();
           if (tp.y >= sp.y + ss.h - 2) {
             const sourceLane = horizontalLaneBelowSource();
             const targetLane = horizontalLaneAboveTarget();
+            const endY = targetEntryY ?? tTop;
             const leftGutterX = bndX + 35;
             const rightGutterX = bndX + bndW - 35;
             const preferRight = scx > bndX + bndW / 2;
             candidates.push(
-              { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: tTop }, bendPoints: [] },
-              { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: tTop }, bendPoints: [{ x: scx, y: targetLane }, { x: tcx, y: targetLane }] },
-              { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: tTop }, bendPoints: [{ x: scx, y: sourceLane }, { x: leftGutterX, y: sourceLane }, { x: leftGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? 120 : -120 },
-              { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: tTop }, bendPoints: [{ x: scx, y: sourceLane }, { x: rightGutterX, y: sourceLane }, { x: rightGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? -120 : 120 }
+              { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [] },
+              { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: targetLane }, { x: tcx, y: targetLane }] },
+              { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: sourceLane }, { x: leftGutterX, y: sourceLane }, { x: leftGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? 120 : -120 },
+              { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: sourceLane }, { x: rightGutterX, y: sourceLane }, { x: rightGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? -120 : 120 }
             );
             for (const safeX of sourceSafeBottomExitXs(preferRight)) {
               candidates.push(
-                { startPoint: { x: safeX, y: sBot }, endPoint: { x: tcx, y: tTop }, bendPoints: [{ x: safeX, y: sourceLane }, { x: leftGutterX, y: sourceLane }, { x: leftGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? 135 : -105 },
-                { startPoint: { x: safeX, y: sBot }, endPoint: { x: tcx, y: tTop }, bendPoints: [{ x: safeX, y: sourceLane }, { x: rightGutterX, y: sourceLane }, { x: rightGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? -105 : 135 }
+                { startPoint: { x: safeX, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: safeX, y: sourceLane }, { x: leftGutterX, y: sourceLane }, { x: leftGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? 135 : -105 },
+                { startPoint: { x: safeX, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: safeX, y: sourceLane }, { x: rightGutterX, y: sourceLane }, { x: rightGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? -105 : 135 }
               );
             }
           } else if (sp.y >= tp.y + ts.h - 2) {
             const sourceLane = horizontalLaneAboveSource();
             const targetLane = horizontalLaneBelowTarget();
+            const endY = targetEntryY ?? tBot;
             const leftGutterX = bndX + 35;
             const rightGutterX = bndX + bndW - 35;
             const preferRight = scx > bndX + bndW / 2;
             candidates.push(
-              { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: tBot }, bendPoints: [] },
-              { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: tBot }, bendPoints: [{ x: scx, y: targetLane }, { x: tcx, y: targetLane }] },
-              { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: tBot }, bendPoints: [{ x: scx, y: sourceLane }, { x: leftGutterX, y: sourceLane }, { x: leftGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? 120 : -120 },
-              { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: tBot }, bendPoints: [{ x: scx, y: sourceLane }, { x: rightGutterX, y: sourceLane }, { x: rightGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? -120 : 120 }
+              { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: endY }, bendPoints: [] },
+              { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: targetLane }, { x: tcx, y: targetLane }] },
+              { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: sourceLane }, { x: leftGutterX, y: sourceLane }, { x: leftGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? 120 : -120 },
+              { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: sourceLane }, { x: rightGutterX, y: sourceLane }, { x: rightGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: preferRight ? -120 : 120 }
             );
           }
           return chooseBestRoute(candidates);
