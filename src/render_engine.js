@@ -2821,6 +2821,13 @@ const elk = new ELK();
 
               const textWidth = label.width;
               const textHeight = label.height;
+              const sourceNode = flatNodeById.get(sourceId);
+              const targetNode = flatNodeById.get(targetId);
+              const labelTextLower = (label.text || '').toLowerCase();
+              const preferSourceSideLabel =
+                targetNode && targetNode.type === 'message_bus' &&
+                (!sourceNode || sourceNode.type !== 'message_bus') &&
+                labelTextLower.includes('publish');
 
               // Extract all points along the chosen edge line style
               const points = [pStart];
@@ -2968,6 +2975,9 @@ const elk = new ELK();
                 const centerClearance = allComponents.length > 0
                   ? Math.min(...allComponents.map(n => pointToBoxDist(cx, cy, n)))
                   : 200;
+                const sourceDistanceBias = preferSourceSideLabel
+                  ? Math.min(180, Math.hypot(cx - pStart.x, cy - pStart.y)) * 5
+                  : 0;
                 return {
                   nodeCollision,
                   edgeHits,
@@ -2977,7 +2987,8 @@ const elk = new ELK();
                     labelHits * 50000 +
                     edgeHits * 9000 -
                     Math.min(centerClearance, 180) * 12 -
-                    segLen * 0.3
+                    segLen * 0.3 +
+                    sourceDistanceBias
                 };
               }
 
@@ -2985,6 +2996,91 @@ const elk = new ELK();
               let placed = false;
 
               const obstacles = [...allComponents, ...boundaryBorderObstacles, ...placedLabels];
+
+              function tryPlaceAnchor(anchor) {
+                const candidate = labelAnchorCandidate(anchor);
+                if (!candidate) return false;
+                if (candidate.nodeCollision > 0 || candidate.edgeHits > 0 || candidate.labelHits > 0) return false;
+                midX = candidate.x;
+                midY = candidate.y;
+                return true;
+              }
+
+              function labelAnchorCandidate(anchor) {
+                if (points.length < 2) return null;
+
+                const isSource = anchor === 'source';
+                const pA = isSource ? points[0] : points[points.length - 2];
+                const pB = isSource ? points[1] : points[points.length - 1];
+                const isHorizontal = Math.abs(pA.y - pB.y) < 2;
+                const anchorDist = isHorizontal
+                  ? Math.max(45, (textWidth / 2) + 20)
+                  : Math.max(45, (textHeight / 2) + 20);
+
+                if (totalLen < 2 * anchorDist) return false;
+
+                const fraction = isSource
+                  ? anchorDist / totalLen
+                  : (totalLen - anchorDist) / totalLen;
+                const cand = getPointAtFraction(fraction);
+                return {
+                  anchor,
+                  x: cand.x,
+                  y: cand.y,
+                  ...labelCandidateScore(cand.x, cand.y, anchorDist)
+                };
+              }
+
+              const anchorOrder = preferSourceSideLabel
+                ? ['source', 'target']
+                : ['target', 'source'];
+
+              function tryPlaceSourceSideRouteBand() {
+                if (!preferSourceSideLabel || points.length < 2 || totalLen <= 0) return false;
+
+                const candidates = [];
+                let accumulated = 0;
+                for (let i = 0; i < points.length - 1; i++) {
+                  const p1 = points[i];
+                  const p2 = points[i + 1];
+                  const len = segLens[i];
+                  if (len < 1) {
+                    accumulated += len;
+                    continue;
+                  }
+
+                  for (const fraction of [0.25, 0.5, 0.75]) {
+                    const distanceAlongRoute = accumulated + len * fraction;
+                    if (distanceAlongRoute / totalLen > 0.38) continue;
+
+                    const x = p1.x + (p2.x - p1.x) * fraction;
+                    const y = p1.y + (p2.y - p1.y) * fraction;
+                    const candidate = {
+                      x,
+                      y,
+                      routeDistance: distanceAlongRoute,
+                      ...labelCandidateScore(x, y, len)
+                    };
+                    if (candidate.nodeCollision === 0 && candidate.labelHits === 0) {
+                      candidates.push(candidate);
+                    }
+                  }
+
+                  accumulated += len;
+                }
+
+                candidates.sort((a, b) =>
+                  a.edgeHits - b.edgeHits ||
+                  a.score - b.score ||
+                  a.routeDistance - b.routeDistance
+                );
+
+                const best = candidates[0];
+                if (!best) return false;
+                midX = best.x;
+                midY = best.y;
+                return true;
+              }
 
               // First Pass: Try to place label avoiding BOTH component collisions and other connection line crossings
               if (!hasBendPoints) {
@@ -2997,44 +3093,8 @@ const elk = new ELK();
                 }
               }
 
-              if (!placed && points.length >= 2) {
-                const pLastPrev = points[points.length - 2];
-                const pLastEnd = points[points.length - 1];
-                const lastIsHorizontal = Math.abs(pLastPrev.y - pLastEnd.y) < 2;
-                const targetAnchorDist = lastIsHorizontal
-                  ? Math.max(45, (textWidth / 2) + 20)
-                  : Math.max(45, (textHeight / 2) + 20);
-
-                if (totalLen >= 2 * targetAnchorDist) {
-                  const targetFraction = (totalLen - targetAnchorDist) / totalLen;
-                  const candA = getPointAtFraction(targetFraction);
-                  if (!checkLabelCollision(candA.x, candA.y, textWidth, textHeight, obstacles) &&
-                      !checkLabelEdgeCollision(candA.x, candA.y, textWidth, textHeight)) {
-                    midX = candA.x;
-                    midY = candA.y;
-                    placed = true;
-                  }
-                }
-              }
-
-              if (!placed && points.length >= 2) {
-                const pFirstStart = points[0];
-                const pFirstEnd = points[1];
-                const firstIsHorizontal = Math.abs(pFirstStart.y - pFirstEnd.y) < 2;
-                const sourceAnchorDist = firstIsHorizontal
-                  ? Math.max(45, (textWidth / 2) + 20)
-                  : Math.max(45, (textHeight / 2) + 20);
-
-                if (totalLen >= 2 * sourceAnchorDist) {
-                  const sourceFraction = sourceAnchorDist / totalLen;
-                  const candB = getPointAtFraction(sourceFraction);
-                  if (!checkLabelCollision(candB.x, candB.y, textWidth, textHeight, obstacles) &&
-                      !checkLabelEdgeCollision(candB.x, candB.y, textWidth, textHeight)) {
-                    midX = candB.x;
-                    midY = candB.y;
-                    placed = true;
-                  }
-                }
+              for (const anchor of anchorOrder) {
+                if (!placed) placed = tryPlaceAnchor(anchor);
               }
 
               // Second Pass (Fallback): prefer edge-clear anchor positions, then relax only if needed.
@@ -3050,44 +3110,35 @@ const elk = new ELK();
                 }
               }
 
-              if (!placed && points.length >= 2) {
-                const pLastPrev = points[points.length - 2];
-                const pLastEnd = points[points.length - 1];
-                const lastIsHorizontal = Math.abs(pLastPrev.y - pLastEnd.y) < 2;
-                const targetAnchorDist = lastIsHorizontal
-                  ? Math.max(45, (textWidth / 2) + 20)
-                  : Math.max(45, (textHeight / 2) + 20);
+              if (!placed) {
+                placed = tryPlaceSourceSideRouteBand();
+              }
 
-                if (totalLen >= 2 * targetAnchorDist) {
-                  const targetFraction = (totalLen - targetAnchorDist) / totalLen;
-                  const candA = getPointAtFraction(targetFraction);
-                  if (!checkLabelCollision(candA.x, candA.y, textWidth, textHeight, obstacles) &&
-                      !checkLabelEdgeCollision(candA.x, candA.y, textWidth, textHeight)) {
-                    midX = candA.x;
-                    midY = candA.y;
-                    placed = true;
-                  }
+              if (!placed && preferSourceSideLabel) {
+                const anchorCandidates = anchorOrder
+                  .map(anchor => labelAnchorCandidate(anchor))
+                  .filter(Boolean)
+                  .filter(candidate => candidate.nodeCollision === 0 && candidate.labelHits === 0)
+                  .map(candidate => ({
+                    ...candidate,
+                    score: candidate.score + (candidate.anchor === 'source' ? -12000 : 0)
+                  }))
+                  .sort((a, b) =>
+                    a.score - b.score ||
+                    a.edgeHits - b.edgeHits ||
+                    a.labelHits - b.labelHits
+                  );
+
+                const bestAnchor = anchorCandidates[0];
+                if (bestAnchor) {
+                  midX = bestAnchor.x;
+                  midY = bestAnchor.y;
+                  placed = true;
                 }
               }
 
-              if (!placed && points.length >= 2) {
-                const pFirstStart = points[0];
-                const pFirstEnd = points[1];
-                const firstIsHorizontal = Math.abs(pFirstStart.y - pFirstEnd.y) < 2;
-                const sourceAnchorDist = firstIsHorizontal
-                  ? Math.max(45, (textWidth / 2) + 20)
-                  : Math.max(45, (textHeight / 2) + 20);
-
-                if (totalLen >= 2 * sourceAnchorDist) {
-                  const sourceFraction = sourceAnchorDist / totalLen;
-                  const candB = getPointAtFraction(sourceFraction);
-                  if (!checkLabelCollision(candB.x, candB.y, textWidth, textHeight, obstacles) &&
-                      !checkLabelEdgeCollision(candB.x, candB.y, textWidth, textHeight)) {
-                    midX = candB.x;
-                    midY = candB.y;
-                    placed = true;
-                  }
-                }
+              for (const anchor of anchorOrder) {
+                if (!placed) placed = tryPlaceAnchor(anchor);
               }
 
               // Rule 3: Fallback to Middle Gutter Clearance
