@@ -255,9 +255,13 @@ const elk = new ELK();
       }
 
       const routePressure = estimateInternalRoutePressure();
-      const ROUTE_CORRIDOR_EXTRA = 80;
-      const leftPad = B_PAD + (routePressure.left >= 4 ? ROUTE_CORRIDOR_EXTRA : 0);
-      const rightPad = B_PAD + (routePressure.right >= 4 ? ROUTE_CORRIDOR_EXTRA : 0);
+      function corridorExtraForPressure(pressure) {
+        if (pressure >= 8) return 120;
+        if (pressure >= 4) return 80;
+        return 0;
+      }
+      const leftPad = B_PAD + corridorExtraForPressure(routePressure.left);
+      const rightPad = B_PAD + corridorExtraForPressure(routePressure.right);
       const contentLeft = leftPad;
       const contentRight = contentLeft + contentW;
       const bndW   = contentW + leftPad + rightPad;
@@ -541,6 +545,7 @@ const elk = new ELK();
       const leftSet  = new Set(leftNodes.map(n => n.id));
       const rightSet = new Set(rightNodes.map(n => n.id));
       const routedEdgeSegments = [];
+      const ROUTE_BOUNDARY_CLEARANCE = 24;
       const LANE_OFFSETS = [
         0,
         -MIN_ROUTE_LINE_GAP,
@@ -682,6 +687,28 @@ const elk = new ELK();
                pointOnSegment(c, d, a) || pointOnSegment(c, d, b);
       }
 
+      function internalBoundaryClearanceHits(segments, edge) {
+        if (!edge || !childIds.has(edge.from) || !childIds.has(edge.to)) return 0;
+
+        let hits = 0;
+        const leftLimit = bndX + ROUTE_BOUNDARY_CLEARANCE;
+        const rightLimit = bndX + bndW - ROUTE_BOUNDARY_CLEARANCE;
+        const topLimit = bndY + ROUTE_BOUNDARY_CLEARANCE;
+        const bottomLimit = bndY + bndH - ROUTE_BOUNDARY_CLEARANCE;
+
+        for (const segment of segments) {
+          const minX = Math.min(segment.a.x, segment.b.x);
+          const maxX = Math.max(segment.a.x, segment.b.x);
+          const minY = Math.min(segment.a.y, segment.b.y);
+          const maxY = Math.max(segment.a.y, segment.b.y);
+          if (minX < leftLimit || maxX > rightLimit || minY < topLimit || maxY > bottomLimit) {
+            hits++;
+          }
+        }
+
+        return hits;
+      }
+
       function edgeConflictScore(points, edge) {
         const segments = pointsToSegments(points);
         let crossings = 0;
@@ -689,6 +716,7 @@ const elk = new ELK();
         let overlapPx = 0;
         let closeParallels = 0;
         let closePx = 0;
+        const boundaryHits = internalBoundaryClearanceHits(segments, edge);
         let nodeCrossings = 0;
 
         for (const segment of segments) {
@@ -728,9 +756,11 @@ const elk = new ELK();
           overlapPx,
           closeParallels,
           closePx,
+          boundaryHits,
           nodeCrossings,
           score:
             nodeCrossings * 10000 +
+            boundaryHits * 5000 +
             overlaps * 120 +
             overlapPx +
             closeParallels * 90 +
@@ -764,9 +794,15 @@ const elk = new ELK();
           if (!isAxisAligned) continue;
 
           const currentStats = edgeConflictScore(points, edge);
-          if (currentStats.overlaps === 0 && currentStats.closeParallels === 0 && currentStats.crossings === 0) continue;
+          if (
+            currentStats.overlaps === 0 &&
+            currentStats.closeParallels === 0 &&
+            currentStats.crossings === 0 &&
+            currentStats.boundaryHits === 0
+          ) continue;
           if (
             currentStats.crossings === 0 &&
+            currentStats.boundaryHits === 0 &&
             currentStats.overlapPx < LANE_OVERLAP_THRESHOLD &&
             currentStats.closePx < LANE_OVERLAP_THRESHOLD
           ) continue;
@@ -829,9 +865,14 @@ const elk = new ELK();
           edgeOverlapPx: 0,
           closeParallels: 0,
           closePx: 0,
+          boundaryHits: 0,
           routeLength: sectionRouteLength(section)
         }));
         const segmentsByEdge = sections.map(section => pointsToSegments(sectionToPoints(section)));
+
+        for (let i = 0; i < segmentsByEdge.length; i++) {
+          edgeScores[i].boundaryHits = internalBoundaryClearanceHits(segmentsByEdge[i], allEdges[i]);
+        }
 
         for (let i = 0; i < segmentsByEdge.length; i++) {
           for (let j = i + 1; j < segmentsByEdge.length; j++) {
@@ -869,9 +910,11 @@ const elk = new ELK();
           acc.edgeOverlapPx += edgeScore.edgeOverlapPx;
           acc.closeParallels += edgeScore.closeParallels;
           acc.closePx += edgeScore.closePx;
+          acc.boundaryHits += edgeScore.boundaryHits;
           acc.totalRouteLength += edgeScore.routeLength;
           edgeScore.score =
             edgeScore.nodeCrossings * 100000 +
+            edgeScore.boundaryHits * 5000 +
             edgeScore.edgeOverlaps * 600 +
             edgeScore.edgeOverlapPx * 2 +
             edgeScore.closeParallels * 450 +
@@ -886,12 +929,14 @@ const elk = new ELK();
           edgeOverlapPx: 0,
           closeParallels: 0,
           closePx: 0,
+          boundaryHits: 0,
           totalRouteLength: 0
         });
 
         totals.edgeScores = edgeScores;
         totals.score =
           totals.nodeCrossings * 100000 +
+          totals.boundaryHits * 5000 +
           totals.edgeOverlaps * 600 +
           totals.edgeOverlapPx * 2 +
           totals.closeParallels * 450 +
@@ -909,6 +954,7 @@ const elk = new ELK();
             edgeScore.edgeCrossings > 0 ||
             edgeScore.edgeOverlaps > 0 ||
             edgeScore.closeParallels > 0 ||
+            edgeScore.boundaryHits > 0 ||
             edgeScore.nodeCrossings > 0
           )
           .sort((a, b) => b.score - a.score)
@@ -1172,6 +1218,7 @@ const elk = new ELK();
           let edgeOverlapPx = 0;
           let closeParallels = 0;
           let closePx = 0;
+          const boundaryHits = internalBoundaryClearanceHits(segments, e);
           let sourcePortReuses = 0;
           const start = route.startPoint;
           if (start) {
@@ -1204,7 +1251,7 @@ const elk = new ELK();
               }
             }
           }
-          return { edgeCrossings, edgeOverlaps, edgeOverlapPx, closeParallels, closePx, sourcePortReuses };
+          return { edgeCrossings, edgeOverlaps, edgeOverlapPx, closeParallels, closePx, boundaryHits, sourcePortReuses };
         }
         function horizontalLaneBelowSource() {
           const nextTop = children
@@ -1394,6 +1441,7 @@ const elk = new ELK();
                 candidate.edgeOverlapPx * 0.5 +
                 candidate.closeParallels * 65 +
                 candidate.closePx * 0.35 +
+                candidate.boundaryHits * 900 +
                 candidate.edgeCrossings * 120 +
                 candidate.sourcePortReuses * 90 +
                 candidate.bends * 45 +
@@ -2986,10 +3034,12 @@ const elk = new ELK();
               const sourceNode = flatNodeById.get(sourceId);
               const targetNode = flatNodeById.get(targetId);
               const labelTextLower = (label.text || '').toLowerCase();
-              const preferSourceSideLabel =
+              const isMessageBusTarget =
                 targetNode && targetNode.type === 'message_bus' &&
-                (!sourceNode || sourceNode.type !== 'message_bus') &&
-                labelTextLower.includes('publish');
+                (!sourceNode || sourceNode.type !== 'message_bus');
+              const isPublishBusLabel = isMessageBusTarget && labelTextLower.includes('publish');
+              const isConsumeBusLabel = isMessageBusTarget && labelTextLower.includes('consume');
+              const preferSourceSideLabel = isPublishBusLabel || isConsumeBusLabel;
 
               // Extract all points along the chosen edge line style
               const points = [pStart];
@@ -3261,8 +3311,13 @@ const elk = new ELK();
               }
 
               if (preferSourceSideLabel) {
-                if (!placed) placed = tryPlaceAnchor('source');
-                if (!placed) placed = tryPlaceSourceSideRouteBand();
+                if (isConsumeBusLabel) {
+                  if (!placed) placed = tryPlaceSourceSideRouteBand();
+                  if (!placed) placed = tryPlaceAnchor('source');
+                } else {
+                  if (!placed) placed = tryPlaceAnchor('source');
+                  if (!placed) placed = tryPlaceSourceSideRouteBand();
+                }
               } else {
                 for (const anchor of anchorOrder) {
                   if (!placed) placed = tryPlaceAnchor(anchor);
