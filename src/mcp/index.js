@@ -11,6 +11,9 @@ import os from 'os';
 import path from 'path';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
+
+const NUDGE_OUTPUT_DIR = process.env.NUDGE_OUTPUT_DIR || path.join(os.homedir(), '.nudge', 'output');
+fs.mkdirSync(NUDGE_OUTPUT_DIR, { recursive: true });
 import yaml from 'js-yaml';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -28,9 +31,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'optimize_diagram',
       description:
-        'Optimize a C4 architecture diagram using AI-driven layout analysis. ' +
+        'Optimize a C4 architecture diagram using geometric layout analysis. ' +
         'Accepts Mermaid C4Context/C4Container syntax or YAML diagram content. ' +
-        'Returns an optimized SVG string with zero node overlaps and clean edge routing.',
+        'Returns a JSON summary with svgPath and pngPath pointing to files saved in ~/.nudge/output/.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -86,13 +89,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   const tmpDir = path.join(os.tmpdir(), `nudge-${randomUUID()}`);
 
   try {
-    const { success, history, svgContent } = await optimizeDiagram({
+    const { success, history, svgContent, pngPath } = await optimizeDiagram({
       diagramModel,
       outputDir: tmpDir,
       onLog: (msg) => server.sendLoggingMessage({ level: 'info', data: msg }),
       signal: extra.signal,
       checkpointTimeout: 15000,
       optimizationTimeout: 20000,
+      skipLlm: true,
     });
 
     const finalCollisions = history.at(-1)?.collisions ?? 0;
@@ -100,15 +104,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       ? `Optimized in ${history.length} iteration(s) — zero collisions.`
       : `Best-effort result after ${history.length} iteration(s) — ${finalCollisions} collision(s) remain. SVG is still usable.`;
 
+    const title = (diagramModel.title || 'diagram').replace(/[^a-z0-9]+/gi, '_').toLowerCase();
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const baseName = `${title}_${timestamp}`;
+
+    let svgPath = null;
+    if (svgContent) {
+      svgPath = path.join(NUDGE_OUTPUT_DIR, `${baseName}.svg`);
+      fs.writeFileSync(svgPath, svgContent);
+    }
+
+    let pngOutputPath = null;
+    if (pngPath) {
+      pngOutputPath = path.join(NUDGE_OUTPUT_DIR, `${baseName}.png`);
+      fs.copyFileSync(pngPath, pngOutputPath);
+    }
+
     return {
       content: [
         {
           type: 'text',
-          text: JSON.stringify({ success, summary, iterations: history.length, finalCollisions }, null, 2),
-        },
-        {
-          type: 'text',
-          text: svgContent ?? 'No SVG produced — rendering failed before any layout could be captured.',
+          text: JSON.stringify({ success, summary, iterations: history.length, finalCollisions, svgPath, pngPath: pngOutputPath }, null, 2),
         },
       ],
     };

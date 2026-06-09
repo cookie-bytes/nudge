@@ -187,6 +187,7 @@ export async function optimizeDiagram({
 
       if (!patch || Object.keys(patch).length === 0) {
         onLog('[Optimization] AI did not suggest any changes. Retaining parameters.');
+        break;
       } else {
         onLog(`[Optimization] AI suggested patch: ${JSON.stringify(patch, null, 2)}`);
         for (const [key, val] of Object.entries(patch)) currentOptions[key] = String(val);
