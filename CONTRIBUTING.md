@@ -16,11 +16,14 @@ A local LLM server is optional. The default test command uses deterministic math
 ## Running tests
 
 ```bash
-npm test
-npm run test:visual
+npm test                  # Run the full test suite (unit + integration + visual)
+npm run test:unit         # Run fast unit tests (parser, geometry math)
+npm run test:integration  # Run CLI and MCP integration tests
+npm run test:visual       # Run visual Playwright-driven rendering tests
+npm run test:refactor     # Run layout regression parity tests
 ```
 
-`npm test` runs the offline integration checks first, renders every `.mermaid` file in `test/` using Playwright, analyses the geometry, verifies boundary containment, writes PNG/SVG snapshots, and grades with the built-in math scorer. `npm run test:visual` sets `NUDGE_VISUAL_TEST=true`, enabling the optional LLM visual grader. If an OpenAI-compatible server is unavailable on `localhost:1234` (or `$NUDGE_LLM_API`), that grader falls back to the math scorer.
+`npm test` runs fast, Playwright-free unit tests first, followed by CLI and MCP server integration tests, and finally renders every `.mermaid` file in `test/fixtures/diagrams/core/` using Playwright, analyzing geometry, verifying boundary containment, writing PNG/SVG snapshots, and grading with the built-in math scorer. `NUDGE_VISUAL_TEST=true npm run test:visual` enables the optional LLM visual grader. If an OpenAI-compatible server is unavailable on `localhost:1234` (or `$NUDGE_LLM_API`), that grader falls back to the math scorer.
 
 When changing `src/render_engine.js`, inspect the generated PNGs in `test_outputs/` as well as the console summary and `test_outputs/test_results.md`. The math scorer catches node overlaps, edge-node crossings, and boundary containment failures, while the report also includes observational edge-quality metrics: edge-edge crossings, edge overlaps, overlap pixels, label-edge intersections, bends, and route length.
 

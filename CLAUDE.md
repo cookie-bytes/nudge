@@ -10,11 +10,15 @@ npx playwright install chromium           # Required one-time browser setup
 npm start                                 # Run CLI optimizer on examples/search_service_container.mermaid
 node src/cli/index.js <path/to/file>      # Run CLI on a custom .mermaid, .mmd, or .yaml file
 node src/mcp/index.js                     # Start the MCP stdio server
-npm test                                  # Run the test suite (renders all test/*.mermaid files)
-npm run test:visual                       # Run tests with optional LLM visual grading
+npm test                                  # Run the full test suite (unit + integration + visual)
+npm run test:unit                         # Run fast, isolated parser/geometry unit tests
+npm run test:integration                  # Run CLI and MCP integration tests
+npm run test:visual                       # Run rendering tests in Playwright with mathematical scorer
+NUDGE_VISUAL_TEST=true npm run test:visual # Run rendering tests with optional LLM visual grading
+npm run test:refactor                     # Run layout regression parity test against git baseline
 ```
 
-`npm test` runs deterministic integration checks, renders every test diagram, verifies boundary containment, and writes snapshots plus `test_outputs/test_results.md`. `npm run test:visual` enables LLM visual grading; if the grader is unavailable it falls back to the math scorer. No test is skipped.
+`npm test` runs fast unit tests, integration tests (CLI & MCP server), renders every test diagram in Playwright, verifies boundary containment, and writes snapshots plus `test_outputs/test_results.md`. `NUDGE_VISUAL_TEST=true npm run test:visual` enables LLM visual grading; if the grader is unavailable it falls back to the math scorer. No test is skipped.
 
 ## Ubiquitous language
 

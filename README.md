@@ -225,10 +225,14 @@ See [`examples/`](examples/) for full working examples including container diagr
 
 **Run the test suite:**
 ```bash
-npm test
-npm run test:visual
+npm test                  # Run the full test suite (unit + integration + visual)
+npm run test:unit         # Run fast unit tests (parser, geometry math)
+npm run test:integration  # Run CLI and MCP integration tests
+npm run test:visual       # Run visual Playwright-driven rendering tests
+npm run test:refactor     # Run layout regression parity tests
 ```
-`npm test` runs deterministic integration checks, renders all diagrams in `test/`, verifies boundary containment, writes PNG/SVG snapshots and `test_outputs/test_results.md`, and grades with the math scorer. `npm run test:visual` enables the optional LLM visual grader. In either mode, if the grader cannot reach a local LLM it falls back to math scoring automatically.
+
+`npm test` runs fast, Playwright-free unit tests first, followed by CLI and MCP server integration tests, and finally renders every `.mermaid` file in `test/fixtures/diagrams/core/` using Playwright, analyzing geometry, verifying boundary containment, writing PNG/SVG snapshots and `test_outputs/test_results.md`, and grading with the built-in math scorer. `NUDGE_VISUAL_TEST=true npm run test:visual` enables the optional LLM visual grader. In either mode, if the grader cannot reach a local LLM it falls back to math scoring automatically.
 
 ---
 
@@ -312,8 +316,12 @@ Call the nudge optimize_diagram tool with this diagram and return the SVG:
 │   ├── render.html         # HTML shell loaded by Playwright — sources render_engine.js
 │   ├── render_engine.js    # ELKjs layout engine + SVG renderer (window.renderDiagram)
 │   └── utils.js            # fetchWithTimeout with cancellation signal support
-├── test/                   # Test diagrams (.mermaid) and test runner
-├── test_outputs/           # Rendered PNGs, SVGs, and test result summary from npm test
+├── test/                   # Fast unit tests, integration tests, visual tests, and fixtures
+│   ├── unit/               # Playwright-free unit tests (parser, geometry math)
+│   ├── integration/        # CLI and MCP integration tests
+│   ├── visual/             # Browser-based Playwright layout tests
+│   └── fixtures/           # Centralized diagram and image fixtures
+├── test_outputs/           # Rendered PNGs, SVGs, and test result summary from npm test (git-ignored)
 ├── LICENSE
 └── package.json
 ```
