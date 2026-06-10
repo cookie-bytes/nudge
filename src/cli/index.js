@@ -6,12 +6,21 @@ import yaml from 'js-yaml';
 import { parseMermaidC4 } from '../mermaid_parser.js';
 import { optimizeDiagram } from '../core/optimizer.js';
 
-const inputArg = process.argv[2];
+const args = process.argv.slice(2);
+const enhanceIndex = args.indexOf('--enhance');
+const hasEnhance = enhanceIndex !== -1;
+if (hasEnhance) {
+  args.splice(enhanceIndex, 1);
+}
+const inputArg = args[0];
 const INPUT_PATH = inputArg ? path.resolve(inputArg) : path.resolve('examples/system_context.yaml');
 const OUTPUT_DIR = path.resolve('.nudge');
 
-console.log('=== Nudge AI-Driven Layout Optimizer ===');
+const enhance = hasEnhance && !process.env.NUDGE_NO_LLM;
+
+console.log('=== Nudge: Deterministic C4 Layout Engine ===');
 console.log(`Input: ${INPUT_PATH}`);
+console.log(`LLM Enhancement: ${enhance ? 'Enabled' : 'Disabled (deterministic-only mode)'}`);
 
 let diagramModel;
 try {
@@ -50,7 +59,7 @@ const { success, history, svgContent, pngPath } = await optimizeDiagram({
   outputDir: OUTPUT_DIR,
   onLog: (msg) => console.log(msg),
   checkpointTimeout: Number(process.env.NUDGE_CHECKPOINT_TIMEOUT || 90000),
-  skipLlm: !!process.env.NUDGE_NO_LLM,
+  enhance,
 });
 
 console.log('\n=================================');

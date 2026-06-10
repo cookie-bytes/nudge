@@ -46,6 +46,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             enum: ['mermaid', 'yaml'],
             description: 'Input format. If omitted, auto-detected from content.',
           },
+          enhance: {
+            type: 'boolean',
+            description: 'Enable optional LLM optimization / visual-hint enhancement pipeline (requires local LLM server). Defaults to false.',
+          },
         },
         required: ['content'],
       },
@@ -61,7 +65,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     };
   }
 
-  const { content, format } = request.params.arguments;
+  const { content, format, enhance = false } = request.params.arguments;
 
   // Auto-detect format if not specified
   const trimmed = content.trimStart();
@@ -96,7 +100,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       signal: extra.signal,
       checkpointTimeout: 15000,
       optimizationTimeout: 20000,
-      skipLlm: true,
+      enhance,
     });
 
     const finalCollisions = history.at(-1)?.collisions ?? 0;

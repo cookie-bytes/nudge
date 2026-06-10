@@ -35,7 +35,7 @@ export async function optimizeDiagram({
   signal = null,
   checkpointTimeout = 30000,
   optimizationTimeout = 120000,
-  skipLlm = !!process.env.NUDGE_NO_LLM,
+  enhance = false,
 }) {
   fs.mkdirSync(outputDir, { recursive: true });
 
@@ -119,7 +119,7 @@ export async function optimizeDiagram({
       if (!initialStep) return { success: false, history: [], svgContent: null, pngPath: null };
       let acceptedStep = initialStep;
 
-      if (!skipLlm && !signal?.aborted) {
+      if (enhance && !signal?.aborted) {
         const orderResult = await getLLMTopOrder(apiUrl, diagramModel, initialStep.result, { signal, timeout: checkpointTimeout });
         if (orderResult) visualHints.topOrder = orderResult;
         if (Array.isArray(orderResult?.suggestedOrder) && orderResult.suggestedOrder.length > 0) {
@@ -151,7 +151,7 @@ export async function optimizeDiagram({
         if (!topOrderStep) return { success: false, history: [], svgContent: null, pngPath: null };
       }
 
-      if (!skipLlm && !signal?.aborted) {
+      if (enhance && !signal?.aborted) {
         const portResult = await getLLMPortHints(apiUrl, diagramModel, acceptedStep.result, { signal, timeout: checkpointTimeout });
         if (portResult) visualHints.port = portResult;
         const portHints = {};
@@ -188,7 +188,7 @@ export async function optimizeDiagram({
         if (!portStep) return { success: false, history: [], svgContent: null, pngPath: null };
       }
 
-      if (!skipLlm && !signal?.aborted) {
+      if (enhance && !signal?.aborted) {
         const routeResult = await getLLMDiagonalRouteHints(apiUrl, diagramModel, acceptedStep.result, { signal, timeout: checkpointTimeout });
         if (routeResult) visualHints.diagonalRoutes = routeResult;
         const routeHints = {};
@@ -260,111 +260,219 @@ export async function optimizeDiagram({
     let success = false;
     let lastRenderResult = null;
 
-    for (let iteration = 1; iteration <= maxIterations; iteration++) {
-      if (signal?.aborted) {
-        onLog(`[Optimizer] Optimization cancelled at iteration ${iteration}.`);
-        break;
+    if (!enhance) {
+      onLog('[Optimizer] LLM is disabled (deterministic-only mode). Running canned ELKjs configuration search...');
+      const cannedConfigs = [
+        { ...currentOptions },
+        {
+          ...currentOptions,
+          "elk.spacing.nodeNode": "160",
+          "elk.layered.spacing.nodeNodeBetweenLayers": "130",
+          "elk.spacing.edgeNode": "90",
+          "elk.spacing.edgeEdge": "25"
+        },
+        {
+          ...currentOptions,
+          "elk.spacing.nodeNode": "200",
+          "elk.layered.spacing.nodeNodeBetweenLayers": "160",
+          "elk.spacing.edgeNode": "100",
+          "elk.spacing.edgeEdge": "30"
+        },
+        {
+          ...currentOptions,
+          "elk.spacing.nodeNode": "120",
+          "elk.layered.spacing.nodeNodeBetweenLayers": "100",
+          "elk.spacing.edgeNode": "70",
+          "elk.spacing.edgeEdge": "15"
+        }
+      ];
+
+      let bestScore = Infinity;
+      let bestOptions = null;
+      let bestRenderResult = null;
+      let bestReport = null;
+
+      for (let i = 0; i < cannedConfigs.length; i++) {
+        if (signal?.aborted) {
+          onLog('[Optimizer] Optimization cancelled during canned config search.');
+          break;
+        }
+        const config = cannedConfigs[i];
+        diagramModel.layoutOptions = { ...config };
+
+        onLog(`[Optimizer] Trying canned config ${i + 1}/${cannedConfigs.length}: nodeNode=${config["elk.spacing.nodeNode"] || 'unset'}, layerSpacing=${config["elk.layered.spacing.nodeNodeBetweenLayers"] || 'unset'}...`);
+        const result = await page.evaluate(async (data) => window.renderDiagram(data), diagramModel);
+        if (!result.success) {
+          onLog(`[Render] Canned config ${i + 1} failed: ${result.error}`);
+          continue;
+        }
+
+        const report = analyzeLayout(result);
+        const edge = report.edgeQuality || {};
+        const score =
+          report.overlapCount * 100000 +
+          report.intersectionCount * 100000 +
+          (edge.edgeCrossingCount || 0) * 500 +
+          (edge.edgeOverlapCount || 0) * 500 +
+          (edge.edgeOverlapPx || 0) * 2 +
+          (edge.labelEdgeIntersectionCount || 0) * 250 +
+          (edge.totalBends || 0) * 4 +
+          (edge.totalRouteLength || 0) * 0.02;
+
+        onLog(`[Optimizer] Config ${i + 1} score: ${Math.round(score * 10) / 10} (overlaps: ${report.overlapCount}, crossings: ${report.intersectionCount}, tight spacing: ${report.collisions.filter(c => c.type === 'tight_spacing').length})`);
+
+        if (score < bestScore) {
+          bestScore = score;
+          bestOptions = config;
+          bestRenderResult = result;
+          bestReport = report;
+        }
       }
 
-      onLog(`\n--- Iteration ${iteration}/${maxIterations} ---`);
-      diagramModel.layoutOptions = { ...currentOptions };
+      if (bestRenderResult) {
+        onLog(`[Optimizer] Selected best config with score ${bestScore}.`);
+        diagramModel.layoutOptions = { ...bestOptions };
 
-      onLog('[Render] Running layout calculations with ELKjs...');
-      const result = await page.evaluate(async (data) => window.renderDiagram(data), diagramModel);
+        await page.setViewportSize({
+          width: Math.ceil(bestRenderResult.width) + 100,
+          height: Math.ceil(bestRenderResult.height) + 100,
+        });
 
-      if (!result.success) {
-        onLog(`[Render] Rendering failed: ${result.error}`);
-        break;
-      }
-      lastRenderResult = result;
+        const screenshotPath = path.join(outputDir, `optimized.png`);
+        const svgElement = await page.$('#svg-root');
+        await svgElement.screenshot({ path: screenshotPath });
+        onLog(`[Snapshot] Saved visual state to: ${screenshotPath}`);
 
-      onLog(`[Render] Viewport bounds computed: ${result.width}x${result.height}`);
-
-      await page.setViewportSize({
-        width: Math.ceil(result.width) + 100,
-        height: Math.ceil(result.height) + 100,
-      });
-
-      const screenshotPath = path.join(outputDir, `iteration_${iteration}.png`);
-      const svgElement = await page.$('#svg-root');
-      await svgElement.screenshot({ path: screenshotPath });
-      onLog(`[Snapshot] Saved visual state to: ${screenshotPath}`);
-
-      onLog('[Critique] Running geometric collision analysis...');
-      const report = analyzeLayout(result);
-      onLog(`[Critique] Aspect Ratio: ${report.aspectRatio}`);
-      onLog(`[Critique] Collisions: ${report.collisions.length} (${report.overlapCount} overlaps, ${report.intersectionCount} edge crossings)`);
-
-      history.push({
-        iteration,
-        options: { ...currentOptions },
-        collisions: report.collisions.length,
-        overlaps: report.overlapCount,
-        crossings: report.intersectionCount,
-        aspectRatio: report.aspectRatio,
-        screenshot: screenshotPath,
-      });
-
-      const hardCollisions = report.collisions.filter(c =>
-        c.type === 'node_overlap' ||
-        c.type === 'edge_node_crossing' ||
-        c.type === 'edge_label_node_crossing'
-      );
-
-      if (!success && hardCollisions.length === 0) {
-        onLog('[Critique] No node overlaps or edge crossings detected. Layout is visually clean.');
-        svgContent = await captureSvg(page, result.width, result.height);
+        svgContent = await captureSvg(page, bestRenderResult.width, bestRenderResult.height);
         const svgFilePath = path.join(outputDir, 'optimized.svg');
         fs.writeFileSync(svgFilePath, svgContent);
 
+        pngPath = screenshotPath;
+
+        history.push({
+          iteration: 1,
+          options: { ...bestOptions },
+          collisions: bestReport.collisions.length,
+          overlaps: bestReport.overlapCount,
+          crossings: bestReport.intersectionCount,
+          aspectRatio: bestReport.aspectRatio,
+          screenshot: screenshotPath,
+        });
+
+        const hardCollisions = bestReport.collisions.filter(c =>
+          c.type === 'node_overlap' ||
+          c.type === 'edge_node_crossing' ||
+          c.type === 'edge_label_node_crossing'
+        );
+        success = (hardCollisions.length === 0);
+      }
+    } else {
+      for (let iteration = 1; iteration <= maxIterations; iteration++) {
+        if (signal?.aborted) {
+          onLog(`[Optimizer] Optimization cancelled at iteration ${iteration}.`);
+          break;
+        }
+
+        onLog(`\n--- Iteration ${iteration}/${maxIterations} ---`);
+        diagramModel.layoutOptions = { ...currentOptions };
+
+        onLog('[Render] Running layout calculations with ELKjs...');
+        const result = await page.evaluate(async (data) => window.renderDiagram(data), diagramModel);
+
+        if (!result.success) {
+          onLog(`[Render] Rendering failed: ${result.error}`);
+          break;
+        }
+        lastRenderResult = result;
+
+        onLog(`[Render] Viewport bounds computed: ${result.width}x${result.height}`);
+
+        await page.setViewportSize({
+          width: Math.ceil(result.width) + 100,
+          height: Math.ceil(result.height) + 100,
+        });
+
+        const screenshotPath = path.join(outputDir, `iteration_${iteration}.png`);
+        const svgElement = await page.$('#svg-root');
+        await svgElement.screenshot({ path: screenshotPath });
+        onLog(`[Snapshot] Saved visual state to: ${screenshotPath}`);
+
+        onLog('[Critique] Running geometric collision analysis...');
+        const report = analyzeLayout(result);
+        onLog(`[Critique] Aspect Ratio: ${report.aspectRatio}`);
+        onLog(`[Critique] Collisions: ${report.collisions.length} (${report.overlapCount} overlaps, ${report.intersectionCount} edge crossings)`);
+
+        history.push({
+          iteration,
+          options: { ...currentOptions },
+          collisions: report.collisions.length,
+          overlaps: report.overlapCount,
+          crossings: report.intersectionCount,
+          aspectRatio: report.aspectRatio,
+          screenshot: screenshotPath,
+        });
+
+        const hardCollisions = report.collisions.filter(c =>
+          c.type === 'node_overlap' ||
+          c.type === 'edge_node_crossing' ||
+          c.type === 'edge_label_node_crossing'
+        );
+
+        if (!success && hardCollisions.length === 0) {
+          onLog('[Critique] No node overlaps or edge crossings detected. Layout is visually clean.');
+          svgContent = await captureSvg(page, result.width, result.height);
+          const svgFilePath = path.join(outputDir, 'optimized.svg');
+          fs.writeFileSync(svgFilePath, svgContent);
+
+          pngPath = path.join(outputDir, 'optimized.png');
+          fs.copyFileSync(screenshotPath, pngPath);
+          success = true;
+        }
+
+        if (report.collisions.length > 0) {
+          report.collisions.forEach((c, i) => onLog(`  ${i + 1}. [${c.type}] ${c.details}`));
+        } else {
+          onLog('[Critique] Visual layout is pristine! Zero collisions or warnings detected.');
+          break;
+        }
+
+        if (iteration === maxIterations) {
+          onLog('[Optimization] Maximum iterations reached.');
+          break;
+        }
+
+        if (signal?.aborted) {
+          onLog(`[Optimizer] Optimization cancelled before LLM optimization call at iteration ${iteration}.`);
+          break;
+        }
+
+        onLog('[Optimization] Requesting layout parameter patch from AI...');
+        const patch = await getLLMOptimizationPatch(apiUrl, currentOptions, report, { signal, timeout: optimizationTimeout });
+
+        if (signal?.aborted) {
+          onLog(`[Optimizer] Optimization cancelled after LLM optimization call at iteration ${iteration}.`);
+          break;
+        }
+
+        if (!patch || Object.keys(patch).length === 0) {
+          onLog('[Optimization] AI did not suggest any changes. Retaining parameters.');
+          break;
+        } else {
+          onLog(`[Optimization] AI suggested patch: ${JSON.stringify(patch, null, 2)}`);
+          for (const [key, val] of Object.entries(patch)) currentOptions[key] = String(val);
+          fs.writeFileSync(path.join(outputDir, 'layout.cache.json'), JSON.stringify(currentOptions, null, 2));
+        }
+      }
+
+      if (!success && lastRenderResult) {
+        svgContent = await captureSvg(page, lastRenderResult.width, lastRenderResult.height);
+        fs.writeFileSync(path.join(outputDir, 'optimized.svg'), svgContent);
+      }
+
+      if (history.length > 0) {
         pngPath = path.join(outputDir, 'optimized.png');
-        fs.copyFileSync(screenshotPath, pngPath);
-        success = true;
+        fs.copyFileSync(history.at(-1).screenshot, pngPath);
       }
-
-      if (report.collisions.length > 0) {
-        report.collisions.forEach((c, i) => onLog(`  ${i + 1}. [${c.type}] ${c.details}`));
-      } else {
-        onLog('[Critique] Visual layout is pristine! Zero collisions or warnings detected.');
-        break;
-      }
-
-      if (iteration === maxIterations) {
-        onLog('[Optimization] Maximum iterations reached.');
-        break;
-      }
-
-      if (signal?.aborted) {
-        onLog(`[Optimizer] Optimization cancelled before LLM optimization call at iteration ${iteration}.`);
-        break;
-      }
-
-      onLog('[Optimization] Requesting layout parameter patch from AI...');
-      const patch = skipLlm ? null : await getLLMOptimizationPatch(apiUrl, currentOptions, report, { signal, timeout: optimizationTimeout });
-
-      if (signal?.aborted) {
-        onLog(`[Optimizer] Optimization cancelled after LLM optimization call at iteration ${iteration}.`);
-        break;
-      }
-
-      if (!patch || Object.keys(patch).length === 0) {
-        onLog('[Optimization] AI did not suggest any changes. Retaining parameters.');
-        break;
-      } else {
-        onLog(`[Optimization] AI suggested patch: ${JSON.stringify(patch, null, 2)}`);
-        for (const [key, val] of Object.entries(patch)) currentOptions[key] = String(val);
-        fs.writeFileSync(path.join(outputDir, 'layout.cache.json'), JSON.stringify(currentOptions, null, 2));
-      }
-    }
-
-    if (!success && lastRenderResult) {
-      svgContent = await captureSvg(page, lastRenderResult.width, lastRenderResult.height);
-      fs.writeFileSync(path.join(outputDir, 'optimized.svg'), svgContent);
-    }
-
-    if (history.length > 0) {
-      pngPath = path.join(outputDir, 'optimized.png');
-      fs.copyFileSync(history.at(-1).screenshot, pngPath);
     }
 
     return { success, history, svgContent, pngPath };

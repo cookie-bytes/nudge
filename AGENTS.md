@@ -31,7 +31,7 @@ Use [UBIQUITOUS_LANGUAGE.md](UBIQUITOUS_LANGUAGE.md) as the canonical language f
 
 ## Architecture
 
-Nudge is a **Critic-Loop optimizer** with two entry points — a CLI and an MCP server — sharing a common core layer.
+Nudge is a **deterministic C4 layout engine with optional LLM enhancement**. It has two entry points — a CLI and an MCP server — sharing a common core layer.
 
 ```
 src/
@@ -45,15 +45,15 @@ src/
   utils.js              ← fetchWithTimeout helper
 ```
 
-Flat diagrams run the critic loop: parse input → render in headless browser → run geometric critique → query LLM for an ELKjs parameter patch → repeat (max 4 times). Container diagrams use the custom renderer plus a one-pass visual-hint pipeline: top-row order, port hints, and diagonal-route hints are tried as staged renders, and only non-worsening candidates are accepted.
+The renderer always produces a deterministic baseline. Container diagrams use the custom deterministic renderer plus an optional one-pass visual-hint pipeline: top-row order, port hints, and diagonal-route hints are tried as staged renders, and only non-worsening candidates are accepted. Flat diagrams use ELKjs; when LLM calls are enabled, the flat-diagram critic loop can ask for ELKjs parameter patches and repeat up to 4 times.
 
 ### Data flow
 
-1. **`src/core/optimizer.js`** — The optimization loop. Accepts `{ diagramModel, outputDir, apiUrl, maxIterations, onLog, signal, checkpointTimeout, optimizationTimeout, skipLlm }`. Drives Playwright, calls `analyzeLayout`, runs the visual-hint pipeline for containers, and calls `getLLMOptimizationPatch` for flat diagrams. Returns `{ success, history, svgContent, pngPath }`. SVG is always returned — on zero-collision success or as best-effort from the last rendered iteration. The `captureSvg` helper extracts both `#svg-root` innerHTML and the page's `<head><style>` block, embedding styles inline so the exported SVG is self-contained.
+1. **`src/core/optimizer.js`** — The render/critique/export loop. Accepts `{ diagramModel, outputDir, apiUrl, maxIterations, onLog, signal, checkpointTimeout, optimizationTimeout, enhance }`. Drives Playwright, calls `analyzeLayout`, runs the visual-hint pipeline for containers, and calls `getLLMOptimizationPatch` for flat diagrams only when LLM calls are enabled. Returns `{ success, history, svgContent, pngPath }`. SVG is always returned — on zero-collision success or as best-effort from the last rendered iteration. The `captureSvg` helper extracts both `#svg-root` innerHTML and the page's `<head><style>` block, embedding styles inline so the exported SVG is self-contained.
 
 2. **`src/cli/index.js`** — Thin CLI entry point. Reads the input file from `process.argv[2]`, parses it, calls `optimizeDiagram`, prints the summary table, and exits with code 1 on failure. All logging goes to stdout via `onLog`.
 
-3. **`src/mcp/index.js`** — MCP stdio server. Registers one tool: `optimize_diagram`. Accepts `{ content, format? }` — Mermaid or YAML diagram source, format auto-detected. Runs the optimizer in a temp directory, returns a JSON summary and the inline SVG in the tool response. All `console.log/warn/error` are redirected to stderr at startup to protect the stdio JSON protocol. Passes `extra.signal` (from the MCP SDK request handler) through to the optimizer so cancellation from the client aborts all in-flight LLM fetches immediately. Uses tighter timeouts than the CLI: 15 s for visual-hint calls, 20 s for optimization calls.
+3. **`src/mcp/index.js`** — MCP stdio server. Registers one tool: `optimize_diagram`. Accepts `{ content, format?, enhance? }` — Mermaid or YAML diagram source, format auto-detected. Runs the optimizer in a temp directory with `enhance: false` by default, returns a JSON summary and the inline SVG in the tool response. All `console.log/warn/error` are redirected to stderr at startup to protect the stdio JSON protocol. Passes `extra.signal` (from the MCP SDK request handler) through to the optimizer so cancellation from the client aborts all in-flight work immediately. Uses tighter timeouts than the CLI for future enhancement paths.
 
 4. **`src/render.html`** — Loaded by Playwright as a `file://` URL. Bundles ELKjs locally (copied to `src/vendor/` on `npm install`). Sources `src/render_engine.js`, which exposes `window.renderDiagram(diagramData)` and `window.computeContainerPlan(diagramData)` called from Node via `page.evaluate(...)`.
 
@@ -85,7 +85,7 @@ Flat diagrams run the critic loop: parse input → render in headless browser �
 
 **Label placement**: Connection labels try midpoint, target-anchored, source-anchored, and segment-clearance positions. Fallback placement now checks all architecture elements, including source/target elements, plus previously placed labels so labels do not settle on top of endpoint boxes.
 
-**Container visual hints**: `optimizer.js` captures `step_0_initial.png`, `step_1_top_order.png`, `step_2_port_hints.png`, and `step_3_diagonal_routes.png` for container diagrams. LLM responses are saved to `visual_hints.json` when present. Set `NUDGE_NO_LLM=1` or pass `skipLlm: true` to keep the deterministic stages but skip network calls.
+**Container visual hints**: `optimizer.js` captures `step_0_initial.png`, `step_1_top_order.png`, `step_2_port_hints.png`, and `step_3_diagonal_routes.png` for container diagrams. LLM responses are saved to `visual_hints.json` when present. Set `NUDGE_NO_LLM=1` or leave `enhance: false` to keep the deterministic stages but skip network calls. Product framing should treat these hints as optional polish on top of the deterministic baseline.
 
 **Diagram model format**: Both YAML and Mermaid inputs are normalised to the same `diagramModel` JSON schema before rendering. YAML files are loaded directly; Mermaid files are transformed by `parseMermaidC4`. The YAML schema mirrors the internal model directly (see `examples/system_context.yaml`).
 

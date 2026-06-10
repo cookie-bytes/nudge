@@ -1,7 +1,7 @@
 {
   "name": "@cookie-bytes/nudge",
   "version": "1.0.0",
-  "description": "AI-driven layout optimizer for C4 Model architecture diagrams",
+  "description": "Deterministic C4 layout engine with optional AI polish",
   "bin": {
     "nudge": "./src/cli/index.js",
     "nudge-mcp": "./src/mcp/index.js"

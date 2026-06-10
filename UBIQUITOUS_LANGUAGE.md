@@ -81,7 +81,7 @@
 | **Self-Contained SVG** | The final SVG export with renderer styles embedded inside the SVG. | Optimized SVG, inline SVG |
 | **MCP Tool** | The stdio-exposed `optimize_diagram` operation used by MCP clients. | Server command, external tool |
 | **Cancellation Chain** | The signal path from MCP request cancellation through optimizer calls to fetch timeouts. | Abort path, timeout chain |
-| **Deterministic Mode** | A run with LLM calls disabled by `NUDGE_NO_LLM` or `skipLlm`. | Offline mode, no-AI mode |
+| **Deterministic Mode** | A run that uses Nudge's deterministic renderer and skips LLM enhancement calls. Enabled by default; AI polish is opted into with the CLI flag `--enhance` or MCP parameter `enhance: true`. | Offline mode, no-AI mode |
 
 ## Relationships
 

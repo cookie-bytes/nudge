@@ -237,6 +237,7 @@ async function runIntegrationTest() {
         apiUrl: 'http://mock-api.local',
         maxIterations: 3,
         onLog: (msg) => console.log(`  [Context] ${msg.trim()}`),
+        enhance: true,
       });
 
       console.log(`  Context test: success=${result.success}, iterations=${result.history.length}, fetches=${callLog.total}`);
@@ -283,6 +284,7 @@ async function runIntegrationTest() {
         apiUrl: 'http://mock-api.local',
         maxIterations: 2,
         onLog: (msg) => console.log(`  [Container] ${msg.trim()}`),
+        enhance: true,
       });
 
       console.log(`  Container test: success=${result.success}, iterations=${result.history.length}, fetches=${callLog.total}`);

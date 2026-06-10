@@ -49,7 +49,7 @@ Flat diagrams run the critic loop: parse input → render in headless browser �
 
 ### Data flow
 
-1. **`src/core/optimizer.js`** — The optimization loop. Accepts `{ diagramModel, outputDir, apiUrl, maxIterations, onLog, signal, checkpointTimeout, optimizationTimeout, skipLlm }`. Drives Playwright, calls `analyzeLayout`, runs the visual-hint pipeline for containers, and calls `getLLMOptimizationPatch` for flat diagrams. Returns `{ success, history, svgContent, pngPath }`. SVG is always returned — on zero-collision success or as best-effort from the last rendered iteration. The `captureSvg` helper extracts both `#svg-root` innerHTML and the page's `<head><style>` block, embedding styles inline so the exported SVG is self-contained.
+1. **`src/core/optimizer.js`** — The optimization loop. Accepts `{ diagramModel, outputDir, apiUrl, maxIterations, onLog, signal, checkpointTimeout, optimizationTimeout, enhance }`. Drives Playwright, calls `analyzeLayout`, runs the visual-hint pipeline for containers, and calls `getLLMOptimizationPatch` for flat diagrams. Returns `{ success, history, svgContent, pngPath }`. SVG is always returned — on zero-collision success or as best-effort from the last rendered iteration. The `captureSvg` helper extracts both `#svg-root` innerHTML and the page's `<head><style>` block, embedding styles inline so the exported SVG is self-contained.
 
 2. **`src/cli/index.js`** — Thin CLI entry point. Reads the input file from `process.argv[2]`, parses it, calls `optimizeDiagram`, prints the summary table, and exits with code 1 on failure. All logging goes to stdout via `onLog`.
 
@@ -85,7 +85,7 @@ Flat diagrams run the critic loop: parse input → render in headless browser �
 
 **Label placement**: Connection labels try midpoint, target-anchored, source-anchored, and segment-clearance positions. Fallback placement now checks all architecture elements, including source/target elements, plus previously placed labels so labels do not settle on top of endpoint boxes.
 
-**Container visual hints**: `optimizer.js` captures `step_0_initial.png`, `step_1_top_order.png`, `step_2_port_hints.png`, and `step_3_diagonal_routes.png` for container diagrams. LLM responses are saved to `visual_hints.json` when present. Set `NUDGE_NO_LLM=1` or pass `skipLlm: true` to keep the deterministic stages but skip network calls.
+**Container visual hints**: `optimizer.js` captures `step_0_initial.png`, `step_1_top_order.png`, `step_2_port_hints.png`, and `step_3_diagonal_routes.png` for container diagrams. LLM responses are saved to `visual_hints.json` when present. Set `NUDGE_NO_LLM=1` or leave `enhance: false` to keep the deterministic stages but skip network calls.
 
 **Diagram model format**: Both YAML and Mermaid inputs are normalised to the same `diagramModel` JSON schema before rendering. YAML files are loaded directly; Mermaid files are transformed by `parseMermaidC4`. The YAML schema mirrors the internal model directly (see `examples/system_context.yaml`).
 

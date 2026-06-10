@@ -81,9 +81,9 @@ need a decent no-LLM path. Options:
 
 ## Checklist when picking this up post-refactor
 
-- [ ] Deterministic mode is the default in CLI and MCP entry points
-- [ ] `--enhance` CLI flag / `enhance` MCP param gates all LLM calls
-- [ ] Flat C4Context diagrams have a no-LLM baseline (static config or canned-config search)
-- [ ] README headline and Features section rewritten around the deterministic core
+- [x] Deterministic mode is the default in CLI and MCP entry points
+- [x] `--enhance` CLI flag / `enhance` MCP param gates all LLM calls
+- [x] Flat C4Context diagrams have a no-LLM baseline (static config or canned-config search)
+- [x] README headline and Features section rewritten around the deterministic core
 - [ ] LLM uplift measured and reported across the test corpus
 - [ ] Decide separately: Structurizr DSL input, external validation corpus, D2 comparison
