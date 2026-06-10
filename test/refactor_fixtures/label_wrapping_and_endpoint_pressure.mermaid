@@ -1,0 +1,22 @@
+C4Container
+    title Label Wrapping And Endpoint Pressure
+    %% Rule: Person above Container
+    %% Rule: Container above ContainerDb
+
+    Person(researcher, "Researcher With A Very Long Display Name", "Runs analysis workflows from the workbench.")
+    System_Boundary(analytics, "Analytics Workbench") {
+        Container(notebook, "Collaborative Notebook Runtime With Long Name", "Python, Jupyter, local", "Executes user supplied notebooks and renders intermediate results.")
+        Container(orchestrator, "Experiment Orchestrator And Policy Enforcer", "Scala", "Coordinates long running experiments and applies governance policy.")
+        Container(modelRegistry, "Model Registry", "TypeScript", "Tracks models, versions, approvals, and lineage.")
+        ContainerDb(results, "Experiment Results Warehouse", "Snowflake", "Stores metrics, predictions, feature snapshots, and explanatory metadata.")
+    }
+    System_Ext(identity, "Enterprise Identity Provider With Long Name", "Provides federated authentication and group membership claims.")
+    System_Ext(storage, "External Object Storage And Archive", "Stores raw input datasets and long term output bundles.")
+
+    Rel(researcher, notebook, "Opens a notebook, edits cells, streams logs, and inspects generated charts", "HTTPS/WebSocket")
+    Rel(notebook, orchestrator, "Submits a governed experiment execution request with policy context", "gRPC")
+    Rel(orchestrator, modelRegistry, "Registers candidate model version and promotion decision metadata", "JSON/HTTPS")
+    Rel(orchestrator, results, "Writes metrics, confusion matrices, feature drift summaries, and run metadata", "JDBC")
+    Rel(modelRegistry, results, "Reads historical evaluation baselines before accepting a promotion", "SQL")
+    Rel(notebook, identity, "Validates short lived user token and resolves group entitlements", "OIDC")
+    Rel(orchestrator, storage, "Reads raw datasets and writes generated model artifact bundles", "S3 API")

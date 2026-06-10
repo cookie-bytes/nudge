@@ -1,0 +1,25 @@
+C4Container
+    title Nested Boundary Characterization
+    %% Rule: Person above Container
+    %% Rule: Container above ContainerDb
+
+    Person(operator, "Operator", "Runs account operations.")
+    System_Boundary(bank, "Banking Platform") {
+        System_Boundary(core, "Core Domain") {
+            Container(accounts, "Accounts Service", "Kotlin", "Maintains account state.")
+            Container(ledger, "Ledger Service", "Kotlin", "Posts ledger entries.")
+            ContainerDb(ledgerDb, "Ledger Store", "PostgreSQL", "Stores immutable entries.")
+        }
+        System_Boundary(edge, "Edge Domain") {
+            Container(api, "Public API", "Java", "Handles client requests.")
+            ContainerQueue(commands, "Command Queue", "RabbitMQ", "Buffers account commands.")
+        }
+    }
+    System_Ext(notifications, "Notification Service", "Sends customer messages.")
+
+    Rel(operator, api, "Uses", "HTTPS")
+    Rel(api, commands, "Submits command", "AMQP")
+    Rel(commands, accounts, "Dispatches command", "AMQP")
+    Rel(accounts, ledger, "Posts entry", "gRPC")
+    Rel(ledger, ledgerDb, "Persists entry", "JDBC")
+    Rel(accounts, notifications, "Requests notification", "HTTPS")

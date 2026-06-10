@@ -1,0 +1,31 @@
+C4Container
+    title Multi Boundary Cross Parent Routes
+    %% Rule: Person above Container
+    %% Rule: Container above ContainerDb
+
+    Person(customer, "Customer", "Uses the product.")
+    Person(admin, "Admin", "Configures the product.")
+    System_Boundary(frontend, "Experience Layer") {
+        Container(web, "Web App", "React", "Customer and admin UI.")
+        Container(bff, "Backend for Frontend", "Node.js", "Aggregates APIs.")
+    }
+    System_Boundary(platform, "Platform Services") {
+        Container(accounts, "Accounts API", "Java", "Owns accounts.")
+        Container(orders, "Orders API", "Go", "Owns orders.")
+        ContainerQueue(events, "Platform Events", "Kafka", "Domain event backbone.")
+        ContainerDb(accountsDb, "Accounts Store", "PostgreSQL", "Account data.")
+        ContainerDb(ordersDb, "Orders Store", "PostgreSQL", "Order data.")
+    }
+    System_Ext(tax, "Tax Service", "Calculates tax.")
+
+    Rel(customer, web, "Uses", "HTTPS")
+    Rel(admin, web, "Configures", "HTTPS")
+    Rel(web, bff, "Calls", "JSON/HTTPS")
+    Rel(bff, accounts, "Reads account profile", "gRPC")
+    Rel(bff, orders, "Places order", "gRPC")
+    Rel(accounts, accountsDb, "Reads and writes", "JDBC")
+    Rel(orders, ordersDb, "Reads and writes", "JDBC")
+    Rel(orders, tax, "Calculates tax", "HTTPS")
+    Rel(accounts, events, "Publishes account events", "Kafka")
+    Rel(orders, events, "Publishes order events", "Kafka")
+    Rel(events, bff, "Pushes status updates", "WebSocket")

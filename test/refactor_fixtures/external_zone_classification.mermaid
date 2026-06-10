@@ -1,0 +1,19 @@
+C4Context
+    title External Zone Classification
+    %% Rule: Person above System
+
+    Person_Ext(customer, "External Customer", "Uses public channels.")
+    Person_Ext(partnerUser, "Partner User", "Uses partner channels.")
+    System(gateway, "Public Gateway", "Entry point owned by us.")
+    System_Ext(crm, "CRM SaaS", "Stores customer interactions.")
+    System_Ext(billing, "Billing Provider", "Bills customers.")
+    System_Ext(partner, "Partner Platform", "Sends partner traffic.")
+    SystemDb_Ext(dataLake, "Shared Data Lake", "Stores shared extracts.")
+
+    Rel(customer, gateway, "Uses", "HTTPS")
+    Rel(partnerUser, partner, "Uses", "HTTPS")
+    Rel(partner, gateway, "Submits partner request", "HTTPS")
+    Rel(gateway, crm, "Looks up customer profile", "HTTPS")
+    Rel(gateway, billing, "Creates invoice", "HTTPS")
+    Rel(crm, dataLake, "Exports interactions", "Batch")
+    Rel(billing, dataLake, "Exports invoice facts", "Batch")

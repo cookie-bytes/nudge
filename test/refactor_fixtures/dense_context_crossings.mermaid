@@ -1,0 +1,30 @@
+C4Context
+    title Dense Context Crossing Stress
+    %% Rule: Person above System
+    %% Rule: System above System_Ext
+
+    Person(buyer, "Buyer", "Places and tracks orders.")
+    Person(support, "Support Agent", "Handles customer questions.")
+    Person(ops, "Operations Analyst", "Monitors fulfilment.")
+    System(shop, "Shopping Platform", "Coordinates customer journeys.")
+    System(identity, "Identity Service", "Authenticates people and services.")
+    System(payment, "Payment Gateway", "Authorises card and wallet payments.")
+    System(warehouse, "Warehouse Control", "Coordinates picking and packing.")
+    System_Ext(carrier, "Carrier Network", "Ships parcels.")
+    System_Ext(email, "Email Provider", "Sends notifications.")
+    System_Ext(fraud, "Fraud Scoring", "Scores suspicious activity.")
+    SystemDb_Ext(archive, "Audit Archive", "Immutable audit record store.")
+
+    Rel(buyer, shop, "Browses catalog and checks out", "HTTPS")
+    Rel(support, shop, "Looks up orders", "HTTPS")
+    Rel(ops, warehouse, "Reviews fulfilment health", "HTTPS")
+    Rel(shop, identity, "Validates sessions", "OIDC")
+    Rel(shop, payment, "Requests payment authorisation", "HTTPS")
+    Rel(shop, warehouse, "Submits fulfilment requests", "JSON/HTTPS")
+    Rel(shop, email, "Sends order email", "SMTP API")
+    Rel(identity, fraud, "Shares login risk signals", "Events")
+    Rel(payment, fraud, "Requests risk score", "HTTPS")
+    Rel(warehouse, carrier, "Books shipments", "REST")
+    Rel(carrier, shop, "Posts delivery status callbacks", "Webhook")
+    Rel(payment, archive, "Writes transaction audit events", "Events")
+    Rel(identity, archive, "Writes authentication audit events", "Events")
