@@ -17,8 +17,10 @@
     "probe:apply-top-order": "node scripts/top_order_apply_probe.js",
     "probe:top-order": "node scripts/top_order_probe.js",
     "test:refactor": "node test/refactor_test_rig.js",
-    "test": "node test/run_tests.js",
-    "test:visual": "NUDGE_VISUAL_TEST=true node test/run_tests.js"
+    "test:unit": "node --test test/unit/**/*.test.js",
+    "test:integration": "node --test test/integration/**/*.test.js",
+    "test:visual": "NUDGE_VISUAL_TEST=true node test/run_tests.js",
+    "test": "npm run test:unit && npm run test:integration && node test/run_tests.js"
   },
   "repository": {
     "type": "git",

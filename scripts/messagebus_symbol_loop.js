@@ -16,7 +16,7 @@ const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '..');
 const OUTPUT_DIR = path.join(ROOT, 'test_outputs');
 const RENDERED_PATH = path.join(OUTPUT_DIR, 'messagebus_only.png');
-const REFERENCE_PATH = path.join(ROOT, 'test/fixtures/MessageBus_Symbol.png');
+const REFERENCE_PATH = path.join(ROOT, 'test/fixtures/images/MessageBus_Symbol.png');
 const TEMPLATE_PATH = path.join(ROOT, 'src/render.html');
 const LM_STUDIO_API = process.env.NUDGE_LLM_API || 'http://127.0.0.1:1234';
 

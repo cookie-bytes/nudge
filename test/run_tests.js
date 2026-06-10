@@ -8,7 +8,7 @@ import { fetchWithTimeout } from '../src/utils.js';
 import { optimizeDiagram } from '../src/core/optimizer.js';
 
 const LM_STUDIO_API = process.env.NUDGE_LLM_API || 'http://127.0.0.1:1234';
-const TEST_DIR = path.resolve('test');
+const TEST_DIR = path.join(path.resolve('test'), 'fixtures', 'diagrams', 'core');
 const OUTPUT_DIR = path.resolve('test_outputs');
 
 // Verify all boundary children are geometrically inside their parent boundary
@@ -323,7 +323,7 @@ async function runTests() {
 
   const testFiles = fs.readdirSync(TEST_DIR).filter(file => file.endsWith('.mermaid'));
   if (testFiles.length === 0) {
-    console.error("No test mermaid files found in test/ folder.");
+    console.error("No test mermaid files found in test/fixtures/diagrams/core folder.");
     process.exit(1);
   }
 

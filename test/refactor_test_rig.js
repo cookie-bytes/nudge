@@ -8,12 +8,11 @@ import { parseMermaidC4 } from '../src/mermaid_parser.js';
 
 const WORKSPACE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_OUTPUT_DIR = path.join(WORKSPACE_ROOT, 'test_outputs', 'refactor_rig');
-
 function parseArgs(argv) {
   const args = {
     baselineRef: 'HEAD',
     candidateDir: WORKSPACE_ROOT,
-    fixturesDir: path.join(WORKSPACE_ROOT, 'test'),
+    fixturesDir: path.join(WORKSPACE_ROOT, 'test', 'fixtures', 'diagrams'),
     outputDir: DEFAULT_OUTPUT_DIR,
   };
 
@@ -40,7 +39,7 @@ function printHelp() {
 Options:
   --baseline-ref <git-ref>    Git ref containing the legacy renderer. Default: HEAD
   --candidate-dir <path>      Working tree containing the candidate renderer. Default: repo root
-  --fixtures-dir <path>       Directory containing .mermaid fixtures. Default: test/
+  --fixtures-dir <path>       Directory containing .mermaid fixtures. Default: test/fixtures/diagrams/
   --output-dir <path>         Artifact directory. Default: test_outputs/refactor_rig/
 
 The rig renders every fixture twice with Playwright: once through the baseline
@@ -85,6 +84,19 @@ function materializeRuntime({ lane, outputDir, baselineRef, candidateDir }) {
   if (lane === 'baseline') {
     fs.writeFileSync(path.join(runtimeDir, 'render.html'), readGitFile(baselineRef, WORKSPACE_ROOT, 'src/render.html'));
     fs.writeFileSync(path.join(runtimeDir, 'render_engine.js'), readGitFile(baselineRef, WORKSPACE_ROOT, 'src/render_engine.js'));
+    try {
+      const hasRenderer = execFileSync('git', ['-C', WORKSPACE_ROOT, 'ls-tree', '-d', '--name-only', baselineRef, 'src/renderer'], { encoding: 'utf8' }).trim();
+      if (hasRenderer) {
+        const tarPath = path.join(runtimeDir, 'renderer.tar');
+        execFileSync('git', ['-C', WORKSPACE_ROOT, 'archive', '--format=tar', '-o', tarPath, baselineRef, 'src/renderer']);
+        execFileSync('tar', ['-xf', tarPath, '-C', runtimeDir]);
+        fs.rmSync(tarPath);
+        fs.renameSync(path.join(runtimeDir, 'src', 'renderer'), path.join(runtimeDir, 'renderer'));
+        fs.rmSync(path.join(runtimeDir, 'src'), { recursive: true, force: true });
+      }
+    } catch (e) {
+      // Ignore errors if src/renderer does not exist in baselineRef
+    }
   } else {
     copyFileOrThrow(path.join(candidateDir, 'src', 'render.html'), path.join(runtimeDir, 'render.html'));
     copyFileOrThrow(path.join(candidateDir, 'src', 'render_engine.js'), path.join(runtimeDir, 'render_engine.js'));
