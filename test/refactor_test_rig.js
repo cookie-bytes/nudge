@@ -63,6 +63,20 @@ function copyFileOrThrow(source, destination) {
   fs.copyFileSync(source, destination);
 }
 
+function copyDirRecursive(source, destination) {
+  if (!fs.existsSync(source)) return;
+  fs.mkdirSync(destination, { recursive: true });
+  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+    const srcPath = path.join(source, entry.name);
+    const dstPath = path.join(destination, entry.name);
+    if (entry.isDirectory()) {
+      copyDirRecursive(srcPath, dstPath);
+    } else if (entry.isFile()) {
+      fs.copyFileSync(srcPath, dstPath);
+    }
+  }
+}
+
 function materializeRuntime({ lane, outputDir, baselineRef, candidateDir }) {
   const runtimeDir = path.join(outputDir, '_runtime', lane);
   fs.rmSync(runtimeDir, { recursive: true, force: true });
@@ -74,6 +88,7 @@ function materializeRuntime({ lane, outputDir, baselineRef, candidateDir }) {
   } else {
     copyFileOrThrow(path.join(candidateDir, 'src', 'render.html'), path.join(runtimeDir, 'render.html'));
     copyFileOrThrow(path.join(candidateDir, 'src', 'render_engine.js'), path.join(runtimeDir, 'render_engine.js'));
+    copyDirRecursive(path.join(candidateDir, 'src', 'renderer'), path.join(runtimeDir, 'renderer'));
   }
 
   const vendorPath = path.join(candidateDir, 'src', 'vendor', 'elk.bundled.js');
