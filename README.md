@@ -6,7 +6,7 @@
 
 **AI-Driven Architecture Diagram Layout Optimizer**
 
-Nudge automatically produces clean, publication-ready C4 Model architecture diagrams. It combines a deterministic custom layout engine for container diagrams with an iterative LLM feedback loop that detects and fixes geometric defects — overlapping components, edge-to-node crossings, and tight spacing — using locally-running AI.
+Nudge automatically produces clean, publication-ready C4 Model architecture diagrams. It combines ELKjs for flat context diagrams, a deterministic custom layout engine for container diagrams, and optional local-LLM reviewers that suggest small layout improvements from rendered geometry.
 
 Nudge runs as a **CLI tool** for direct use from the terminal, and as a local **MCP server** so LLM clients like Claude Desktop can call it as a tool — generating and optimizing diagrams in a single conversational step.
 
@@ -29,23 +29,27 @@ Nudge runs on a **Critic-Loop** architecture:
 ```mermaid
 graph TD
     A[Input YAML or Mermaid] --> B[Parse Diagram Model]
-    B --> C[LM Checkpoint Pipeline\ncontainer diagrams only]
-    C --> D[Render Diagram in Playwright]
-    D --> E[Geometric Critique Analyzer]
-    E -->|Defects Detected?| F[Query LLM with Report & Options]
-    F -->|JSON Layout Patch| G[Apply Parameters]
-    G --> D
-    E -->|No Defects or Max Iterations Met| H[Export SVG & PNG]
+    B --> C{Container diagram?}
+    C -->|Yes| D[Visual-Hint Pipeline\nTop order → Port hints → Diagonal routes]
+    C -->|No| E[ELKjs Critic Loop]
+    D --> F[Render Final Container Layout]
+    E --> G[Render in Playwright]
+    G --> H[Geometric Critique Analyzer]
+    H -->|Defects Detected?| I[Query LLM for ELKjs Patch]
+    I -->|JSON Layout Patch| G
+    F --> J[Geometric Critique Analyzer]
+    H -->|No Defects or Max Iterations Met| K[Export SVG & PNG]
+    J --> K
 ```
 
 1. **Ingestion**: Parses C4 Context or C4 Container diagrams from `.mermaid` or `.yaml` specifications.
-2. **LM Checkpoint Pipeline** *(container diagrams only)*: Before the optimization loop, two LLM checkpoints verify and correct zone assignments and node ordering — ensuring callers are above the boundary, callees below, and external nodes are ordered to minimise edge crossings.
+2. **Container visual hints** *(container diagrams only)*: Renders staged snapshots, asks the local LLM for top-row order, port-side, and diagonal-route hints, then accepts only hints that improve the geometric score. Set `NUDGE_NO_LLM=1` to render the deterministic stages without LLM calls.
 3. **Rendering**: Playwright loads the diagram template and executes the layout pipeline:
    - **Flat diagrams (C4Context)**: Arranged dynamically via **ELKjs** (layered algorithm).
    - **Nested diagrams (C4Container)**: Arranged via a custom, deterministic **Container Layout Engine** (see below).
 4. **Criticism**: Measures DOM bounding boxes to detect geometric defects (overlaps, edge-node crossings, edge-label collisions, aspect ratio). Container routing also scores candidate paths against already-routed edges to reduce stacked line corridors.
-5. **Correction**: Feeds the critique report to a local LLM, requesting layout property adjustments or ordering swap overrides.
-6. **Iteration**: Repeats up to 4 times or until a clean layout is produced. A best-effort SVG is always exported even if collisions remain.
+5. **Correction**: For flat diagrams, feeds the critique report to a local LLM and requests ELKjs layout option patches.
+6. **Iteration and export**: Flat diagrams repeat up to 4 times or until clean. Container diagrams run the staged visual-hint pass once. A best-effort SVG is always exported even if collisions remain.
 
 ---
 
@@ -61,17 +65,19 @@ Container diagrams containing boundary blocks bypass ELKjs entirely and use a cu
 
 - **Phase 1: Kahn Layering (Boundary Interior)**: Children of the boundary are sorted into horizontal layers using a modified Kahn's topological sort. Nodes receiving cross-boundary edges are automatically seeded as entry nodes in the top row (Layer 0); unconnected utility nodes are pushed down to minimise clutter. Cycles are silently broken by appending remaining nodes to a final layer.
 - **Phase 2: Dedicated Utility Rows**: Message buses and databases are excluded from Kahn's sort and reinserted into purpose-built rows. Busy buses widen into clear spines; all message buses are corner-anchored in the bottom-right. Databases sit in tighter rows beneath their deepest contributing service.
-- **Phase 3: Zone Classification & Connectivity Sorting**: External nodes are classified into layout zones — callers go **above**, callees go **below**, and overflow nodes spill into **left** and **right** columns. Each zone is automatically sorted by the average layer/column index of the internal nodes it connects to, so external nodes align visually with their counterparts inside the boundary with minimal edge crossings. LLM override commands (`zoneOverrides`, `SWAP_NODE_ORDER`, `SHIFT_ZONE`) from the checkpoint pipeline are applied on top of the automatic sort.
+- **Phase 3: Zone Classification & Connectivity Sorting**: External nodes are classified into layout zones — callers go **above**, callees go **below**, and overflow nodes spill into **left** and **right** columns. Each zone is automatically sorted by the average layer/column index of the internal nodes it connects to, so external nodes align visually with their counterparts inside the boundary with minimal edge crossings.
 - **Phase 4: Hybrid Edge Routing**: Candidate routes are scored by node crossings first, then by a weighted mix of existing edge overlaps/crossings, bend count, and path length. This keeps direct-looking lines when they are clean, while choosing row-gap or gutter detours only when they avoid real conflicts. After the first route pass, interior lane reservation separates unavoidable shared corridors, and a conservative second pass reroutes only the worst edge-conflict offenders when the global score improves. Bend points are post-processed into broad SVG quadratic bezier curves so detours read as soft paths rather than rigid right-angle wiring.
 - **Phase 5: Rule-Based Edge Label Placement**: Relationship labels are placed along the edge using four strategies evaluated in order: (0) straight-line midpoint, (1) target-anchored, (2) source-anchored, (3) edge-density-aware segment scoring. Every strategy checks for collision against node bounding boxes, source/target boxes, previously-placed labels, and nearby connection lines, so duplicate-text labels on co-terminal edges are separated and labels avoid busy corridors where possible. Long labels wrap automatically; technology notes (e.g. `[HTTPS]`) are rendered in a smaller, semi-transparent style beneath the main text.
 
-### LM Checkpoint Pipeline (Container diagrams)
-Before the 4-iteration optimization loop runs, two LLM checkpoints fire once:
+### Visual-Hint Pipeline (Container diagrams)
+Before final container export, the optimizer renders and scores a sequence of visual states:
 
-- **Checkpoint 1 — Zone Verification**: The LLM reviews the computed zone plan and may issue `zoneOverrides` (move a node to a different zone) or `SWAP_NODE_ORDER` commands.
-- **Checkpoint 2 — Ordering Verification**: If Checkpoint 1 changed any zones, the plan is recomputed first. The LLM then checks whether the left-to-right ordering within each zone minimises edge crossings, and may issue further `SWAP_NODE_ORDER` or `SHIFT_ZONE` commands.
+- `step_0_initial.png` — deterministic container layout.
+- `step_1_top_order.png` — optional top internal row order suggested by `getLLMTopOrder`.
+- `step_2_port_hints.png` — optional source/target side hints suggested by `getLLMPortHints`.
+- `step_3_diagonal_routes.png` — optional route-intent hints suggested by `getLLMDiagonalRouteHints`.
 
-All override commands are written to `diagramModel._layoutOverrides` and applied on every subsequent render pass.
+Each candidate is scored against node overlaps, edge-node crossings, edge-edge conflicts, label-edge intersections, bend count, and route length. A hint is accepted only when the candidate score is no worse than the current accepted state. Accepted hints are written to `diagramModel._layoutOverrides`, and raw LLM responses are saved to `visual_hints.json`.
 
 ---
 
@@ -79,7 +85,7 @@ All override commands are written to `diagramModel._layoutOverrides` and applied
 
 - 🎯 **Automatic Defect Detection**: Finds overlapping components, intersecting arrows, edge-label collisions, and poor aspect ratios.
 - 🔄 **Critic Loop**: Continuous optimization loop that improves layout quality iteratively (up to 4 passes).
-- 🤖 **LM Checkpoint Pipeline**: Two pre-render LLM checkpoints verify and correct zone assignments and node ordering for container diagrams before the main loop begins.
+- 🤖 **Visual-Hint Pipeline**: Container diagrams can use local LLM reviewers for top-row ordering, port-side hints, and diagonal route intent hints.
 - 🔌 **MCP Server**: Exposes an `optimize_diagram` tool over stdio so Claude Desktop and other MCP clients can generate and render diagrams conversationally.
 - 🎨 **Supports Mermaid & YAML**: Seamless support for C4 diagrams in `.mermaid`/`.mmd` syntax and structured `.yaml` specifications.
 - 📏 **Standardized Sizing & Grid**: All nodes are standardized to a width of `200px`. Heights: `200px` for Person, `140px` for Container/Database/External, `80px` for MessageBus — ensuring consistent alignment and a clean grid.
@@ -132,6 +138,7 @@ You can customize Nudge's layout tuning behavior and LLM connections using envir
 | `NUDGE_LLM_MODEL` | The model name Nudge should request. | `google/gemma-4-12b` |
 | `NUDGE_LLM_API_KEY` | The API Key to send in the `Authorization` header. | *(none)* |
 | `OPENAI_API_KEY` | Alternative API key if `NUDGE_LLM_API_KEY` is unset. | *(none)* |
+| `NUDGE_NO_LLM` | Disable all optimizer LLM calls and render deterministic layouts only. | *(unset)* |
 
 **Examples:**
 - **Local LM Studio/Ollama (Custom Port)**:
@@ -199,15 +206,18 @@ See [`examples/`](examples/) for full working examples including container diagr
 
 **Outputs** are written to `.nudge/`:
 - `iteration_N.png` — screenshot at each optimization pass
+- `step_0_initial.png`, `step_1_top_order.png`, `step_2_port_hints.png`, `step_3_diagonal_routes.png` — staged container visual-hint snapshots
 - `optimized.png` — final layout as PNG
 - `optimized.svg` — final layout as a self-contained SVG with embedded styles
 - `layout.cache.json` — final ELKjs parameter patch (C4Context diagrams)
+- `visual_hints.json` — raw accepted/reviewed visual-hint payloads for container diagrams when LLM calls run
 
 **Run the test suite:**
 ```bash
 npm test
+npm run test:visual
 ```
-Renders all diagrams in `test/` and grades them. If a local LLM is unavailable, grading falls back to a math-based scorer automatically — no test is skipped.
+`npm test` runs deterministic integration checks, renders all diagrams in `test/`, verifies boundary containment, writes PNG/SVG snapshots and `test_outputs/test_results.md`, and grades with the math scorer. `npm run test:visual` enables the optional LLM visual grader. In either mode, if the grader cannot reach a local LLM it falls back to math scoring automatically.
 
 ---
 
@@ -283,7 +293,7 @@ Call the nudge optimize_diagram tool with this diagram and return the SVG:
 │   ├── core/
 │   │   ├── optimizer.js    # Shared optimization loop — called by both CLI and MCP
 │   │   ├── geometry.js     # Pure geometric algorithms: overlap, intersection, label placement
-│   │   └── llm_client.js   # Stateless LLM API client — zone/routing/optimization calls
+│   │   └── llm_client.js   # Stateless LLM API client — visual hints and optimization calls
 │   ├── cli/
 │   │   └── index.js        # CLI entry point — argument parsing, file I/O, console output
 │   ├── mcp/

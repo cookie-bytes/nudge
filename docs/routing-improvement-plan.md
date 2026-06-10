@@ -39,7 +39,7 @@ This gives the renderer a local optimization loop without turning it into a full
 
 ## Later Ideas
 
-- Use explicit side/endcap ports for databases and message buses.
+- Expand explicit side/endcap port handling for databases and message buses beyond the current targeted hint support.
 - Make high-connectivity bus placement depend on connection span and direction balance instead of a simple threshold.
 - Add optional route style modes such as `direct`, `balanced`, and `avoid-conflicts`.
 
@@ -48,6 +48,12 @@ This gives the renderer a local optimization loop without turning it into a full
 Status: implemented.
 
 Label placement now records actual rendered label coordinates on returned edge labels and uses edge-density-aware fallback scoring. The test suite's label-edge metric therefore measures the labels that were actually drawn. Fallback label candidates penalize node collisions, already-placed label collisions, and intersections with other connection lines.
+
+## Completed Follow-Up — Container Visual Hints
+
+Status: implemented.
+
+Container optimization now renders staged snapshots for `step_0_initial`, `step_1_top_order`, `step_2_port_hints`, and `step_3_diagonal_routes`. The LLM reviewers can suggest a top-row internal order, targeted source/target port sides, and route intents for long diagonal paths. Each candidate is accepted only when the geometry score is no worse than the current accepted state, keeping the hint pipeline conservative.
 
 ## Guardrails
 

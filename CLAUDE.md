@@ -7,13 +7,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 npm install                               # Install dependencies
 npx playwright install chromium           # Required one-time browser setup
-npm start                                 # Run CLI optimizer on examples/system_context.yaml
+npm start                                 # Run CLI optimizer on examples/search_service_container.mermaid
 node src/cli/index.js <path/to/file>      # Run CLI on a custom .mermaid, .mmd, or .yaml file
 node src/mcp/index.js                     # Start the MCP stdio server
 npm test                                  # Run the test suite (renders all test/*.mermaid files)
+npm run test:visual                       # Run tests with optional LLM visual grading
 ```
 
-Tests require a running local LLM server for LLM-based grading; if unavailable, they fall back to a math-based scorer. No test is skipped — the fallback is automatic.
+`npm test` runs deterministic integration checks, renders every test diagram, verifies boundary containment, and writes snapshots plus `test_outputs/test_results.md`. `npm run test:visual` enables LLM visual grading; if the grader is unavailable it falls back to the math scorer. No test is skipped.
+
+## Ubiquitous language
+
+Use [UBIQUITOUS_LANGUAGE.md](UBIQUITOUS_LANGUAGE.md) as the canonical language for Nudge domain discussions, docs, issue writeups, PR descriptions, and user-facing explanations.
+
+- Prefer **Architecture Element** over "node" when discussing diagram-domain concepts.
+- Prefer **Connection Line** over "edge" when discussing the rendered visual line.
+- Prefer **Relationship** for the semantic source-model connection between two architecture elements.
+- Prefer **Connection Label** over "edge label".
+- Prefer **Element Overlap**, **Connection-Line Element Crossing**, **Connection-Label Element Crossing**, **Connection-Line Crossing**, **Connection-Line Overlap**, and **Label-Line Intersection** for quality terms.
+- Reserve **Node** and **Edge** for implementation-level graph, ELKjs, renderer, or code-identifier discussion.
+- If a user uses a non-glossary or ambiguous term, translate to the canonical term when the meaning is obvious. Ask a short clarification question when it could mean multiple glossary concepts.
+- When editing code, preserve existing code identifiers such as `nodes`, `edges`, `edgeQuality`, and CSS classes unless the task explicitly asks for a code rename.
 
 ## Architecture
 
@@ -23,7 +37,7 @@ Nudge is a **Critic-Loop optimizer** with two entry points — a CLI and an MCP 
 src/
   core/optimizer.js     ← shared optimization loop
   core/geometry.js      ← geometric critic (overlaps, crossings, spacing)
-  core/llm_client.js    ← LLM API client + checkpoint calls
+  core/llm_client.js    ← LLM API client + visual hint/optimization calls
   cli/index.js          ← thin CLI wrapper (reads file, logs to stdout)
   mcp/index.js          ← MCP stdio server (exposes optimize_diagram tool)
   mermaid_parser.js     ← Mermaid C4 → internal JSON model
@@ -31,23 +45,23 @@ src/
   utils.js              ← fetchWithTimeout helper
 ```
 
-Each iteration of the optimizer: parse input → render in headless browser → run geometric collision analysis → query LLM for an ELKjs parameter patch → repeat (max 4 times). Container diagrams also run a pre-render checkpoint pipeline for zone and ordering verification.
+Flat diagrams run the critic loop: parse input → render in headless browser → run geometric critique → query LLM for an ELKjs parameter patch → repeat (max 4 times). Container diagrams use the custom renderer plus a one-pass visual-hint pipeline: top-row order, port hints, and diagonal-route hints are tried as staged renders, and only non-worsening candidates are accepted.
 
 ### Data flow
 
-1. **`src/core/optimizer.js`** — The optimization loop. Accepts `{ diagramModel, outputDir, apiUrl, maxIterations, onLog, signal, checkpointTimeout, optimizationTimeout }`. Drives Playwright, calls `analyzeLayout`, `getLLMOptimizationPatch`, and the two checkpoint functions. Returns `{ success, history, svgContent, pngPath }`. SVG is always returned — on zero-collision success or as best-effort from the last rendered iteration. The `captureSvg` helper extracts both `#svg-root` innerHTML and the page's `<head><style>` block, embedding styles inline so the exported SVG is self-contained.
+1. **`src/core/optimizer.js`** — The optimization loop. Accepts `{ diagramModel, outputDir, apiUrl, maxIterations, onLog, signal, checkpointTimeout, optimizationTimeout, skipLlm }`. Drives Playwright, calls `analyzeLayout`, runs the visual-hint pipeline for containers, and calls `getLLMOptimizationPatch` for flat diagrams. Returns `{ success, history, svgContent, pngPath }`. SVG is always returned — on zero-collision success or as best-effort from the last rendered iteration. The `captureSvg` helper extracts both `#svg-root` innerHTML and the page's `<head><style>` block, embedding styles inline so the exported SVG is self-contained.
 
 2. **`src/cli/index.js`** — Thin CLI entry point. Reads the input file from `process.argv[2]`, parses it, calls `optimizeDiagram`, prints the summary table, and exits with code 1 on failure. All logging goes to stdout via `onLog`.
 
-3. **`src/mcp/index.js`** — MCP stdio server. Registers one tool: `optimize_diagram`. Accepts `{ content, format? }` — Mermaid or YAML diagram source, format auto-detected. Runs the optimizer in a temp directory, returns a JSON summary and the inline SVG in the tool response. All `console.log/warn/error` are redirected to stderr at startup to protect the stdio JSON protocol. Passes `extra.signal` (from the MCP SDK request handler) through to the optimizer so cancellation from the client aborts all in-flight LLM fetches immediately. Uses tighter timeouts than the CLI: 15 s for checkpoint calls, 20 s for optimization calls.
+3. **`src/mcp/index.js`** — MCP stdio server. Registers one tool: `optimize_diagram`. Accepts `{ content, format? }` — Mermaid or YAML diagram source, format auto-detected. Runs the optimizer in a temp directory, returns a JSON summary and the inline SVG in the tool response. All `console.log/warn/error` are redirected to stderr at startup to protect the stdio JSON protocol. Passes `extra.signal` (from the MCP SDK request handler) through to the optimizer so cancellation from the client aborts all in-flight LLM fetches immediately. Uses tighter timeouts than the CLI: 15 s for visual-hint calls, 20 s for optimization calls.
 
 4. **`src/render.html`** — Loaded by Playwright as a `file://` URL. Bundles ELKjs locally (copied to `src/vendor/` on `npm install`). Sources `src/render_engine.js`, which exposes `window.renderDiagram(diagramData)` and `window.computeContainerPlan(diagramData)` called from Node via `page.evaluate(...)`.
 
-5. **`src/render_engine.js`** — Browser-side renderer and layout engine. Flat diagrams use ELKjs. Container diagrams use a custom deterministic pipeline: Kahn layering, dedicated rows for message buses/databases, external zone classification, hybrid route scoring, SVG drawing, and label placement. Returns absolute node bounding boxes and flattened edge sections back to Node.
+5. **`src/render_engine.js`** — Browser-side renderer and layout engine. Flat diagrams use ELKjs. Container diagrams use a custom deterministic pipeline: Kahn layering, dedicated rows for message buses/databases, external zone classification, hybrid route scoring, SVG drawing, and label placement. It applies accepted `_layoutOverrides.internalOrder`, `_layoutOverrides.portHints`, and `_layoutOverrides.routeHints`, then returns absolute architecture element bounding boxes and flattened connection-line sections back to Node.js.
 
-6. **`src/core/geometry.js`** — Stateless geometry analyzer (`analyzeLayout`). Detects node overlaps, edge-node crossings, edge-label-node overlaps, poor aspect ratio, and tight spacing (<45px).
+6. **`src/core/geometry.js`** — Stateless geometry analyzer (`analyzeLayout`). Detects element overlaps, connection-line element crossings, connection-label element crossings, poor aspect ratio, and tight spacing (<45px).
 
-7. **`src/core/llm_client.js`** — Stateless LLM API client (`getLLMZoneVerification`, `getLLMRoutingVerification`, `getLLMOptimizationPatch`, `getActiveModel`). All LLM functions accept `{ signal, timeout }` options — the signal is forwarded to `fetchWithTimeout` so the MCP cancellation chain reaches every fetch.
+7. **`src/core/llm_client.js`** — Stateless LLM API client (`getLLMTopOrder`, `getLLMPortHints`, `getLLMDiagonalRouteHints`, `getLLMOptimizationPatch`, `getActiveModel`). All LLM functions accept `{ signal, timeout }` options — the signal is forwarded to `fetchWithTimeout` so the MCP cancellation chain reaches every fetch. Legacy zone/routing checkpoint helpers still exist in this file, but the active container optimizer uses the visual-hint functions.
 
 8. **`src/mermaid_parser.js`** — Converts Mermaid `C4Context`/`C4Container` syntax into the internal JSON model (`{ title, diagramType, layoutOptions, nodes, edges, rules }`). Supports `%% Rule: X above Y` comments for layout ordering constraints resolved via Bellman-Ford relaxation inside `render.html`.
 
@@ -61,15 +75,17 @@ Each iteration of the optimizer: parse input → render in headless browser → 
 
 **ELKjs port namespace quirk**: Port side properties must be set redundantly under three namespaces simultaneously — `properties["port.side"]`, `properties["org.eclipse.elk.port.side"]`, and `layoutOptions["port.side"]`/`layoutOptions["org.eclipse.elk.port.side"]` — and `portConstraints` must be set as `"FIXED_SIDE"` under all three namespaces (`elk.portConstraints`, `portConstraints`, `org.eclipse.elk.portConstraints`). This is required because ELKjs resolves property keys inconsistently depending on context.
 
-**Port constraints are only applied to same-parent edges**: Cross-hierarchy edges (source and target with different parents) skip port assignment entirely to avoid ELK node resolution errors.
+**Port constraints are only applied to same-parent relationships**: Cross-hierarchy relationships (source and target with different parents) skip port assignment entirely to avoid ELK node resolution errors.
 
-**Side ports for upward edges**: The two-pass layout exists because upward edges (where `rankSrc > rankTgt`) need their target port side set to EAST or WEST based on the *actual* rendered x-coordinates from Pass 1, not the hint coordinates.
+**Side ports for upward relationships**: The two-pass layout exists because upward relationships (where `rankSrc > rankTgt`) need their target port side set to EAST or WEST based on the *actual* rendered x-coordinates from Pass 1, not the hint coordinates.
 
-**Container utility rows**: In `render_engine.js`, `message_bus` and `database` children are excluded from Kahn layering and reinserted afterward. Buses are always marked `_cornerAnchor` and right-aligned in the bottom-right corner; they are sized based on connectivity (3× width for 4+ connections, 2× for 3+ connections). Databases are placed in tighter rows beneath the deepest connected service, with direct parent→db vertical routing when column-aligned.
+**Container utility rows**: In `render_engine.js`, `message_bus` and `database` children are excluded from Kahn layering and reinserted afterward. Message buses are always marked `_cornerAnchor` and right-aligned in the bottom-right corner; they are sized based on connectivity (3× width for 4+ connections, 2× for 3+ connections). Databases are placed in tighter rows beneath the deepest connected container, with direct parent→database vertical routing when column-aligned.
 
-**Hybrid route scoring**: `routeEdge(e, idx)` builds route candidates and chooses with `chooseBestRoute`. Node crossings are the hard first priority. Candidate scores then weigh already-routed edge overlaps, already-routed edge crossings, bend count, and path length. `reserveRouteLanes` offsets only interior segments to separate unavoidable shared corridors, and `improveRoutedSections` reroutes the worst few offenders only when the global edge-quality score improves without adding node crossings or excessive route length. This is intentionally not a hard “no edge crosses another edge” rule; it reduces stacked corridors without forcing huge perimeter detours.
+**Hybrid route scoring**: `routeEdge(e, idx)` builds route candidates and chooses with `chooseBestRoute`. Connection-line element crossings are the hard first priority. Candidate scores then weigh already-routed connection-line overlaps, connection-line crossings, bend count, and path length. `reserveRouteLanes` offsets only interior segments to separate unavoidable shared corridors, and `improveRoutedSections` reroutes the worst few offenders only when the global connection-line quality score improves without adding connection-line element crossings or excessive route length. This is intentionally not a hard “no connection line crosses another connection line” rule; it reduces stacked corridors without forcing huge perimeter detours.
 
-**Label placement**: Edge labels try midpoint, target-anchored, source-anchored, and segment-clearance positions. Fallback placement now checks all components, including source/target nodes, plus previously placed labels so labels do not settle on top of endpoint boxes.
+**Label placement**: Connection labels try midpoint, target-anchored, source-anchored, and segment-clearance positions. Fallback placement now checks all architecture elements, including source/target elements, plus previously placed labels so labels do not settle on top of endpoint boxes.
+
+**Container visual hints**: `optimizer.js` captures `step_0_initial.png`, `step_1_top_order.png`, `step_2_port_hints.png`, and `step_3_diagonal_routes.png` for container diagrams. LLM responses are saved to `visual_hints.json` when present. Set `NUDGE_NO_LLM=1` or pass `skipLlm: true` to keep the deterministic stages but skip network calls.
 
 **Diagram model format**: Both YAML and Mermaid inputs are normalised to the same `diagramModel` JSON schema before rendering. YAML files are loaded directly; Mermaid files are transformed by `parseMermaidC4`. The YAML schema mirrors the internal model directly (see `examples/system_context.yaml`).
 

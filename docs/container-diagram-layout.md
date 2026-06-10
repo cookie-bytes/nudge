@@ -12,22 +12,24 @@ The pipeline has two distinct engines and runs in this order every time a contai
 Input model
     │
     ▼
-[cli.js] LM Checkpoint Pipeline   ← runs ONCE before the optimisation loop
-    │  computeContainerPlan()
-    │  → Checkpoint 1: zone verification
-    │  → Checkpoint 2: ordering verification
-    │  → writes _layoutOverrides onto diagramModel
+[core/optimizer.js] Visual-Hint Pipeline   ← runs ONCE for containers
+    │  renderDiagram()
+    │  → step_0_initial
+    │  → step_1_top_order
+    │  → step_2_port_hints
+    │  → step_3_diagonal_routes
+    │  → accepts only score-improving _layoutOverrides
     │
     ▼
-[cli.js] Optimisation Loop (up to 4 iterations)
+[core/optimizer.js] Final critique + export
     │
     ▼
-[render.html] layoutContainerDiagram()
+[render_engine.js] layoutContainerDiagram()
     │  Phase 1: boundary interior
     │  Phase 2: external node placement + edge routing
     │
     ▼
-[render.html] renderEdges() / drawGraph()
+[render_engine.js] renderEdges() / drawGraph()
     │  Phase 3: edge rendering & rule-based label placement
     │
     ▼
@@ -38,7 +40,7 @@ PNG screenshot + SVG export
 
 ## Phase 1 — Boundary Interior Layout
 
-**File:** `src/render.html` → `layoutContainerDiagram()`  
+**File:** `src/render_engine.js` → `layoutContainerDiagram()`  
 **Sub-phases:** 1a, 1b, 1c
 
 ### 1a: Kahn's topological layer assignment
@@ -108,7 +110,7 @@ Each layer is centred horizontally inside the boundary's content band. Positions
 
 ## Phase 2 — External Node Placement
 
-**File:** `src/render.html` → `layoutContainerDiagram()`  
+**File:** `src/render_engine.js` → `layoutContainerDiagram()`  
 **Sub-phases:** 2a, 2b, 2c, 2d
 
 ### 2a: External node classification
@@ -134,10 +136,10 @@ After classification, each zone's node array is sorted by the average layer/colu
 
 **Stable sort fallback:** When two external nodes have the same average connected index, their original declaration order in the Mermaid source file is preserved.
 
-This sorting runs deterministically in the browser rendering pass with zero latency cost, producing a clean initial layout before the LLM optimisation loop begins.
+This sorting runs deterministically in the browser rendering pass with zero latency cost, producing a clean initial layout before any optional visual hints are evaluated.
 
 **Override support (`_layoutOverrides`):**  
-After sorting, any `zoneOverrides` map from `diagramModel._layoutOverrides` is applied — each entry moves a node out of its current zone and into the specified one. Then `swapCommands` of type `SWAP_NODE_ORDER` reorder within each zone's array. Overrides take precedence over the automatic sort order.
+The active container optimizer writes accepted visual hints into `_layoutOverrides`. `internalOrder` can override the left-to-right order of an internal layer, `portHints` can request source/target sides for specific edges, and `routeHints` can request route intents such as `LEFT_LANE`, `RIGHT_LANE`, or `ORTHOGONAL_NEAR_TARGET`. The renderer also still understands `zoneOverrides` and `swapCommands` for older experiments, but the production optimizer currently uses the visual-hint keys.
 
 ### 2b: Total diagram dimensions
 
@@ -189,7 +191,7 @@ Bend points are post-processed by `renderEdges` into SVG quadratic bezier curves
 
 ## Phase 3 — Edge Rendering & Rule-Based Label Placement
 
-**File:** `src/render.html` → `renderEdges()`
+**File:** `src/render_engine.js` → `renderEdges()`
 
 After the absolute layout positions are computed, the edges and their description labels are rendered dynamically. To prevent relationship labels from overlapping with nodes, arrowheads, other labels, and dense route corridors, a rule-based placement engine evaluates segment clearance and selects the best location. The final rendered label coordinates are written back onto the returned edge labels so post-render metrics measure the actual placement rather than estimating it independently.
 
@@ -212,80 +214,114 @@ Labels containing technology notes (e.g. `Relationship Label [JSON/HTTPS]`) are 
 
 ---
 
-## LM Checkpoint Pipeline
+## Visual-Hint Pipeline
 
-**File:** `src/cli.js`  
-**Functions:** `getLLMZoneVerification`, `getLLMRoutingVerification` (both in `src/core/llm_client.js`)
-**Runs:** Once, before the 4-iteration optimisation loop, only when `hasBoundary` is true.
+**File:** `src/core/optimizer.js`  
+**Functions:** `getLLMTopOrder`, `getLLMPortHints`, `getLLMDiagonalRouteHints` (all in `src/core/llm_client.js`)  
+**Runs:** Once for container diagrams, before final SVG/PNG export.
 
-### Step 1 — Compute initial plan
+Container diagrams do not use the flat-diagram ELKjs parameter loop. Instead, the optimizer renders a small sequence of visual states and keeps only candidate hints that improve the renderer's geometry score. When `NUDGE_NO_LLM` is set, each stage is still rendered for inspection but no LLM hint calls are made.
 
-`window.computeContainerPlan(diagramData)` is called via `page.evaluate`. It mirrors Phase 1 + Phase 2a of `layoutContainerDiagram` but returns structured data instead of an ELK-compatible graph:
+### Stage 0 — Initial deterministic render
 
-```json
-{
-  "zones": {
-    "above": [{ "id": "...", "label": "...", "type": "..." }],
-    "below": [...],
-    "left":  [...],
-    "right": [...]
-  },
-  "boundary": {
-    "id": "...",
-    "label": "...",
-    "layers": [[{ "id": "...", "label": "..." }], [...]]
-  },
-  "crossZoneEdges": [
-    { "from": "...", "to": "...", "label": "...", "fromZone": "above", "toZone": "boundary" }
-  ],
-  "zoneDensity": { "above": 2, "below": 1, "left": 0, "right": 0, "maxAbove": 6 }
-}
-```
+`renderContainerStep('step_0_initial')` calls `window.renderDiagram` with the current model and captures `step_0_initial.png`. This result becomes the baseline accepted state.
 
-### Checkpoint 1 — Zone assignment verification (`getLLMZoneVerification`)
+### Stage 1 — Top internal row order
 
-The LM is asked to verify that callers are above and callees are below. It may return:
+`getLLMTopOrder` reviews the rendered top row of internal containers and may return a replacement order for that row:
 
 ```json
 {
-  "zoneOverrides": { "nodeId": "above|below|left|right" },
-  "swapCommands": [{ "type": "SWAP_NODE_ORDER", "nodeA": "id1", "nodeB": "id2" }],
-  "rationale": "..."
+  "layerIndex": 0,
+  "currentOrder": ["web", "mobile"],
+  "suggestedOrder": ["mobile", "web"],
+  "confidence": "medium",
+  "reason": "..."
 }
 ```
 
-Any non-empty `zoneOverrides` or `swapCommands` are collected into `overrides`.
-
-### Checkpoint 2 — Node ordering verification (`getLLMRoutingVerification`)
-
-If Checkpoint 1 changed any zones, the plan is recomputed with those overrides applied first. The LM then checks whether left-to-right ordering within each zone minimises edge crossings.
-
-It may return `SWAP_NODE_ORDER` or `SHIFT_ZONE` commands:
-
-```json
-{
-  "swapCommands": [
-    { "type": "SWAP_NODE_ORDER", "nodeA": "id1", "nodeB": "id2" },
-    { "type": "SHIFT_ZONE", "nodeId": "id", "from": "above", "to": "left" }
-  ],
-  "rationale": "..."
-}
-```
-
-`SHIFT_ZONE` is handled by `layoutContainerDiagram` the same way as `zoneOverrides` — removing the node from its current zone array and pushing it to the target zone.
-
-### Applying overrides
-
-All collected overrides are merged and written to `diagramModel._layoutOverrides`:
+If the suggested order contains exactly the same IDs as the current row, the optimizer tries it as:
 
 ```js
-diagramModel._layoutOverrides = {
-  zoneOverrides: { ... },  // node ID → target zone
-  swapCommands: [...]       // SWAP_NODE_ORDER | SHIFT_ZONE
+diagramModel._layoutOverrides.internalOrder[0] = suggestedOrder;
+```
+
+The rendered candidate is saved as `step_1_top_order.png` and accepted only if its score is no worse than the previous accepted state.
+
+### Stage 2 — Port hints
+
+`getLLMPortHints` focuses on crossing edges and message-bus edges. It may request explicit source and target sides for a few edge IDs:
+
+```json
+{
+  "suggestions": [
+    {
+      "edgeId": "edge_7",
+      "sourceSide": "RIGHT",
+      "targetSide": "LEFT",
+      "confidence": "medium",
+      "reason": "..."
+    }
+  ],
+  "rationale": "..."
 }
 ```
 
-This object is then passed into every subsequent `renderDiagram` call inside the optimisation loop, where `layoutContainerDiagram` applies it during Phase 2a.
+Accepted hints are stored as:
+
+```js
+diagramModel._layoutOverrides.portHints.edge_7 = {
+  sourceSide: "RIGHT",
+  targetSide: "LEFT"
+};
+```
+
+The candidate is saved as `step_2_port_hints.png`.
+
+### Stage 3 — Diagonal route hints
+
+`getLLMDiagonalRouteHints` reviews long diagonal segments and may request a route intent:
+
+```json
+{
+  "suggestions": [
+    {
+      "edgeId": "edge_12",
+      "routeIntent": "LEFT_LANE",
+      "confidence": "medium",
+      "reason": "..."
+    }
+  ],
+  "rationale": "..."
+}
+```
+
+`KEEP_DIAGONAL` is ignored because it leaves the deterministic route untouched. Other accepted intents are stored as:
+
+```js
+diagramModel._layoutOverrides.routeHints.edge_12 = {
+  routeIntent: "LEFT_LANE"
+};
+```
+
+The candidate is saved as `step_3_diagonal_routes.png`.
+
+### Candidate scoring and outputs
+
+Every candidate is scored by `scoreContainerStep` in `src/core/optimizer.js`:
+
+```
+overlaps * 100000
++ edge-node crossings * 100000
++ edge-edge crossings * 500
++ edge overlaps * 500
++ edge overlap pixels * 2
++ label-edge intersections * 250
++ bends * 4
++ route length * 0.02
+```
+
+Only non-worsening candidates become the accepted state. The final accepted state is exported as `optimized.png` and `optimized.svg`. If any LLM hint call returned data, the raw responses are saved to `visual_hints.json`.
 
 ---
 
@@ -328,6 +364,6 @@ All edge coordinates are absolute. The `drawGraph` function uses `flattenNodes` 
 
 - **Single boundary only:** The engine assumes exactly one `Boundary(...)` node at the top level. Nested boundaries are not supported in container mode.
 - **No cycle detection warning:** A cycle in the boundary's internal edges is silently broken by dumping remaining nodes into a final layer.
-- **SHIFT_ZONE not fully wired in routing pass:** `SHIFT_ZONE` commands from Checkpoint 2 are currently fed into `_layoutOverrides.swapCommands`, which `layoutContainerDiagram` ignores (it only processes `SWAP_NODE_ORDER` from `swapCommands`). A future pass should re-read `swapCommands` for `SHIFT_ZONE` and apply them as `zoneOverrides`.
+- **Legacy checkpoint helpers remain in `llm_client.js`:** `getLLMZoneVerification` and `getLLMRoutingVerification` are still present for older experiments, but the active container optimizer imports the visual-hint functions instead.
 - **Edge routing is heuristic:** The hybrid router scores route candidates, reserves lanes, and performs bounded second-pass rerouting, but it is still not a full obstacle-avoidance engine. Edges may still cross when avoiding them would require long or visually awkward detours.
 - **Post-render edge-to-edge scoring is observational:** The renderer uses edge-conflict scoring while choosing routes, and the test suite reports edge-edge crossings, overlaps, overlap pixels, label-edge intersections, bends, and route length. These metrics do not currently fail tests, so renderer changes that affect line corridors should still be reviewed visually.
