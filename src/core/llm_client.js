@@ -349,9 +349,9 @@ Allowed placement options:
 - "middle": Places the label in the geometric center of the line. This is the default.
 
 Focus particularly on:
-1. Long relationship lines (routeLength > 350px) where the center label is far from both nodes, making it hard to read or relate.
+1. Long relationship lines (routeLength > 350px) or highly bent lines (bendCount > 0) where the default "middle" placement is far from the endpoints or routes over unrelated nodes. Suggest "source" or "target" for these.
 2. Relationships where a center label overlaps with other nodes or lines.
-3. Keep the number of overrides minimal: suggest changes only where they offer a clear visual improvement in readability or collision avoidance.
+3. Suggest overrides for ANY connection where "middle" placement would be confusing, ambiguous, or visually separated from its context. Do not be overly conservative.
 
 Output ONLY valid JSON matching the schema.`
     },
