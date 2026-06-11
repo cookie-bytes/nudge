@@ -2,7 +2,7 @@
 
 | Before (Mermaid C4 Baseline) | After (Nudge Optimized) |
 | :---: | :---: |
-| ![Core banking Mermaid baseline](./core-banking-single-boundary-before.png) | ![Core banking Nudge optimized layout](./core-banking-single-boundary.png) |
+| ![Core banking Mermaid baseline](./core-banking-single-boundary-native-mermaid.png) | ![Core banking Nudge optimized layout](./core-banking-single-boundary.png) |
 
 Optimized SVG version: [core-banking-single-boundary.svg](./core-banking-single-boundary.svg)
 

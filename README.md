@@ -18,7 +18,7 @@ Nudge runs as a **CLI tool** for direct use from the terminal, and as a local **
 
 | Before (Mermaid C4 Baseline) | After (Nudge Optimized) |
 | :---: | :---: |
-| ![Core banking Mermaid baseline](docs/core-banking-single-boundary-before.png) | ![Core banking Nudge optimized layout](docs/core-banking-single-boundary.png) |
+| ![Core banking Mermaid baseline](docs/core-banking-single-boundary-native-mermaid.png) | ![Core banking Nudge optimized layout](docs/core-banking-single-boundary.png) |
 
 See the full comparison source in [docs/core-banking-single-boundary-comparison.md](docs/core-banking-single-boundary-comparison.md).
 
