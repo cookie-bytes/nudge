@@ -6,7 +6,7 @@
 
 **Deterministic C4 layout engine, with optional AI polish**
 
-Nudge automatically produces clean, publication-ready C4 Model architecture diagrams. Its quality floor comes from deterministic layout rules: ELKjs for flat context diagrams, a custom Container Layout Engine for nested container diagrams, orthogonal grid routing (A* pathfinding over a sparse orthogonal visibility graph) with rip-up-and-reroute, channel nudging, and collision-aware Connection Label placement.
+Nudge automatically produces clean, publication-ready C4 Model architecture diagrams. Its quality floor comes from deterministic layout rules: a custom Container Layout Engine for both context and container diagrams, orthogonal grid routing (A* pathfinding over a sparse orthogonal visibility graph) with rip-up-and-reroute, channel nudging, and collision-aware Connection Label placement. ELKjs remains the engine for flat diagrams with no person/external elements.
 
 Local LLM reviewers are an optional enhancement layer. They can suggest top-row ordering, port sides, diagonal route intent, or ELKjs option patches, but those suggestions are accepted only when they do not worsen the geometric score.
 
@@ -31,7 +31,8 @@ Nudge is built around a deterministic renderer with an optional accept-only-if-n
 ```mermaid
 graph TD
     A[Input YAML, Mermaid, or PlantUML] --> B[Parse Diagram Model]
-    B --> C{Container diagram?}
+    B --> N[Normalize: wrap C4Context internals in a hidden synthetic boundary]
+    N --> C{Has boundary?}
     C -->|Yes| D[Deterministic Container Layout Engine]
     C -->|No| E[ELKjs Layered Layout]
     D --> F[Render in Playwright]
@@ -45,8 +46,8 @@ graph TD
     G --> K
 ```
 
-1. **Ingestion**: Parses C4 Context or C4 Container diagrams from `.mermaid`, `.puml`/`.plantuml`, or `.yaml` specifications.
-2. **Deterministic rendering**: Produces a complete baseline layout without needing cloud services. Container diagrams use Nudge's custom deterministic rules; flat diagrams use ELKjs.
+1. **Ingestion**: Parses C4 Context or C4 Container diagrams from `.mermaid`, `.puml`/`.plantuml`, or `.yaml` specifications. C4Context diagrams are normalised by wrapping their internal architecture elements in a hidden synthetic boundary — persons and external systems stay outside — so context diagrams reuse the full container pipeline.
+2. **Deterministic rendering**: Produces a complete baseline layout without needing cloud services. Context and container diagrams use Nudge's custom deterministic rules; flat diagrams without person/external elements use ELKjs.
 3. **Geometric critique**: Measures DOM bounding boxes to detect Element Overlaps, Connection-Line Element Crossings, Connection-Label Element Crossings, poor aspect ratio, and tight spacing. Container routing uses A* pathfinding over a sparse orthogonal visibility graph, hardest-first routing, and rip-up-and-reroute to optimize line paths and avoid corridors.
 4. **Optional enhancement**: When LLM calls are enabled, Nudge asks a local OpenAI-compatible model for small layout improvements. Container hints are accepted only when the candidate score is no worse than the current accepted state. Flat diagram patches are applied through the existing critic loop.
 5. **Export**: Writes a best-effort SVG and PNG even if geometric issues remain.
@@ -55,22 +56,22 @@ graph TD
 
 ## Layout Engines & Algorithms
 
-Nudge uses two distinct engines depending on the C4 model type:
+Nudge uses two distinct engines depending on the diagram shape:
 
-### 1. Flat C4 Context Layout (ELKjs)
-Flat context diagrams are laid out using the **Eclipse Layout Kernel (ELKjs)** with a layered algorithm. The current CLI can optionally run the LLM critic loop to tune ELKjs layout properties such as spacing, node distances, and routing directions. A stronger no-LLM flat-diagram baseline is tracked as follow-up work in `REFRAMING.md`.
+### 1. Flat Layout (ELKjs)
+Diagrams with no boundary and no person/external elements are laid out using the **Eclipse Layout Kernel (ELKjs)** with a layered algorithm. The current CLI can optionally run the LLM critic loop to tune ELKjs layout properties such as spacing, node distances, and routing directions. A stronger no-LLM flat-diagram baseline is tracked as follow-up work in `REFRAMING.md`.
 
-### 2. Nested C4 Container Layout (Custom Engine)
-Container diagrams containing boundary blocks bypass ELKjs entirely and use a custom deterministic layout pipeline:
+### 2. Context & Container Layout (Custom Engine)
+Container diagrams containing boundary blocks bypass ELKjs entirely and use a custom deterministic layout pipeline. C4Context diagrams take the same pipeline: their internal architecture elements are wrapped in a synthetic boundary that drives the layout but is never drawn, while persons and external systems stay outside in the external zones. The central system of a context diagram renders with a `[Software System]` type label.
 
-- **Phase 1: Kahn Layering (Boundary Interior)**: Children of the boundary are sorted into horizontal layers using a modified Kahn's topological sort. Nodes receiving cross-boundary edges are automatically seeded as entry nodes in the top row (Layer 0); unconnected utility nodes are pushed down to minimise clutter. Cycles are silently broken by appending remaining nodes to a final layer.
+- **Phase 1: Kahn Layering (Boundary Interior)**: Children of the boundary are sorted into horizontal layers using a modified Kahn's topological sort. Nodes receiving cross-boundary edges are automatically seeded as entry nodes in the top row (Layer 0); unconnected utility nodes are pushed down to minimise clutter. When every element sits on a relationship cycle (e.g. mutual request/response pairs), the first layer is seeded with the most source-like element(s) — maximum out-degree minus in-degree; remaining cycles are silently broken by appending leftover nodes to a final layer.
 - **Phase 2: Dedicated Utility Rows**: Message buses and databases are excluded from Kahn's sort and reinserted into purpose-built rows. Busy buses widen into clear spines; all message buses are corner-anchored in the bottom-right. Databases sit in tighter rows beneath their deepest contributing service.
 - **Phase 3: Zone Classification & Connectivity Sorting**: External nodes are classified into layout zones — callers go **above**, callees go **below**, and overflow nodes spill into **left** and **right** columns. Each zone is automatically sorted by the average layer/column index of the internal nodes it connects to, so external nodes align visually with their counterparts inside the boundary with minimal edge crossings.
 - **Phase 4: Orthogonal Grid Routing**: Connection lines are routed using an A* pathfinding algorithm on a sparse orthogonal visibility graph. Vertices are generated at inflated element boundaries, centerlines, and channel midlines to keep the search space small and keep routes centered. A* search state includes the current heading to penalize bends. Face ports are reserved on use with cost penalties. The router routes lines hardest-first, followed by an iterative rip-up-and-reroute loop that optimizes global crossings, overlaps, and bends. Finally, a channel nudging phase offsets overlapping parallel segments into separate lanes. Standard straight orthogonal and diagonal lines are rendered, bypassing the legacy candidate router (which remains as a fallback for cross-hierarchy or unplaced edges, or when using `NUDGE_ROUTER=legacy`).
 - **Phase 5: Rule-Based Edge Label Placement**: Relationship labels are placed along the edge using four strategies evaluated in order: (0) straight-line midpoint, (1) target-anchored, (2) source-anchored, (3) edge-density-aware segment scoring. Every strategy checks for collision against node bounding boxes, source/target boxes, previously-placed labels, and nearby connection lines, so duplicate-text labels on co-terminal edges are separated and labels avoid busy corridors where possible. Long labels wrap automatically; technology notes (e.g. `[HTTPS]`) are rendered in a smaller, semi-transparent style beneath the main text.
 
-### Optional Visual-Hint Pipeline (Container diagrams)
-Before final container export, the optimizer renders and scores a sequence of visual states:
+### Optional Visual-Hint Pipeline (Context & container diagrams)
+Before final export, the optimizer renders and scores a sequence of visual states:
 
 - `step_0_initial.png` — deterministic container layout.
 - `step_1_label_hints.png` — connection label placement overrides (e.g. placing long connection labels at the source or target endpoints instead of the default middle) suggested by `getLLMLabelPlacementHints`.
@@ -84,7 +85,7 @@ Each candidate is scored against Element Overlaps, Connection-Line Element Cross
 - 🎯 **Deterministic C4 Layout Engine**: Produces a complete layout from structured rules before any LLM enhancement is considered.
 - 📐 **Opinionated, Consistent C4 Geometry**: Standardized sizing, dedicated Utility Rows, External Zone sorting, and repeatable route scoring make diagrams feel consistent from run to run.
 - 🔍 **Automatic Defect Detection**: Finds Element Overlaps, Connection-Line Element Crossings, Connection-Label Element Crossings, and poor aspect ratios.
-- ✨ **Optional AI Polish**: Local LLM reviewers can suggest connection label placements (source/target/middle) for container diagrams, or ELKjs patches for flat diagrams. Suggestions are accepted only through score-gated checks.
+- ✨ **Optional AI Polish**: Local LLM reviewers can suggest connection label placements (source/target/middle) for context and container diagrams, or ELKjs patches for flat diagrams. Suggestions are accepted only through score-gated checks.
 - 🔌 **MCP Server**: Exposes an `optimize_diagram` tool over stdio so Claude Desktop and other MCP clients can generate and render diagrams conversationally.
 - 🎨 **Supports Mermaid, PlantUML & YAML**: Seamless support for C4 diagrams in `.mermaid`/`.mmd` syntax, `.puml`/`.plantuml` C4-PlantUML syntax, and structured `.yaml` specifications.
 - 📏 **Standardized Sizing & Grid**: All nodes are standardized to a width of `200px`. Heights: `200px` for Person, `140px` for Container/Database/External, `80px` for MessageBus — ensuring consistent alignment and a clean grid.
@@ -220,8 +221,8 @@ See [`examples/`](examples/) for full working examples including container diagr
 - `step_0_initial.png`, `step_1_label_hints.png` — staged container visual-hint snapshots; in deterministic mode these are inspection snapshots without LLM calls
 - `optimized.png` — final layout as PNG
 - `optimized.svg` — final layout as a self-contained SVG with embedded styles
-- `layout.cache.json` — final ELKjs parameter patch (C4Context diagrams)
-- `visual_hints.json` — raw accepted/reviewed visual-hint payloads for container diagrams when LLM calls run
+- `layout.cache.json` — final ELKjs parameter patch (flat diagrams)
+- `visual_hints.json` — raw accepted/reviewed visual-hint payloads for context/container diagrams when LLM calls run
 
 **Run the test suite:**
 ```bash

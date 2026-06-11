@@ -1,6 +1,6 @@
 # Container Diagram Layout Engine
 
-This document describes the full layout pipeline used for C4Container diagrams (any Mermaid input that contains a `Boundary(...)` block). It replaces ELK for this diagram type entirely — ELK is only used for flat C4Context diagrams.
+This document describes the full layout pipeline used for C4Container diagrams (any Mermaid input that contains a `Boundary(...)` block) and for C4Context diagrams, whose internal architecture elements are wrapped in a hidden synthetic boundary (`_synthetic: true`, never drawn) by `normalizeDiagramModel` in `core/optimizer.js` — persons and external systems stay outside in the external zones. It replaces ELK for these diagram types entirely; ELK is only used for flat diagrams with no boundary and no person/external elements.
 
 ---
 
@@ -52,7 +52,7 @@ Children of the boundary are sorted into horizontal layers using a modified Kahn
 
 This prevents utility/support nodes (e.g. background lambdas with no callers) from cluttering the entry row.
 
-**Cycle handling:** If the Kahn queue empties before all nodes are processed (i.e. a cycle exists), the remaining unplaced nodes are dumped into one final layer.
+**Cycle handling:** When *every* element sits on a relationship cycle (e.g. mutual request/response pairs leaving no zero-in-degree element), Layer 0 is seeded with the most source-like element(s) — maximum out-degree minus in-degree — instead of an empty layer. If the Kahn queue otherwise empties before all nodes are processed, the remaining unplaced nodes are dumped into one final layer.
 
 ### 1a′: Dedicated rows for buses and databases
 
@@ -309,7 +309,7 @@ All edge coordinates are absolute. The `drawGraph` function uses `flattenNodes` 
 ## Known Limitations / Future Work
 
 - **Single boundary only:** The engine assumes exactly one `Boundary(...)` node at the top level. Nested boundaries are not supported in container mode.
-- **No cycle detection warning:** A cycle in the boundary's internal edges is silently broken by dumping remaining nodes into a final layer.
+- **No cycle detection warning:** A cycle in the boundary's internal edges is silently broken — all-cycle graphs seed Layer 0 with the most source-like element(s), and any remaining stuck nodes are dumped into a final layer.
 - **Legacy checkpoint helpers remain in `llm_client.js`:** `getLLMZoneVerification` and `getLLMRoutingVerification` are still present for older experiments, but the active container optimizer imports the visual-hint functions instead.
 - **Edge routing is grid-based pathfinding:** The grid router uses A* over a visibility graph, rip-up-and-reroute, and channel nudging to find optimal collision-free paths, falling back to legacy candidate routing when necessary. Crossings are expensive but not impossible, preventing long and visually awkward detours.
 - **Post-render edge-to-edge scoring is observational:** The renderer uses edge-conflict scoring while choosing routes, and the test suite reports edge-edge crossings, overlaps, overlap pixels, label-edge intersections, bends, and route length. These metrics do not currently fail tests, so renderer changes that affect line corridors should still be reviewed visually.
