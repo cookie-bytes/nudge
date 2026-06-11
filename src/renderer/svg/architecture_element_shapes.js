@@ -57,6 +57,9 @@ window.NudgeRenderer.architectureElementShapes = {
 
     return {
       boundary(node, absX, absY, layers) {
+        // Synthetic boundaries exist only to drive the container layout
+        // (e.g. C4Context diagrams) and are not drawn.
+        if (node._synthetic) return;
         const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
         rect.setAttribute("x", absX);
         rect.setAttribute("y", absY);

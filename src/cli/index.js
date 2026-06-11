@@ -78,10 +78,11 @@ if (diagramModel.diagramType === 'C4Context' && !diagramModel._contextBoundaryAd
       _synthetic: true
     };
 
-    // Replace diagram structure
+    // Replace diagram structure. diagramType stays C4Context so the title
+    // renders correctly — the renderer selects the container pipeline by
+    // boundary presence, not by diagram type.
     diagramModel.nodes = [...actors, syntheticBoundary];
     diagramModel._contextBoundaryAdded = true;
-    diagramModel.diagramType = 'C4Container'; // Now treat as container for rendering
   }
 }
 
