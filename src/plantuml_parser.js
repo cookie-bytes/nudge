@@ -181,6 +181,9 @@ export function parsePlantUMLC4(pumlString) {
           width: 200,
           height: mappedType === 'person' ? 200 : (mappedType === 'database' || mappedType === 'container' || mappedType === 'external') ? 140 : mappedType === 'message_bus' ? 120 : 80
         };
+        // System() maps to the container node type for layout, but should
+        // still read as a software system on the rendered diagram.
+        if (macroLower === 'system') componentNode.typeLabel = 'Software System';
 
         if (activeBoundaries.length > 0) {
           const parentId = activeBoundaries[activeBoundaries.length - 1];

@@ -222,7 +222,8 @@ async function runIntegrationTest() {
   console.log("\n=== Running Offline Deterministic Integration Test ===");
 
   // --- C4Context sub-test ---
-  // Verifies the core critic loop: tight spacing → LLM patch → clean layout.
+  // Context diagrams are wrapped in a hidden synthetic boundary and run the
+  // container visual-hint pipeline (persons/external systems stay outside).
   {
     const outputDir = path.resolve('test_outputs/integration_test/context');
     if (fs.existsSync(outputDir)) fs.rmSync(outputDir, { recursive: true, force: true });
@@ -239,8 +240,6 @@ async function runIntegrationTest() {
         Rel(userC, system, "Uses", "HTTPS")
     `;
     const model = parseMermaidC4(mermaidDiagram);
-    model.layoutOptions["elk.spacing.nodeNode"] = "10";
-    model.layoutOptions["elk.layered.spacing.nodeNodeBetweenLayers"] = "10";
 
     const callLog = { total: 0, modelList: 0, optimizationPatch: 0, labelPlacementHints: 0 };
     const originalFetch = globalThis.fetch;
@@ -259,10 +258,65 @@ async function runIntegrationTest() {
       console.log(`  Context test: success=${result.success}, iterations=${result.history.length}, fetches=${callLog.total}`);
 
       if (!result.success) throw new Error("C4Context integration test: optimization did not succeed.");
-      if (result.history.length < 2) throw new Error("C4Context integration test: optimizer did not iterate — mock patch was not applied.");
-      if (callLog.optimizationPatch === 0) throw new Error("C4Context integration test: optimization patch mock was never called — user-message contract may have changed.");
+      if (!model.nodes.some(n => n.type === 'boundary' && n._synthetic)) throw new Error("C4Context integration test: synthetic boundary was not added to the model.");
+      if (callLog.labelPlacementHints === 0) throw new Error("C4Context integration test: label placement hint mock was never called — user-message contract may have changed.");
       if (!fs.existsSync(path.join(outputDir, 'optimized.svg'))) throw new Error("C4Context integration test: optimized.svg was not created.");
       if (!fs.existsSync(path.join(outputDir, 'optimized.png'))) throw new Error("C4Context integration test: optimized.png was not created.");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  // --- Flat critic-loop sub-test ---
+  // Verifies the core critic loop: tight spacing → LLM patch → clean layout.
+  // Uses internal elements only, so no synthetic boundary is added and the
+  // diagram takes the flat ELKjs path.
+  {
+    const outputDir = path.resolve('test_outputs/integration_test/flat');
+    if (fs.existsSync(outputDir)) fs.rmSync(outputDir, { recursive: true, force: true });
+
+    const model = {
+      title: 'Flat Critic Loop',
+      layoutOptions: {
+        'elk.algorithm': 'layered',
+        'elk.direction': 'RIGHT',
+        'elk.spacing.nodeNode': '10',
+        'elk.layered.spacing.nodeNodeBetweenLayers': '10',
+      },
+      nodes: [
+        { id: 'a', label: 'Service A', type: 'container', description: 'First service', width: 160, height: 80 },
+        { id: 'b', label: 'Service B', type: 'container', description: 'Second service', width: 160, height: 80 },
+        { id: 'c', label: 'Service C', type: 'container', description: 'Third service', width: 160, height: 80 },
+      ],
+      edges: [
+        // a and b share a layer 10px apart, so the tight-spacing critic
+        // fires on iteration 1 and the loop requests an LLM patch.
+        { from: 'a', to: 'c', label: 'Calls' },
+        { from: 'b', to: 'c', label: 'Calls' },
+      ],
+    };
+
+    const callLog = { total: 0, modelList: 0, optimizationPatch: 0, labelPlacementHints: 0 };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = buildMockFetch(callLog);
+
+    try {
+      const result = await optimizeDiagram({
+        diagramModel: model,
+        outputDir,
+        apiUrl: 'http://mock-api.local',
+        maxIterations: 3,
+        onLog: (msg) => console.log(`  [Flat] ${msg.trim()}`),
+        enhance: true,
+      });
+
+      console.log(`  Flat test: success=${result.success}, iterations=${result.history.length}, fetches=${callLog.total}`);
+
+      if (!result.success) throw new Error("Flat critic-loop integration test: optimization did not succeed.");
+      if (result.history.length < 2) throw new Error("Flat critic-loop integration test: optimizer did not iterate — mock patch was not applied.");
+      if (callLog.optimizationPatch === 0) throw new Error("Flat critic-loop integration test: optimization patch mock was never called — user-message contract may have changed.");
+      if (!fs.existsSync(path.join(outputDir, 'optimized.svg'))) throw new Error("Flat critic-loop integration test: optimized.svg was not created.");
+      if (!fs.existsSync(path.join(outputDir, 'optimized.png'))) throw new Error("Flat critic-loop integration test: optimized.png was not created.");
     } finally {
       globalThis.fetch = originalFetch;
     }

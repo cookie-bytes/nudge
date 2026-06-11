@@ -1,6 +1,7 @@
 window.NudgeRenderer.architectureElementShapes = {
   // Helper to generate capitalized node type label
   getNodeTypeLabel(node) {
+    if (node.typeLabel) return node.typeLabel;
     let typeName = node.type;
     if (node.type === 'container') typeName = 'Container';
     else if (node.type === 'external') typeName = 'External System';
