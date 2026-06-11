@@ -55,6 +55,36 @@ if (!Array.isArray(diagramModel.edges)) {
   process.exit(1);
 }
 
+// Infer diagram type if not already set (for YAML inputs)
+if (!diagramModel.diagramType) {
+  const hasBoundary = (diagramModel.nodes || []).some(n => n.type === 'boundary');
+  diagramModel.diagramType = hasBoundary ? 'C4Container' : 'C4Context';
+}
+
+// For C4Context diagrams, wrap non-person/non-external nodes in a synthetic boundary
+// to enable the container renderer's superior layout and routing for context diagrams
+if (diagramModel.diagramType === 'C4Context' && !diagramModel._contextBoundaryAdded) {
+  const actorTypes = new Set(['person', 'person_ext']);
+  const actors = diagramModel.nodes.filter(n => actorTypes.has(n.type));
+  const mainNodes = diagramModel.nodes.filter(n => !actorTypes.has(n.type));
+
+  if (mainNodes.length > 0 && actors.length > 0) {
+    // Create a synthetic boundary to wrap non-actor nodes
+    const syntheticBoundary = {
+      id: '__context_boundary',
+      label: 'System Context',
+      type: 'boundary',
+      children: mainNodes,
+      _synthetic: true
+    };
+
+    // Replace diagram structure
+    diagramModel.nodes = [...actors, syntheticBoundary];
+    diagramModel._contextBoundaryAdded = true;
+    diagramModel.diagramType = 'C4Container'; // Now treat as container for rendering
+  }
+}
+
 console.log(`Diagram loaded: "${diagramModel.title}"`);
 console.log('Initial Layout Options:', JSON.stringify(diagramModel.layoutOptions, null, 2));
 

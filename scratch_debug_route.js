@@ -10,7 +10,7 @@ async function run() {
   page.on('console', msg => { const t = msg.text(); if (t.includes('RouteDebug') || t.includes('Shifted')) console.log(t); });
   await page.goto(new URL('./src/render.html', import.meta.url).href);
   await page.evaluate(async (data) => {
-    window.__nudgeDebugRoute = 'partner_sync_lambda->database';
+    window.__nudgeDebugRoute = 'aws_eventbridge->partner_sync_lambda';
     return window.renderDiagram(data);
   }, model);
   await browser.close();
