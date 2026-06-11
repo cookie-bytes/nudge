@@ -39,6 +39,14 @@ export async function optimizeDiagram({
 }) {
   fs.mkdirSync(outputDir, { recursive: true });
 
+  // Container connection lines default to the grid router (A* over the
+  // orthogonal visibility graph, docs/nudge_next_generation_design.md §3).
+  // NUDGE_ROUTER=legacy restores the old candidate router.
+  if (process.env.NUDGE_ROUTER) {
+    diagramModel._router = process.env.NUDGE_ROUTER;
+    onLog(`[Optimizer] Connection-line router override: ${process.env.NUDGE_ROUTER} (NUDGE_ROUTER).`);
+  }
+
   const browser = await chromium.launch({ headless: true });
   try {
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });

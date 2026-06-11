@@ -799,15 +799,48 @@ const elk = new ELK();
         candidateRules,
         extNodes
       });
+      // Grid router (default): A* over the orthogonal visibility graph.
+      // Lines it cannot route (e.g. endpoints that are not placed leaf
+      // elements) fall back to the legacy candidate router per edge.
+      // NUDGE_ROUTER=legacy switches the whole pass back to the old router.
+      const routerMode = diagramData._router || window.__nudgeRouter || 'grid';
+      const useGridRouter = routerMode !== 'legacy';
       const routedSections = [];
-      for (let idx = 0; idx < allEdges.length; idx++) {
-        const e = allEdges[idx];
-        const section = reserveRouteLanes(routeEdge(e, idx), e);
-        routedSections[idx] = section;
-        routedEdgeSegments.push(...pointsToSegments(sectionToPoints(section), idx));
-      }
+      if (useGridRouter) {
+        const routableBoxes = [...children, ...extNodes].map(n => {
+          const pos = getAbs(n.id);
+          const sz = getSz(n.id);
+          return { id: n.id, x: pos.x, y: pos.y, width: sz.w, height: sz.h };
+        });
+        const gridSections = window.NudgeRenderer.gridConnectionLineRouter.routeAllEdges({
+          allEdges,
+          obstacles: routableBoxes,
+          bounds: { x: 0, y: 0, width: totalW, height: totalH },
+          boundaryRect: { x: bndX, y: bndY, width: bndW, height: bndH },
+          childIds,
+          canBundleEdges
+        });
+        gridSections.forEach((section, idx) => {
+          if (!section) return;
+          routedSections[idx] = section;
+          routedEdgeSegments.push(...pointsToSegments(sectionToPoints(section), idx));
+        });
+        allEdges.forEach((e, idx) => {
+          if (routedSections[idx]) return;
+          const section = reserveRouteLanes(routeEdge(e, idx), e);
+          routedSections[idx] = section;
+          routedEdgeSegments.push(...pointsToSegments(sectionToPoints(section), idx));
+        });
+      } else {
+        for (let idx = 0; idx < allEdges.length; idx++) {
+          const e = allEdges[idx];
+          const section = reserveRouteLanes(routeEdge(e, idx), e);
+          routedSections[idx] = section;
+          routedEdgeSegments.push(...pointsToSegments(sectionToPoints(section), idx));
+        }
 
-      improveRoutedSections(routedSections);
+        improveRoutedSections(routedSections);
+      }
 
       out.edges = window.NudgeRenderer.containerLayout.buildOutputEdges({
         allEdges, routedSections, createConnectionLabel
