@@ -728,7 +728,6 @@ window.NudgeRenderer.connectionLabelPlacement = {
     checkLabelCollision,
     checkLabelEdgeCollision
   }) {
-    if (hasBendPoints) return false;
     const candMid = getPointAtFraction(0.5);
     if (!checkLabelCollision(candMid.x, candMid.y, textWidth, textHeight, obstacles) &&
         !checkLabelEdgeCollision(candMid.x, candMid.y, textWidth, textHeight)) {
