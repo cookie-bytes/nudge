@@ -109,7 +109,8 @@ window.NudgeRenderer.svgRenderer = {
     pointToBoxDist,
     wrapText,
     MAX_LABEL_WIDTH,
-    LINE_HEIGHT
+    LINE_HEIGHT,
+    labelHints
   }) {
     const absX = absoluteParentX + (node.x || 0);
     const absY = absoluteParentY + (node.y || 0);
@@ -157,7 +158,8 @@ window.NudgeRenderer.svgRenderer = {
             pointToBoxDist,
             wrapText,
             MAX_LABEL_WIDTH,
-            LINE_HEIGHT
+            LINE_HEIGHT,
+            labelHints
           });
         }
       }
@@ -176,7 +178,8 @@ window.NudgeRenderer.svgRenderer = {
         pointToBoxDist,
         wrapText,
         MAX_LABEL_WIDTH,
-        LINE_HEIGHT
+        LINE_HEIGHT,
+        labelHints
       }));
     }
   },
@@ -234,6 +237,8 @@ window.NudgeRenderer.svgRenderer = {
       absoluteParentY: 50
     });
 
+    const labelHints = diagramData._layoutOverrides?.labelHints;
+
     // 2. Draw connector lines (edges) recursively (with vertical offset of 50px)
     window.NudgeRenderer.svgRenderer.renderEdges({
       node: graph,
@@ -247,7 +252,8 @@ window.NudgeRenderer.svgRenderer = {
       pointToBoxDist,
       wrapText,
       MAX_LABEL_WIDTH,
-      LINE_HEIGHT
+      LINE_HEIGHT,
+      labelHints
     });
   }
 };

@@ -275,7 +275,9 @@ window.NudgeRenderer.connectionLabelPlacement = {
     points,
     textWidth,
     textHeight,
-    labelCandidateScore
+    labelCandidateScore,
+    edge,
+    labelHints
   }) {
     let midX, midY;
     let placed = false;
@@ -286,55 +288,78 @@ window.NudgeRenderer.connectionLabelPlacement = {
       return true;
     }
 
-    // First Pass: Try to place label avoiding BOTH component collisions and other connection line crossings
-    placed = tryPlaceClearMidpoint(acceptPlacement);
-
-    if (preferSourceSideLabel) {
-      if (isConsumeBusLabel) {
-        if (!placed) placed = tryPlaceSourceSideRouteBand(acceptPlacement);
-        if (!placed) placed = tryPlaceAnchor('source', acceptPlacement);
-      } else {
-        if (!placed) placed = tryPlaceAnchor('source', acceptPlacement);
-        if (!placed) placed = tryPlaceSourceSideRouteBand(acceptPlacement);
+    // Check if there is an LLM/layout override hint for this connection label
+    const hint = labelHints?.[edge?.id];
+    if (hint) {
+      if (hint === 'source') {
+        placed = tryPlaceAnchor('source', acceptPlacement);
+      } else if (hint === 'target') {
+        placed = tryPlaceAnchor('target', acceptPlacement);
+      } else if (hint === 'middle') {
+        placed = tryPlaceClearMidpoint(acceptPlacement);
+        if (!placed) {
+          const placement = window.NudgeRenderer.connectionLabelPlacement.findMiddleGutterPlacement({
+            points,
+            textWidth,
+            textHeight,
+            labelCandidateScore
+          });
+          if (placement) placed = acceptPlacement(placement);
+        }
       }
-    } else {
+    }
+
+    if (!placed) {
+      // First Pass: Try to place label avoiding BOTH component collisions and other connection line crossings
+      placed = tryPlaceClearMidpoint(acceptPlacement);
+
+      if (preferSourceSideLabel) {
+        if (isConsumeBusLabel) {
+          if (!placed) placed = tryPlaceSourceSideRouteBand(acceptPlacement);
+          if (!placed) placed = tryPlaceAnchor('source', acceptPlacement);
+        } else {
+          if (!placed) placed = tryPlaceAnchor('source', acceptPlacement);
+          if (!placed) placed = tryPlaceSourceSideRouteBand(acceptPlacement);
+        }
+      } else {
+        for (const anchor of anchorOrder) {
+          if (!placed) placed = tryPlaceAnchor(anchor, acceptPlacement);
+        }
+      }
+
+      // Second Pass (Fallback): prefer edge-clear anchor positions, then relax only if needed.
+      if (!placed) {
+        placed = tryPlaceClearMidpoint(acceptPlacement);
+      }
+
+      if (!placed && !preferSourceSideLabel) {
+        placed = tryPlaceSourceSideRouteBand(acceptPlacement);
+      }
+
+      if (!placed && preferSourceSideLabel) {
+        const placement = window.NudgeRenderer.connectionLabelPlacement.findRelaxedSourceAnchorPlacement(anchorOrder, labelAnchorCandidate);
+        if (placement) {
+          midX = placement.x;
+          midY = placement.y;
+          placed = true;
+        }
+      }
+
       for (const anchor of anchorOrder) {
         if (!placed) placed = tryPlaceAnchor(anchor, acceptPlacement);
       }
-    }
 
-    // Second Pass (Fallback): prefer edge-clear anchor positions, then relax only if needed.
-    if (!placed) {
-      placed = tryPlaceClearMidpoint(acceptPlacement);
-    }
-
-    if (!placed && !preferSourceSideLabel) {
-      placed = tryPlaceSourceSideRouteBand(acceptPlacement);
-    }
-
-    if (!placed && preferSourceSideLabel) {
-      const placement = window.NudgeRenderer.connectionLabelPlacement.findRelaxedSourceAnchorPlacement(anchorOrder, labelAnchorCandidate);
-      if (placement) {
+      // Rule 3: Fallback to Middle Gutter Clearance
+      if (!placed) {
+        const placement = window.NudgeRenderer.connectionLabelPlacement.findMiddleGutterPlacement({
+          points,
+          textWidth,
+          textHeight,
+          labelCandidateScore
+        });
         midX = placement.x;
         midY = placement.y;
-        placed = true;
       }
-    }
-
-    for (const anchor of anchorOrder) {
-      if (!placed) placed = tryPlaceAnchor(anchor, acceptPlacement);
-    }
-
-    // Rule 3: Fallback to Middle Gutter Clearance
-    if (!placed) {
-      const placement = window.NudgeRenderer.connectionLabelPlacement.findMiddleGutterPlacement({
-        points,
-        textWidth,
-        textHeight,
-        labelCandidateScore
-      });
-      midX = placement.x;
-      midY = placement.y;
     }
 
     return { midX, midY };

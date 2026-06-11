@@ -331,309 +331,72 @@ async function callJsonModel(apiUrl, messages, schema, { signal, timeout = 30000
   return text ? extractJson(text) : null;
 }
 
-export async function getLLMPortHints(apiUrl, diagramModel, graph, { signal, timeout = 30000, top = 3 } = {}) {
+export async function getLLMLabelPlacementHints(apiUrl, diagramModel, graph, { signal, timeout = 30000 } = {}) {
   const edgeSummaries = buildEdgeSummaries(diagramModel, graph);
-  const crossingEdgeIds = new Set();
-  for (let i = 0; i < edgeSummaries.length; i++) {
-    for (let j = i + 1; j < edgeSummaries.length; j++) {
-      const edgeA = edgeSummaries[i], edgeB = edgeSummaries[j];
-      for (const segA of edgeSegments(edgeA.points)) {
-        for (const segB of edgeSegments(edgeB.points)) {
-          if (segmentsCross(segA, segB)) {
-            crossingEdgeIds.add(edgeA.id);
-            crossingEdgeIds.add(edgeB.id);
-          }
-        }
-      }
-    }
-  }
-
-  const focusEdges = edgeSummaries
-    .filter(edge => crossingEdgeIds.has(edge.id) || edge.sourceType === 'message_bus' || edge.targetType === 'message_bus')
-    .slice(0, 12)
-    .map(edge => ({
-      id: edge.id,
-      connection: `${edge.sourceLabel} (${edge.source}) -> ${edge.targetLabel} (${edge.target})`,
-      sourceType: edge.sourceType,
-      targetType: edge.targetType,
-      label: edge.label,
-      currentSourceSide: edge.currentSourceSide,
-      currentTargetSide: edge.currentTargetSide,
-      routeLength: edge.routeLength,
-      bendCount: edge.bendCount,
-      start: edge.points[0],
-      end: edge.points[edge.points.length - 1],
-      bends: edge.points.slice(1, -1)
-    }));
-
-  if (focusEdges.length === 0) return null;
-
-  const nodeIds = new Set(focusEdges.flatMap(edge =>
-    (edge.connection.match(/\(([^)]+)\)/g) || []).map(id => id.slice(1, -1))
-  ));
-  const nodes = (graph.nodes || [])
-    .filter(node => nodeIds.has(node.id))
-    .map(node => ({
-      id: node.id,
-      label: node.label,
-      type: node.type,
-      box: { x: round(node.x), y: round(node.y), width: round(node.width), height: round(node.height) },
-      center: nodeCenter(node)
-    }));
+  if (edgeSummaries.length === 0) return null;
 
   const messages = [
     {
       role: 'system',
-      content: `You are a JSON-only port-hint reviewer for C4 architecture diagrams.
+      content: `You are Nudge, an expert JSON-only C4 architecture diagram text placement optimizer.
 
-Suggest only small source/target port changes that could make connection lines easier to read.
+Evaluate the visual layout of the diagram and suggest optimal placement for connection line text labels.
+Your goal is to make the relationship labels as readable and clear as possible, especially for long or bent lines.
 
-Allowed sides: LEFT, RIGHT, TOP, BOTTOM.
-Return at most ${top} suggestions.
-Every suggestion must include both sourceSide and targetSide, using the current side when only one endpoint needs to change.
-Prefer message bus side-entry suggestions when they reduce awkward top/bottom cap approaches.
-Do not move nodes or labels.
-Output only valid JSON.`
+Allowed placement options:
+- "source": Places the label closer to the starting element of the relationship. Excellent for long lines to show who is initiating the connection.
+- "target": Places the label closer to the ending element of the relationship. Great when the relationship clearly belongs near the recipient.
+- "middle": Places the label in the geometric center of the line. This is the default.
+
+Focus particularly on:
+1. Long relationship lines (routeLength > 350px) where the center label is far from both nodes, making it hard to read or relate.
+2. Relationships where a center label overlaps with other nodes or lines.
+3. Keep the number of overrides minimal: suggest changes only where they offer a clear visual improvement in readability or collision avoidance.
+
+Output ONLY valid JSON matching the schema.`
     },
     {
       role: 'user',
-      content: `Rendered geometry review payload:
-${JSON.stringify({ title: diagramModel.title, nodes, edges: focusEdges }, null, 2)}
-
-Return only:
-{
-  "suggestions": [
-    { "edgeId": "edge_0", "sourceSide": "RIGHT", "targetSide": "LEFT", "confidence": "medium", "reason": "Short reason." }
-  ],
-  "rationale": "Brief rationale."
-}`
-    }
-  ];
-
-  const schema = {
-    name: 'port_hint_review',
-    schema: {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        suggestions: {
-          type: 'array',
-          maxItems: top,
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            properties: {
-              edgeId: { type: 'string' },
-              sourceSide: { type: 'string', enum: ['LEFT', 'RIGHT', 'TOP', 'BOTTOM'] },
-              targetSide: { type: 'string', enum: ['LEFT', 'RIGHT', 'TOP', 'BOTTOM'] },
-              confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
-              reason: { type: 'string' }
-            },
-            required: ['edgeId', 'sourceSide', 'targetSide', 'confidence', 'reason']
-          }
-        },
-        rationale: { type: 'string' }
-      },
-      required: ['suggestions', 'rationale']
-    }
-  };
-
-  try {
-    const result = await callJsonModel(apiUrl, messages, schema, { signal, timeout, maxTokens: 800, logPrefix: '[Visual Hint 1]' });
-    console.log(`[Visual Hint 1] Rationale: ${result?.rationale || '(none)'}`);
-    return result;
-  } catch (err) {
-    console.error('[Visual Hint 1] Failed:', err.message);
-    return null;
-  }
-}
-
-export async function getLLMTopOrder(apiUrl, diagramModel, graph, { signal, timeout = 30000 } = {}) {
-  const containers = (graph.nodes || []).filter(node => node.type === 'container');
-  if (containers.length === 0) return null;
-
-  const minY = Math.min(...containers.map(node => node.y));
-  const topNodes = containers
-    .filter(node => Math.abs(node.y - minY) < 5)
-    .sort((a, b) => a.x - b.x);
-  const currentOrder = topNodes.map(node => node.id);
-  if (currentOrder.length < 2) return null;
-
-  const topIds = new Set(currentOrder);
-  const edgeSummaries = buildEdgeSummaries(diagramModel, graph)
-    .filter(edge => topIds.has(edge.source) || topIds.has(edge.target))
-    .map(edge => ({
-      id: edge.id,
-      source: edge.source,
-      sourceLabel: edge.sourceLabel,
-      target: edge.target,
-      targetLabel: edge.targetLabel,
-      label: edge.label,
-      points: edge.points,
-      bendCount: edge.bendCount
-    }));
-
-  const payload = {
-    title: diagramModel.title,
-    row: {
-      layerIndex: 0,
-      currentOrder,
-      nodes: topNodes.map(node => ({
-        id: node.id,
-        label: node.label,
-        type: node.type,
-        x: round(node.x),
-        y: round(node.y),
-        center: nodeCenter(node)
-      }))
-    },
-    connectedEdges: edgeSummaries
-  };
-
-  const messages = [
-    {
-      role: 'system',
-      content: `You are a JSON-only C4 diagram top-row ordering reviewer.
-
-Suggest a better left-to-right order for the given row only.
-Use exactly the same node ids from currentOrder.
-Prefer orders that reduce line crossings and keep related workflow steps near their targets.
-Output only valid JSON.`
-    },
-    {
-      role: 'user',
-      content: `Rendered top-row payload:
-${JSON.stringify(payload, null, 2)}
-
-Return only:
-{
-  "layerIndex": 0,
-  "currentOrder": ["id_a", "id_b"],
-  "suggestedOrder": ["id_b", "id_a"],
-  "confidence": "medium",
-  "reason": "Short reason."
-}`
-    }
-  ];
-
-  const schema = {
-    name: 'top_order_review',
-    schema: {
-      type: 'object',
-      additionalProperties: false,
-      properties: {
-        layerIndex: { type: 'integer' },
-        currentOrder: { type: 'array', items: { type: 'string' } },
-        suggestedOrder: { type: 'array', items: { type: 'string' } },
-        confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
-        reason: { type: 'string' }
-      },
-      required: ['layerIndex', 'currentOrder', 'suggestedOrder', 'confidence', 'reason']
-    }
-  };
-
-  try {
-    const result = await callJsonModel(apiUrl, messages, schema, { signal, timeout, maxTokens: 800, logPrefix: '[Visual Hint 2]' });
-    const sameIds = Array.isArray(result?.suggestedOrder) &&
-      result.suggestedOrder.length === currentOrder.length &&
-      result.suggestedOrder.every(id => currentOrder.includes(id));
-    if (!sameIds) return null;
-    console.log(`[Visual Hint 2] Reason: ${result.reason || '(none)'}`);
-    return result;
-  } catch (err) {
-    console.error('[Visual Hint 2] Failed:', err.message);
-    return null;
-  }
-}
-
-export async function getLLMDiagonalRouteHints(apiUrl, diagramModel, graph, { signal, timeout = 30000, top = 5 } = {}) {
-  const candidates = buildEdgeSummaries(diagramModel, graph)
-    .map(edge => {
-      const diagonals = diagonalSegments(edge.points);
-      return {
-        id: edge.id,
-        source: edge.source,
-        sourceLabel: edge.sourceLabel,
-        target: edge.target,
-        targetLabel: edge.targetLabel,
-        sourceType: edge.sourceType,
-        targetType: edge.targetType,
-        label: edge.label,
-        routeLength: edge.routeLength,
-        bendCount: edge.bendCount,
-        diagonalLength: round(diagonals.reduce((sum, seg) => sum + seg.length, 0)),
-        points: edge.points,
-        diagonalSegments: diagonals
-      };
-    })
-    .filter(edge => edge.diagonalLength >= 180 && edge.sourceType !== 'database' && edge.targetType !== 'database')
-    .sort((a, b) => b.diagonalLength - a.diagonalLength)
-    .slice(0, top);
-
-  if (candidates.length === 0) return null;
-
-  const nodeIds = new Set(candidates.flatMap(edge => [edge.source, edge.target]));
-  const nodes = (graph.nodes || [])
-    .filter(node => nodeIds.has(node.id))
-    .map(node => ({
-      id: node.id,
-      label: node.label,
-      type: node.type,
-      box: { x: round(node.x), y: round(node.y), width: round(node.width), height: round(node.height) },
-      center: nodeCenter(node)
-    }));
-
-  const messages = [
-    {
-      role: 'system',
-      content: `You are a JSON-only diagonal route reviewer for C4 architecture diagrams.
-
-Suggest route intents only where an orthogonal lane would likely read better.
-Use only edge ids from diagonalEdges.
-Allowed routeIntent values: KEEP_DIAGONAL, LEFT_LANE, RIGHT_LANE, ORTHOGONAL_NEAR_TARGET.
-Prefer KEEP_DIAGONAL when a diagonal is short or semantically clear.
-Do not move nodes or labels.
-Output only valid JSON.`
-    },
-    {
-      role: 'user',
-      content: `Rendered diagonal-route payload:
+      content: `Rendered layout review payload:
 ${JSON.stringify({
   title: diagramModel.title,
-  allowedRouteIntents: ['KEEP_DIAGONAL', 'LEFT_LANE', 'RIGHT_LANE', 'ORTHOGONAL_NEAR_TARGET'],
-  nodes,
-  diagonalEdges: candidates
+  nodes: (graph.nodes || []).map(n => ({
+    id: n.id,
+    label: n.label,
+    type: n.type,
+    box: { x: round(n.x), y: round(n.y), width: round(n.width), height: round(n.height) }
+  })),
+  edges: edgeSummaries.map(edge => ({
+    id: edge.id,
+    connection: `${edge.sourceLabel} (${edge.source}) -> ${edge.targetLabel} (${edge.target})`,
+    label: edge.label,
+    routeLength: edge.routeLength,
+    bendCount: edge.bendCount
+  }))
 }, null, 2)}
 
-Return only:
-{
-  "suggestions": [
-    { "edgeId": "edge_0", "routeIntent": "LEFT_LANE", "confidence": "medium", "reason": "Short reason." }
-  ],
-  "rationale": "Brief rationale."
-}`
+Return your suggestions as JSON.`
     }
   ];
 
   const schema = {
-    name: 'diagonal_route_review',
+    name: 'label_placement_review',
     schema: {
       type: 'object',
       additionalProperties: false,
       properties: {
         suggestions: {
           type: 'array',
-          maxItems: top,
           items: {
             type: 'object',
             additionalProperties: false,
             properties: {
               edgeId: { type: 'string' },
-              routeIntent: { type: 'string', enum: ['KEEP_DIAGONAL', 'LEFT_LANE', 'RIGHT_LANE', 'ORTHOGONAL_NEAR_TARGET'] },
+              placement: { type: 'string', enum: ['source', 'target', 'middle'] },
               confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
               reason: { type: 'string' }
             },
-            required: ['edgeId', 'routeIntent', 'confidence', 'reason']
+            required: ['edgeId', 'placement', 'confidence', 'reason']
           }
         },
         rationale: { type: 'string' }
@@ -643,11 +406,11 @@ Return only:
   };
 
   try {
-    const result = await callJsonModel(apiUrl, messages, schema, { signal, timeout, maxTokens: 1000, logPrefix: '[Visual Hint 3]' });
-    console.log(`[Visual Hint 3] Rationale: ${result?.rationale || '(none)'}`);
+    const result = await callJsonModel(apiUrl, messages, schema, { signal, timeout, maxTokens: 1000, logPrefix: '[Label Polish]' });
+    console.log(`[Label Polish] Rationale: ${result?.rationale || '(none)'}`);
     return result;
   } catch (err) {
-    console.error('[Visual Hint 3] Failed:', err.message);
+    console.error('[Label Polish] Failed:', err.message);
     return null;
   }
 }

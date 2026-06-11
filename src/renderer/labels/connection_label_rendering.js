@@ -18,7 +18,8 @@ window.NudgeRenderer.connectionLabelRendering = {
     pointToBoxDist,
     wrapText,
     MAX_LABEL_WIDTH,
-    LINE_HEIGHT
+    LINE_HEIGHT,
+    labelHints
   }) {
     const label = edge.labels[0];
 
@@ -122,7 +123,9 @@ window.NudgeRenderer.connectionLabelRendering = {
       points,
       textWidth,
       textHeight,
-      labelCandidateScore
+      labelCandidateScore,
+      edge,
+      labelHints
     }));
 
     ({ midX, midY } = window.NudgeRenderer.connectionLabelPlacement.adjustFinalLabelPlacement({

@@ -4,9 +4,7 @@ import { chromium } from 'playwright';
 import { analyzeLayout } from './geometry.js';
 import {
   getLLMOptimizationPatch,
-  getLLMPortHints,
-  getLLMTopOrder,
-  getLLMDiagonalRouteHints
+  getLLMLabelPlacementHints
 } from './llm_client.js';
 
 async function captureSvg(page, width, height) {
@@ -121,113 +119,45 @@ export async function optimizeDiagram({
         return { accepted: false, step: currentStep, overrides };
       };
 
-      onLog('[Visual Hint] Container diagram — running top-order → port → diagonal pipeline...');
+      onLog('[Visual Hint] Container diagram — running label placement optimizer...');
 
       const initialStep = await renderContainerStep('step_0_initial');
       if (!initialStep) return { success: false, history: [], svgContent: null, pngPath: null };
       let acceptedStep = initialStep;
 
       if (enhance && !signal?.aborted) {
-        const orderResult = await getLLMTopOrder(apiUrl, diagramModel, initialStep.result, { signal, timeout: checkpointTimeout });
-        if (orderResult) visualHints.topOrder = orderResult;
-        if (Array.isArray(orderResult?.suggestedOrder) && orderResult.suggestedOrder.length > 0) {
-          const candidateOverrides = {
-            ...overrides,
-            internalOrder: {
-              ...(overrides.internalOrder || {}),
-              [orderResult.layerIndex ?? 0]: orderResult.suggestedOrder
-            }
-          };
-          const accepted = await renderAndMaybeAccept('step_1_top_order', candidateOverrides, acceptedStep, 'top-row order');
-          acceptedStep = accepted.step || acceptedStep;
-          if (accepted.accepted) {
-            onLog(`[Visual Hint] Accepted top-row order: ${orderResult.suggestedOrder.join(', ')}`);
+        const labelResult = await getLLMLabelPlacementHints(apiUrl, diagramModel, initialStep.result, { signal, timeout: checkpointTimeout });
+        if (labelResult) visualHints.labelPlacement = labelResult;
+        const labelHints = {};
+        for (const suggestion of labelResult?.suggestions || []) {
+          if (suggestion.edgeId && suggestion.placement) {
+            labelHints[suggestion.edgeId] = suggestion.placement;
           }
-        } else {
-          const topOrderStep = await renderContainerStep('step_1_top_order');
-          if (!topOrderStep) return { success: false, history: [], svgContent: null, pngPath: null };
-          acceptedStep = topOrderStep;
         }
-      } else {
-        const topOrderStep = await renderContainerStep('step_1_top_order');
-        if (!topOrderStep) return { success: false, history: [], svgContent: null, pngPath: null };
-        acceptedStep = topOrderStep;
-      }
-
-      if (!fs.existsSync(path.join(outputDir, 'step_1_top_order.png'))) {
-        const topOrderStep = await renderContainerStep('step_1_top_order');
-        if (!topOrderStep) return { success: false, history: [], svgContent: null, pngPath: null };
-      }
-
-      if (enhance && !signal?.aborted) {
-        const portResult = await getLLMPortHints(apiUrl, diagramModel, acceptedStep.result, { signal, timeout: checkpointTimeout });
-        if (portResult) visualHints.port = portResult;
-        const portHints = {};
-        for (const suggestion of portResult?.suggestions || []) {
-          if (!suggestion.edgeId) continue;
-          const hint = {};
-          if (suggestion.sourceSide) hint.sourceSide = suggestion.sourceSide;
-          if (suggestion.targetSide) hint.targetSide = suggestion.targetSide;
-          if (Object.keys(hint).length > 0) portHints[suggestion.edgeId] = hint;
-        }
-        if (Object.keys(portHints).length > 0) {
+        if (Object.keys(labelHints).length > 0) {
           const candidateOverrides = {
             ...overrides,
-            portHints: {
-              ...(overrides.portHints || {}),
-              ...portHints
+            labelHints: {
+              ...(overrides.labelHints || {}),
+              ...labelHints
             }
           };
-          const accepted = await renderAndMaybeAccept('step_2_port_hints', candidateOverrides, acceptedStep, `port hints ${Object.keys(portHints).join(', ')}`);
+          const accepted = await renderAndMaybeAccept('step_1_label_hints', candidateOverrides, acceptedStep, `label hints: ${Object.entries(labelHints).map(([id, val]) => `${id}->${val}`).join(', ')}`);
           acceptedStep = accepted.step || acceptedStep;
         } else {
-          const portStep = await renderContainerStep('step_2_port_hints');
-          if (!portStep) return { success: false, history: [], svgContent: null, pngPath: null };
-          acceptedStep = portStep;
+          const labelHintsStep = await renderContainerStep('step_1_label_hints');
+          if (!labelHintsStep) return { success: false, history: [], svgContent: null, pngPath: null };
+          acceptedStep = labelHintsStep;
         }
       } else {
-        const portStep = await renderContainerStep('step_2_port_hints');
-        if (!portStep) return { success: false, history: [], svgContent: null, pngPath: null };
-        acceptedStep = portStep;
+        const labelHintsStep = await renderContainerStep('step_1_label_hints');
+        if (!labelHintsStep) return { success: false, history: [], svgContent: null, pngPath: null };
+        acceptedStep = labelHintsStep;
       }
 
-      if (!fs.existsSync(path.join(outputDir, 'step_2_port_hints.png'))) {
-        const portStep = await renderContainerStep('step_2_port_hints');
-        if (!portStep) return { success: false, history: [], svgContent: null, pngPath: null };
-      }
-
-      if (enhance && !signal?.aborted) {
-        const routeResult = await getLLMDiagonalRouteHints(apiUrl, diagramModel, acceptedStep.result, { signal, timeout: checkpointTimeout });
-        if (routeResult) visualHints.diagonalRoutes = routeResult;
-        const routeHints = {};
-        for (const suggestion of routeResult?.suggestions || []) {
-          if (!suggestion.edgeId || !suggestion.routeIntent || suggestion.routeIntent === 'KEEP_DIAGONAL') continue;
-          routeHints[suggestion.edgeId] = { routeIntent: suggestion.routeIntent };
-        }
-        if (Object.keys(routeHints).length > 0) {
-          const candidateOverrides = {
-            ...overrides,
-            routeHints: {
-              ...(overrides.routeHints || {}),
-              ...routeHints
-            }
-          };
-          const accepted = await renderAndMaybeAccept('step_3_diagonal_routes', candidateOverrides, acceptedStep, `diagonal route hints ${Object.keys(routeHints).join(', ')}`);
-          acceptedStep = accepted.step || acceptedStep;
-        } else {
-          const routeStep = await renderContainerStep('step_3_diagonal_routes');
-          if (!routeStep) return { success: false, history: [], svgContent: null, pngPath: null };
-          acceptedStep = routeStep;
-        }
-      } else {
-        const routeStep = await renderContainerStep('step_3_diagonal_routes');
-        if (!routeStep) return { success: false, history: [], svgContent: null, pngPath: null };
-        acceptedStep = routeStep;
-      }
-
-      if (!fs.existsSync(path.join(outputDir, 'step_3_diagonal_routes.png'))) {
-        const routeStep = await renderContainerStep('step_3_diagonal_routes');
-        if (!routeStep) return { success: false, history: [], svgContent: null, pngPath: null };
+      if (!fs.existsSync(path.join(outputDir, 'step_1_label_hints.png'))) {
+        const labelHintsStep = await renderContainerStep('step_1_label_hints');
+        if (!labelHintsStep) return { success: false, history: [], svgContent: null, pngPath: null };
       }
 
       const finalStep = acceptedStep;

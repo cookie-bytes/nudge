@@ -194,28 +194,16 @@ function buildMockFetch(callLog) {
         };
       }
 
-      if (userMessage.includes('Verify zone assignments')) {
-        callLog.zoneVerification++;
+      if (userMessage.includes('Rendered layout review payload:')) {
+        callLog.labelPlacementHints++;
         return {
           ok: true,
           json: async () => ({
             choices: [{ message: { content: JSON.stringify({
-              zoneOverrides: {},
-              swapCommands: [],
-              rationale: "Assignments correct."
-            }) } }]
-          })
-        };
-      }
-
-      if (userMessage.includes('Check node ordering')) {
-        callLog.routingVerification++;
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{ message: { content: JSON.stringify({
-              swapCommands: [],
-              rationale: "Ordering is optimal."
+              suggestions: [
+                { edgeId: "edge_0", placement: "source", confidence: "high", reason: "Visual layout improvement" }
+              ],
+              rationale: "Optimized connection label placement."
             }) } }]
           })
         };
@@ -253,7 +241,7 @@ async function runIntegrationTest() {
     model.layoutOptions["elk.spacing.nodeNode"] = "10";
     model.layoutOptions["elk.layered.spacing.nodeNodeBetweenLayers"] = "10";
 
-    const callLog = { total: 0, modelList: 0, optimizationPatch: 0, zoneVerification: 0, routingVerification: 0 };
+    const callLog = { total: 0, modelList: 0, optimizationPatch: 0, labelPlacementHints: 0 };
     const originalFetch = globalThis.fetch;
     globalThis.fetch = buildMockFetch(callLog);
 
@@ -272,7 +260,6 @@ async function runIntegrationTest() {
       if (!result.success) throw new Error("C4Context integration test: optimization did not succeed.");
       if (result.history.length < 2) throw new Error("C4Context integration test: optimizer did not iterate — mock patch was not applied.");
       if (callLog.optimizationPatch === 0) throw new Error("C4Context integration test: optimization patch mock was never called — user-message contract may have changed.");
-      if (callLog.zoneVerification > 0 || callLog.routingVerification > 0) throw new Error("C4Context integration test: checkpoint mocks were called unexpectedly on a flat diagram.");
       if (!fs.existsSync(path.join(outputDir, 'optimized.svg'))) throw new Error("C4Context integration test: optimized.svg was not created.");
       if (!fs.existsSync(path.join(outputDir, 'optimized.png'))) throw new Error("C4Context integration test: optimized.png was not created.");
     } finally {
@@ -300,7 +287,7 @@ async function runIntegrationTest() {
     `;
     const model = parseMermaidC4(mermaidDiagram);
 
-    const callLog = { total: 0, modelList: 0, optimizationPatch: 0, zoneVerification: 0, routingVerification: 0 };
+    const callLog = { total: 0, modelList: 0, optimizationPatch: 0, labelPlacementHints: 0 };
     const originalFetch = globalThis.fetch;
     globalThis.fetch = buildMockFetch(callLog);
 
@@ -316,7 +303,7 @@ async function runIntegrationTest() {
 
       console.log(`  Container test: success=${result.success}, iterations=${result.history.length}, fetches=${callLog.total}`);
 
-      for (const file of ['step_0_initial.png', 'step_1_top_order.png', 'step_2_port_hints.png', 'step_3_diagonal_routes.png']) {
+      for (const file of ['step_0_initial.png', 'step_1_label_hints.png']) {
         if (!fs.existsSync(path.join(outputDir, file))) throw new Error(`C4Container integration test: ${file} was not created.`);
       }
       if (!fs.existsSync(path.join(outputDir, 'optimized.svg'))) throw new Error("C4Container integration test: optimized.svg was not created.");
