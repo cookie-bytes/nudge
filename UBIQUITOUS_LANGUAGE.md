@@ -43,15 +43,19 @@
 | **Connection Line** | The visible line that represents a relationship between two architecture elements. | Edge, line, connector |
 | **Route** | The geometric path chosen for a connection line from source architecture element to target architecture element. | Line, edge path |
 | **Connection Point** | The point on an architecture element's face where a connection line begins or ends. | Port, anchor, endpoint |
-| **Route Candidate** | A possible route considered by the router before scoring chooses one. | Option, path option |
-| **Route Intent** | A high-level routing preference such as `LEFT_LANE`, `RIGHT_LANE`, or `ORTHOGONAL_NEAR_TARGET`. | Route style, path mode |
-| **Lane Reservation** | The local offsetting of interior route segments to reduce unavoidable shared corridors. | Lane routing, line spreading |
-| **Second-Pass Rerouting** | A bounded reroute attempt for the worst route-conflict offenders after initial routing. | Rerendering, route retry |
+| **Grid Router** | The default pathfinding-based router that routes connection lines using A* search over a sparse orthogonal visibility graph. | Geometric router, A* router |
+| **Visibility Graph** | A sparse orthogonal visibility graph generated at inflated element boundaries, centerlines, and channel midlines. | Search graph, uniform pixel grid |
+| **Rip-Up-and-Reroute** | The optimization loop that repeatedly selects the worst-scoring routed lines, removes them, and re-routes them against the rest. | Rerouting, route retry |
+| **Channel Nudging** | The post-routing phase that resolves overlapping line segments within shared channels by spreading them into separated lanes. | Spreading, route nudging |
 | **Connection Label** | The rendered relationship text and optional technology note placed near a connection line. | Edge label, relationship label |
 | **Technology Note** | The bracketed transport or implementation detail shown beneath a connection label. | Protocol, tech label |
 | **Label Placement** | The collision-aware process that chooses where a connection label should appear. | Text placement, label routing |
-| **Direct Database Drop** | A straight vertical route from a parent container to a column-aligned database. | DB drop, persistence line |
-| **Gutter Route** | A detour that uses reserved side space inside or outside a boundary. | Perimeter route, side detour |
+| **Direct Database Drop** | A straight vertical route from a parent container to a column-aligned database (handled in legacy fallback). | DB drop, persistence line |
+| **Gutter Route** | A detour that uses reserved side space inside or outside a boundary (handled in legacy fallback). | Perimeter route, side detour |
+| **Route Candidate** | A possible route considered by the legacy router before scoring chooses one. | Option, path option |
+| **Route Intent** | A high-level routing preference such as `LEFT_LANE`, `RIGHT_LANE`, or `ORTHOGONAL_NEAR_TARGET`. | Route style, path mode |
+| **Lane Reservation** | The legacy local offsetting of interior route segments to reduce unavoidable shared corridors. | Lane routing, line spreading |
+| **Second-Pass Rerouting** | The legacy bounded reroute attempt for the worst route-conflict offenders after initial routing. | Rerendering, route retry |
 
 ## Quality and scoring
 

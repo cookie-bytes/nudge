@@ -1,6 +1,9 @@
 # Routing Improvement Plan
 
-This plan tracks the next layout-quality improvements for container diagrams. The goal is to keep the current soft, direct-looking routes while reducing visual conflicts in dense diagrams.
+> [!NOTE]
+> This improvement plan has been succeeded and implemented by the default **Grid-Based Connection-Line Router** (A* pathfinding over a sparse orthogonal visibility graph) with rip-up-and-reroute and channel nudging. The legacy candidate router described in Phase 2 and Phase 3 below is retained as a fallback for unplaced leaf elements or cross-hierarchy relationships.
+
+This plan tracks the historical layout-quality improvements for container diagrams. The goal was to keep the soft, direct-looking routes while reducing visual conflicts in dense diagrams.
 
 ## Phase 1 — Edge Quality Metrics
 

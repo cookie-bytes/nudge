@@ -45,7 +45,14 @@ src/
   cli/index.js          ← thin CLI wrapper (reads file, logs to stdout)
   mcp/index.js          ← MCP stdio server (exposes optimize_diagram tool)
   mermaid_parser.js     ← Mermaid C4 → internal JSON model
-  render.html           ← ELKjs layout engine + SVG renderer (loaded by Playwright)
+  render.html           ← HTML shell loaded by Playwright (sources render_engine.js and renderer/)
+  render_engine.js      ← browser facade orchestration
+  renderer/             ← browser-side layout and rendering modules
+    container/          ← Kahn layering and container placement
+    elk/                ← ELKjs integration for flat diagrams
+    labels/             ← collision-aware label placement
+    routing/            ← default grid-based A* router & legacy router
+    svg/                ← shape rendering & SVG drawing
   utils.js              ← fetchWithTimeout helper
 ```
 
@@ -61,7 +68,7 @@ The renderer always produces a deterministic baseline. Container diagrams use th
 
 4. **`src/render.html`** — Loaded by Playwright as a `file://` URL. Bundles ELKjs locally (copied to `src/vendor/` on `npm install`). Sources `src/render_engine.js`, which exposes `window.renderDiagram(diagramData)` and `window.computeContainerPlan(diagramData)` called from Node via `page.evaluate(...)`.
 
-5. **`src/render_engine.js`** — Browser-side renderer and layout engine. Flat diagrams use ELKjs. Container diagrams use a custom deterministic pipeline: Kahn layering, dedicated rows for message buses/databases, external zone classification, hybrid route scoring, SVG drawing, and label placement. It applies accepted `_layoutOverrides.internalOrder`, `_layoutOverrides.portHints`, and `_layoutOverrides.routeHints`, then returns absolute architecture element bounding boxes and flattened connection-line sections back to Node.js.
+5. **`src/render_engine.js`** — Browser-side renderer and layout engine. Flat diagrams use ELKjs. Container diagrams use a custom deterministic pipeline: Kahn layering, dedicated rows for message buses/databases, external zone classification, grid-based orthogonal line routing, SVG drawing, and label placement. It applies accepted `_layoutOverrides.internalOrder`, `_layoutOverrides.portHints`, and `_layoutOverrides.routeHints`, then returns absolute architecture element bounding boxes and flattened connection-line sections back to Node.js.
 
 6. **`src/core/geometry.js`** — Stateless geometry analyzer (`analyzeLayout`). Detects element overlaps, connection-line element crossings, connection-label element crossings, poor aspect ratio, and tight spacing (<45px).
 
@@ -85,7 +92,13 @@ The renderer always produces a deterministic baseline. Container diagrams use th
 
 **Container utility rows**: In `render_engine.js`, `message_bus` and `database` children are excluded from Kahn layering and reinserted afterward. Message buses are always marked `_cornerAnchor` and right-aligned in the bottom-right corner; they are sized based on connectivity (3× width for 4+ connections, 2× for 3+ connections). Databases are placed in tighter rows beneath the deepest connected container, with direct parent→database vertical routing when column-aligned.
 
-**Hybrid route scoring**: `routeEdge(e, idx)` builds route candidates and chooses with `chooseBestRoute`. Connection-line element crossings are the hard first priority. Candidate scores then weigh already-routed connection-line overlaps, connection-line crossings, bend count, and path length. `reserveRouteLanes` offsets only interior segments to separate unavoidable shared corridors, and `improveRoutedSections` reroutes the worst few offenders only when the global connection-line quality score improves without adding connection-line element crossings or excessive route length. This is intentionally not a hard “no connection line crosses another connection line” rule; it reduces stacked corridors without forcing huge perimeter detours.
+**Grid connection-line routing (default)**: Connection lines are routed using A* pathfinding over a sparse orthogonal visibility graph (in `grid_connection_line_router.js`).
+- **Sparse Visibility Graph**: Vertices are generated at inflated element boundaries, centerlines, and channel midlines to keep the search space small and routes centered.
+- **Search State**: A* search state is `(vertex, heading)` to track and penalize bends.
+- **Shared Port Resources**: Slots on faces are reserved on use, and face slot reuse incurs cost penalties.
+- **Rip-Up-and-Reroute**: Runs hardest-first, then repeatedly rips up and reroutes worst-scoring edges against current paths to minimize global crossings, overlaps, and bends.
+- **Nudging Phase**: Overlapping parallel segments in shared channels are separated into lanes.
+- **Legacy Fallback**: The legacy candidate router (`connection_line_router.js`) is used as a fallback for edges whose endpoints are not placed leaf elements, or when explicitly requested via `NUDGE_ROUTER=legacy`.
 
 **Label placement**: Connection labels try midpoint, target-anchored, source-anchored, and segment-clearance positions. Fallback placement now checks all architecture elements, including source/target elements, plus previously placed labels so labels do not settle on top of endpoint boxes.
 

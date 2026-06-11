@@ -43,6 +43,8 @@ Renderer modules:
 - `src/renderer/routing/route_specifications.js`
 - `src/renderer/routing/route_candidate_rules.js`
 - `src/renderer/routing/connection_line_router.js`
+- `src/renderer/routing/visibility_graph.js`
+- `src/renderer/routing/grid_connection_line_router.js`
 - `src/renderer/svg/architecture_element_shapes.js`
 - `src/renderer/svg/connection_line_rendering.js`
 - `src/renderer/svg/svg_renderer.js`
@@ -98,10 +100,12 @@ The `ranks` mutation contract is intentionally explicit: the module returns `{ g
 
 - `routing/route_geometry.js`: route point/section conversion and conflict geometry helpers.
 - `routing/route_specifications.js`: bundle, reserved-drop, and direct-drop specifications.
-- `routing/route_candidate_rules.js`: ordered Route Candidate generation.
-- `routing/connection_line_router.js`: route set evaluation, hub and side corridor assignment, route selection, Lane Reservation, `routeEdge`, and route improvement.
+- `routing/route_candidate_rules.js`: ordered Route Candidate generation (legacy).
+- `routing/connection_line_router.js`: legacy router (`routeEdge`), route set evaluation, corridor assignment, lane reservation, and rerouting.
+- `routing/visibility_graph.js`: sparse orthogonal visibility graph generator.
+- `routing/grid_connection_line_router.js`: default grid-based A* router with rip-up-and-reroute and channel nudging.
 
-Route Candidate order, score weights, route hint handling, and Lane Reservation offsets are parity-critical.
+The default A* grid router uses the visibility graph; the legacy candidate router remains as a fallback.
 
 ### SVG And Labels
 
@@ -129,6 +133,8 @@ Current intended script order:
 <script src="renderer/container/plan_summary.js"></script>
 <script src="renderer/container/utility_row_rules.js"></script>
 <script src="renderer/container/container_layout.js"></script>
+<script src="renderer/routing/visibility_graph.js"></script>
+<script src="renderer/routing/grid_connection_line_router.js"></script>
 <script src="renderer/routing/route_geometry.js"></script>
 <script src="renderer/routing/route_specifications.js"></script>
 <script src="renderer/routing/route_candidate_rules.js"></script>

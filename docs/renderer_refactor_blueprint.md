@@ -90,9 +90,11 @@ Proposed modules:
 - `src/renderer/container/container_plan.js`: `buildContainerZonePlan`, override appliers.
 - `src/renderer/container/container_layout.js`: container sizing and placement orchestration.
 - `src/renderer/container/utility_row_rules.js`: Database and Message Bus row behavior.
-- `src/renderer/routing/connection_line_router.js`: `routeEdge`, lane reservation, rerouting orchestration.
-- `src/renderer/routing/route_candidate_rules.js`: ordered Route Candidate Rule Objects.
+- `src/renderer/routing/connection_line_router.js`: legacy `routeEdge`, lane reservation, and rerouting orchestration.
+- `src/renderer/routing/route_candidate_rules.js`: ordered Route Candidate Rule Objects (legacy).
 - `src/renderer/routing/route_specifications.js`: route predicates and conflict specifications.
+- `src/renderer/routing/visibility_graph.js`: sparse orthogonal visibility graph generator.
+- `src/renderer/routing/grid_connection_line_router.js`: default A* grid connection line router with rip-up-and-reroute and channel nudging.
 - `src/renderer/svg/architecture_element_shapes.js`: existing `shapeStrategies`.
 - `src/renderer/svg/svg_renderer.js`: `drawGraph`.
 - `src/renderer/labels/connection_label_placement.js`: label candidate scoring and placement.

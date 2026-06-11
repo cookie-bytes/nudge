@@ -161,31 +161,33 @@ Left/right columns are as wide as their widest node plus `H_GAP`.
 - **Left nodes:** stacked vertically, x = boundaryLeft − nodeWidth − H_GAP, starting at boundaryTop
 - **Right nodes:** stacked vertically, x = boundaryRight + H_GAP, starting at boundaryTop
 
-### 2d: Orthogonal edge routing
+### 2d: Grid-Based Orthogonal Edge Routing
 
-Each edge is routed by `routeEdge(e)`, which uses absolute coordinates (converting boundary-relative child positions to absolute via `getAbs`).
+Connection lines are routed using a deterministic grid-based router (in `grid_connection_line_router.js`) by default. This uses pathfinding over a sparse orthogonal visibility graph.
 
-**Type-specific overrides** are evaluated first and short-circuit the spatial-relationship table below:
-- **Parent → database (column-aligned):** if the target is a database sitting directly below the source and their centres are within `min(srcWidth, tgtWidth) / 2`, route a straight line from source bottom-centre to target top-centre, bypassing the standard edge-distribution logic.
-- **Source → message bus (vertical entry blocked):** when the source sits above a bus, try side-entry first (route into the left or right end-cap of the bus) to keep the bus's top edge available for label placement.
+**Visibility Graph Construction:**
+- The router constructs a **Sparse Orthogonal Visibility Graph** (in `visibility_graph.js`) where vertices are generated at inflated element boundaries, centerlines, and channel midlines to keep the search space compact and paths naturally centered.
+- Obstacles (placed elements) are inflated by the routing clearance; vertices inside inflated obstacles are blocked.
 
-**Source and target slot ordering:** when a node has multiple outgoing edges, source exit slots are ordered by target centre X so left-going edges leave from the left side of the source and right-going edges leave from the right side. Message-bus entry slots are ordered by source approach X, so routes arriving from the right corridor enter toward the right side of the bus instead of crossing back across the bus row. Databases with a direct vertical parent drop keep that centre drop clear; other incoming database edges are biased to the opposite/nearest side to avoid crossing the direct persistence line.
+**A* Pathfinding & Heading:**
+- The router runs an **A\*** pathfinding algorithm over the visibility graph.
+- The search state is a tuple of `(vertex, heading)`. Tracking the arrival heading allows the router to penalize bends as a first-class cost (e.g. $+40$ cost per bend).
 
-**Hybrid route scoring:** for internal boundary edges, the router compares the standard route, a direct route, a row-gap dogleg, and left/right gutter detours. Candidates are scored by node crossings first, then a weighted mix of existing edge overlaps/crossings, bend count, and path length. This keeps direct-looking lines when they are clean, while only using detours for routes that would cut through nodes or pile onto existing line corridors.
+**Port Reservation & Face Assignments:**
+- Port slots on each face of a node are modeled as resources.
+- Connecting to a port slot reserves it, raising the cost of reusing it for other connection lines to prevent overlapping drops.
 
-**Lane reservation:** after a route is selected, `reserveRouteLanes` may offset interior horizontal or vertical segments by compact amounts when they overlap already-routed segments. Start and end segments stay anchored so arrows remain visually attached to their source and target nodes.
+**Hardest-First & Rip-Up-and-Reroute:**
+- Edges are routed hardest-first based on their centre-to-centre Manhattan span.
+- Once an initial pass is complete, the worst conflict offenders (measured by a global score weighing overlaps, crossings, and bends) are repeatedly ripped up and rerouted against current paths. A reroute is kept only if the global conflict score does not worsen.
 
-**Second-pass rerouting:** after all edges have an initial route, `improveRoutedSections` scores the complete route set, retries only the worst few edge-conflict offenders, and keeps a reroute only when the global score improves without adding node crossings or excessive route length. This removes remaining shared corridors without turning edge routing into a hard no-crossing constraint.
+**Channel Nudging & Straightening:**
+- Once path topologies are established, a **channel nudging phase** offsets overlapping parallel segments within shared channels into separate lanes (using a minimum gap) while keeping endpoints fixed.
+- Finally, minor kinks are straightened, and paths are drawn as standard straight line segments rather than bezier curves.
 
-| Spatial relationship | Route shape |
-|----------------------|-------------|
-| Target directly below source | L-shape: source bottom → horizontal jog at midpoint → target top |
-| Target directly above source | L-shape: source top → horizontal jog at midpoint → target bottom |
-| Source and target are vertically aligned (centres within 3px) | Straight vertical line, no bend points |
-| Same horizontal band | Straight horizontal line from side edge to side edge |
-| Fallback (none of the above) | U-shape arcing above both nodes |
-
-Bend points are post-processed by `renderEdges` into SVG quadratic bezier curves with a broad corner radius to remove sharp kinks.
+**Legacy Fallback & Override:**
+- Edges that cannot be routed geometrically (such as cross-hierarchy relationships whose endpoints are not placed leaf elements) fall back to the legacy candidate router (`connection_line_router.js`) per edge.
+- If needed, the entire routing pipeline can be forced back to the legacy router using the environment variable `NUDGE_ROUTER=legacy`.
 
 ---
 
@@ -365,5 +367,5 @@ All edge coordinates are absolute. The `drawGraph` function uses `flattenNodes` 
 - **Single boundary only:** The engine assumes exactly one `Boundary(...)` node at the top level. Nested boundaries are not supported in container mode.
 - **No cycle detection warning:** A cycle in the boundary's internal edges is silently broken by dumping remaining nodes into a final layer.
 - **Legacy checkpoint helpers remain in `llm_client.js`:** `getLLMZoneVerification` and `getLLMRoutingVerification` are still present for older experiments, but the active container optimizer imports the visual-hint functions instead.
-- **Edge routing is heuristic:** The hybrid router scores route candidates, reserves lanes, and performs bounded second-pass rerouting, but it is still not a full obstacle-avoidance engine. Edges may still cross when avoiding them would require long or visually awkward detours.
+- **Edge routing is grid-based pathfinding:** The grid router uses A* over a visibility graph, rip-up-and-reroute, and channel nudging to find optimal collision-free paths, falling back to legacy candidate routing when necessary. Crossings are expensive but not impossible, preventing long and visually awkward detours.
 - **Post-render edge-to-edge scoring is observational:** The renderer uses edge-conflict scoring while choosing routes, and the test suite reports edge-edge crossings, overlaps, overlap pixels, label-edge intersections, bends, and route length. These metrics do not currently fail tests, so renderer changes that affect line corridors should still be reviewed visually.

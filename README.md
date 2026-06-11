@@ -6,7 +6,7 @@
 
 **Deterministic C4 layout engine, with optional AI polish**
 
-Nudge automatically produces clean, publication-ready C4 Model architecture diagrams. Its quality floor comes from deterministic layout rules: ELKjs for flat context diagrams, a custom Container Layout Engine for nested container diagrams, hybrid route scoring, lane reservation, and collision-aware Connection Label placement.
+Nudge automatically produces clean, publication-ready C4 Model architecture diagrams. Its quality floor comes from deterministic layout rules: ELKjs for flat context diagrams, a custom Container Layout Engine for nested container diagrams, orthogonal grid routing (A* pathfinding over a sparse orthogonal visibility graph) with rip-up-and-reroute, channel nudging, and collision-aware Connection Label placement.
 
 Local LLM reviewers are an optional enhancement layer. They can suggest top-row ordering, port sides, diagonal route intent, or ELKjs option patches, but those suggestions are accepted only when they do not worsen the geometric score.
 
@@ -47,7 +47,7 @@ graph TD
 
 1. **Ingestion**: Parses C4 Context or C4 Container diagrams from `.mermaid` or `.yaml` specifications.
 2. **Deterministic rendering**: Produces a complete baseline layout without needing cloud services. Container diagrams use Nudge's custom deterministic rules; flat diagrams use ELKjs.
-3. **Geometric critique**: Measures DOM bounding boxes to detect Element Overlaps, Connection-Line Element Crossings, Connection-Label Element Crossings, poor aspect ratio, and tight spacing. Container routing also scores Route Candidates against already-routed Connection Lines to reduce stacked corridors.
+3. **Geometric critique**: Measures DOM bounding boxes to detect Element Overlaps, Connection-Line Element Crossings, Connection-Label Element Crossings, poor aspect ratio, and tight spacing. Container routing uses A* pathfinding over a sparse orthogonal visibility graph, hardest-first routing, and rip-up-and-reroute to optimize line paths and avoid corridors.
 4. **Optional enhancement**: When LLM calls are enabled, Nudge asks a local OpenAI-compatible model for small layout improvements. Container hints are accepted only when the candidate score is no worse than the current accepted state. Flat diagram patches are applied through the existing critic loop.
 5. **Export**: Writes a best-effort SVG and PNG even if geometric issues remain.
 
@@ -66,7 +66,7 @@ Container diagrams containing boundary blocks bypass ELKjs entirely and use a cu
 - **Phase 1: Kahn Layering (Boundary Interior)**: Children of the boundary are sorted into horizontal layers using a modified Kahn's topological sort. Nodes receiving cross-boundary edges are automatically seeded as entry nodes in the top row (Layer 0); unconnected utility nodes are pushed down to minimise clutter. Cycles are silently broken by appending remaining nodes to a final layer.
 - **Phase 2: Dedicated Utility Rows**: Message buses and databases are excluded from Kahn's sort and reinserted into purpose-built rows. Busy buses widen into clear spines; all message buses are corner-anchored in the bottom-right. Databases sit in tighter rows beneath their deepest contributing service.
 - **Phase 3: Zone Classification & Connectivity Sorting**: External nodes are classified into layout zones — callers go **above**, callees go **below**, and overflow nodes spill into **left** and **right** columns. Each zone is automatically sorted by the average layer/column index of the internal nodes it connects to, so external nodes align visually with their counterparts inside the boundary with minimal edge crossings.
-- **Phase 4: Hybrid Edge Routing**: Candidate routes are scored by node crossings first, then by a weighted mix of existing edge overlaps/crossings, bend count, and path length. This keeps direct-looking lines when they are clean, while choosing row-gap or gutter detours only when they avoid real conflicts. After the first route pass, interior lane reservation separates unavoidable shared corridors, and a conservative second pass reroutes only the worst edge-conflict offenders when the global score improves. Bend points are post-processed into broad SVG quadratic bezier curves so detours read as soft paths rather than rigid right-angle wiring.
+- **Phase 4: Orthogonal Grid Routing**: Connection lines are routed using an A* pathfinding algorithm on a sparse orthogonal visibility graph. Vertices are generated at inflated element boundaries, centerlines, and channel midlines to keep the search space small and keep routes centered. A* search state includes the current heading to penalize bends. Face ports are reserved on use with cost penalties. The router routes lines hardest-first, followed by an iterative rip-up-and-reroute loop that optimizes global crossings, overlaps, and bends. Finally, a channel nudging phase offsets overlapping parallel segments into separate lanes. Standard straight orthogonal and diagonal lines are rendered, bypassing the legacy candidate router (which remains as a fallback for cross-hierarchy or unplaced edges, or when using `NUDGE_ROUTER=legacy`).
 - **Phase 5: Rule-Based Edge Label Placement**: Relationship labels are placed along the edge using four strategies evaluated in order: (0) straight-line midpoint, (1) target-anchored, (2) source-anchored, (3) edge-density-aware segment scoring. Every strategy checks for collision against node bounding boxes, source/target boxes, previously-placed labels, and nearby connection lines, so duplicate-text labels on co-terminal edges are separated and labels avoid busy corridors where possible. Long labels wrap automatically; technology notes (e.g. `[HTTPS]`) are rendered in a smaller, semi-transparent style beneath the main text.
 
 ### Optional Visual-Hint Pipeline (Container diagrams)
@@ -93,7 +93,7 @@ Each candidate is scored against Element Overlaps, Connection-Line Element Cross
 - 🧭 **Dedicated Bus & Database Rows**: Message buses and databases are separated from ordinary service layers, with message buses always anchored in the bottom-right and databases visually paired beneath their owner service.
 - 💬 **3-Line Descriptions**: Node descriptions support a 3-line clamp, providing space for detailed technical notes without clipping.
 - 🏷️ **Collision-Aware Label Placement**: Edge labels check four strategies sequentially — straight-middle, target-anchored, source-anchored, and edge-density-aware segment scoring. Each strategy checks for collision against node boxes, already-placed labels, and connection lines, preventing co-terminal labels from stacking and reducing label-edge intersections.
-- 🔌 **Hybrid Edge Routing**: Cross-boundary and internal boundary edges compare direct, row-gap, and gutter candidates. Node crossings are avoided as a hard priority, while shared edge corridors and edge-edge crossings are reduced with weighted scoring, lane reservation, and bounded second-pass rerouting.
+- 🔌 **Orthogonal Grid Routing**: Connection lines use A* search over a sparse orthogonal visibility graph, keeping track of heading to penalize bends. Multiple slots on faces act as shared port resources. The system runs hardest-first, performs rip-up-and-reroute optimization, and finishes with a channel nudging phase that spreads parallel segments. Legacy candidate routing remains as a fallback for unplaced leaf/cross-hierarchy elements.
 - 🌐 **Connectivity-Based Zone Sorting**: External nodes are auto-sorted to align with the internal layer or column they connect to, reducing edge crossings without LLM intervention.
 - 🏠 **Local-First Runtime**: Rendering runs locally with Playwright and bundled ELKjs. Optional AI polish can use a local OpenAI-compatible backend such as LM Studio.
 
@@ -313,8 +313,14 @@ Call the nudge optimize_diagram tool with this diagram and return the SVG:
 │   ├── mcp/
 │   │   └── index.js        # MCP stdio server — registers and handles optimize_diagram tool
 │   ├── mermaid_parser.js   # Mermaid C4 syntax → internal JSON model
-│   ├── render.html         # HTML shell loaded by Playwright — sources render_engine.js
-│   ├── render_engine.js    # ELKjs layout engine + SVG renderer (window.renderDiagram)
+│   ├── render.html         # HTML shell loaded by Playwright — sources render_engine.js and renderer/
+│   ├── render_engine.js    # Browser-side facade orchestration
+│   ├── renderer/           # Browser-side layout and rendering modules
+│   │   ├── container/      # Kahn layering and container placement
+│   │   ├── elk/            # ELKjs integration for flat diagrams
+│   │   ├── labels/         # Collision-aware label placement
+│   │   ├── routing/        # Default A* grid router & legacy candidate router
+│   │   └── svg/            # Shape rendering & SVG drawing
 │   └── utils.js            # fetchWithTimeout with cancellation signal support
 ├── test/                   # Fast unit tests, integration tests, visual tests, and fixtures
 │   ├── unit/               # Playwright-free unit tests (parser, geometry math)
