@@ -36,6 +36,33 @@ function checkBoundaryContainment(model, result) {
   return violations;
 }
 
+function checkConnectionLineOrthogonality(result) {
+  const violations = [];
+
+  for (const edge of result.edges || []) {
+    const section = edge.sections?.[0];
+    if (!section) continue;
+
+    const points = [
+      section.startPoint,
+      ...(section.bendPoints || []),
+      section.endPoint
+    ];
+
+    for (let i = 0; i < points.length - 1; i++) {
+      const a = points[i];
+      const b = points[i + 1];
+      const horizontal = Math.abs(a.y - b.y) < 0.5;
+      const vertical = Math.abs(a.x - b.x) < 0.5;
+      if (!horizontal && !vertical) {
+        violations.push(`${edge.id} segment ${i + 1}: (${Math.round(a.x)},${Math.round(a.y)}) -> (${Math.round(b.x)},${Math.round(b.y)})`);
+      }
+    }
+  }
+
+  return violations;
+}
+
 // Math-based grading fallback if LLM is offline
 function gradeMathematically(report) {
   let c4AlignmentScore = 10;
@@ -387,10 +414,19 @@ async function runTests() {
       for (const v of boundaryViolations) console.error(`    - ${v}`);
     }
 
+    const orthogonalViolations = checkConnectionLineOrthogonality(result);
+    if (orthogonalViolations.length > 0) {
+      console.error(`  [FAIL] Non-orthogonal Connection Line segments (${orthogonalViolations.length}):`);
+      for (const v of orthogonalViolations) console.error(`    - ${v}`);
+    }
+
     const gradeResult = useVisualLLM
       ? await gradeWithLLM(model, result, report)
       : gradeMathematically(report);
-    const isPass = totalCollisions === 0 && boundaryViolations.length === 0 && (gradeResult.finalGrade === 'A' || gradeResult.finalGrade === 'B');
+    const isPass = totalCollisions === 0 &&
+      boundaryViolations.length === 0 &&
+      orthogonalViolations.length === 0 &&
+      (gradeResult.finalGrade === 'A' || gradeResult.finalGrade === 'B');
 
     summary.push({
       file,
@@ -401,6 +437,7 @@ async function runTests() {
       explanation: gradeResult.gradeExplanation,
       collisions: totalCollisions,
       boundaryViolations: boundaryViolations.length,
+      orthogonalViolations: orthogonalViolations.length,
       edgeCrossings: report.edgeQuality.edgeCrossingCount,
       edgeOverlaps: report.edgeQuality.edgeOverlapCount,
       edgeOverlapPx: report.edgeQuality.edgeOverlapPx,
@@ -429,6 +466,7 @@ async function runTests() {
     Grade: s.grade,
     Collisions: s.collisions,
     'Bnd Viol': s.boundaryViolations,
+    'Ortho Viol': s.orthogonalViolations,
     'Edge X': s.edgeCrossings,
     'Edge OL': s.edgeOverlaps,
     'OL px': s.edgeOverlapPx,
@@ -441,10 +479,10 @@ async function runTests() {
   // Write markdown report
   let mdReport = `# Nudge Layout Test Run Results\n\n`;
   mdReport += `Generated on: ${new Date().toISOString()}\n\n`;
-  mdReport += `| File | C4 Align Score | Aspect Score | Clarity Score | Grade | Collisions | Bnd Viol | Edge X | Edge OL | OL px | Lbl/Edge | Bends | Route px | Status | Explanation |\n`;
-  mdReport += `| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |\n`;
+  mdReport += `| File | C4 Align Score | Aspect Score | Clarity Score | Grade | Collisions | Bnd Viol | Ortho Viol | Edge X | Edge OL | OL px | Lbl/Edge | Bends | Route px | Status | Explanation |\n`;
+  mdReport += `| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |\n`;
   for (const s of summary) {
-    mdReport += `| [${s.file}](file://${path.join(TEST_DIR, s.file)}) | ${s.c4Align} | ${s.aspect} | ${s.clarity} | **${s.grade}** | ${s.collisions} | ${s.boundaryViolations} | ${s.edgeCrossings} | ${s.edgeOverlaps} | ${s.edgeOverlapPx} | ${s.labelEdgeHits} | ${s.bends} | ${s.routeLength} | ${s.status === 'PASSED' ? '✅ PASSED' : '❌ FAILED'} | ${s.explanation} |\n`;
+    mdReport += `| [${s.file}](file://${path.join(TEST_DIR, s.file)}) | ${s.c4Align} | ${s.aspect} | ${s.clarity} | **${s.grade}** | ${s.collisions} | ${s.boundaryViolations} | ${s.orthogonalViolations} | ${s.edgeCrossings} | ${s.edgeOverlaps} | ${s.edgeOverlapPx} | ${s.labelEdgeHits} | ${s.bends} | ${s.routeLength} | ${s.status === 'PASSED' ? '✅ PASSED' : '❌ FAILED'} | ${s.explanation} |\n`;
   }
   mdReport += `\nEdge-quality diagnostics are observational only. They do not currently affect pass/fail status.\n`;
   mdReport += `\n*Visual snapshot assets saved in [test_outputs/](file://${OUTPUT_DIR}) directory.*\n`;

@@ -42,6 +42,7 @@
 | --- | --- | --- |
 | **Connection Line** | The visible line that represents a relationship between two architecture elements. | Edge, line, connector |
 | **Route** | The geometric path chosen for a connection line from source architecture element to target architecture element. | Line, edge path |
+| **Connection Point** | The point on an architecture element's face where a connection line begins or ends. | Port, anchor, endpoint |
 | **Route Candidate** | A possible route considered by the router before scoring chooses one. | Option, path option |
 | **Route Intent** | A high-level routing preference such as `LEFT_LANE`, `RIGHT_LANE`, or `ORTHOGONAL_NEAR_TARGET`. | Route style, path mode |
 | **Lane Reservation** | The local offsetting of interior route segments to reduce unavoidable shared corridors. | Lane routing, line spreading |
@@ -91,6 +92,8 @@
 - A **Relationship** has exactly one source **Architecture Element** and exactly one target **Architecture Element**.
 - A **Connection Line** renders exactly one **Relationship**.
 - A **Route** is the geometry of exactly one **Connection Line**.
+- A **Connection Line** has exactly two **Connection Points**: one on the source architecture element and one on the target architecture element.
+- A **Port Hint** requests the side of an architecture element on which a **Connection Point** is placed.
 - A **Connection Label** belongs to exactly one **Relationship**.
 - A **C4 Context Diagram** uses the **Critic Loop** and **ELK Layout**.
 - A **C4 Container Diagram** uses the **Container Layout Engine** and may use the **Visual-Hint Pipeline**.
@@ -111,6 +114,7 @@
 
 - "Node" is an implementation term and "entity" is too broad; use **Architecture Element** for the domain concept and reserve **Node** for ELKjs or renderer internals.
 - "Edge" is an implementation term from graph layout; use **Relationship** for source semantics and **Connection Line** for the rendered visual line.
+- "Port" is an ELKjs implementation term; use **Connection Point** for the domain concept and reserve **Port** for ELKjs port constraints and renderer internals (a **Port Hint** keeps its established name).
 - "Container" can mean a **Container** architecture element or a **C4 Container Diagram**; use **Container** for the element type and **C4 Container Diagram** for the diagram type.
 - "Connection line crossing" has been used for both **Connection-Line Element Crossing** and **Connection-Line Crossing**; use the precise term because only **Connection-Line Element Crossing** is a hard collision.
 - "Collision" has sometimes included warnings and observational metrics; reserve **Collision** for hard layout defects and call route metrics observational.

@@ -343,6 +343,7 @@ window.NudgeRenderer.connectionLabelPlacement = {
   adjustFinalLabelPlacement({
     midX,
     midY,
+    points,
     textWidth,
     textHeight,
     H_PAD,
@@ -351,6 +352,7 @@ window.NudgeRenderer.connectionLabelPlacement = {
     obstacleNodes,
     boxesOverlap,
     checkLabelCollision,
+    labelBoxAt,
     targetNode,
     targetId,
     labelEdgeHitCount
@@ -390,7 +392,87 @@ window.NudgeRenderer.connectionLabelPlacement = {
       midY = placement.y;
     }
 
+    {
+      const placement = window.NudgeRenderer.connectionLabelPlacement.rescueLabelFromConnectionLineHits({
+        midX,
+        midY,
+        points,
+        textWidth,
+        textHeight,
+        H_PAD,
+        V_PAD,
+        placedLabels,
+        obstacleNodes,
+        boxesOverlap,
+        checkLabelCollision,
+        labelBoxAt,
+        labelEdgeHitCount
+      });
+      midX = placement.x;
+      midY = placement.y;
+    }
+
     return { midX, midY };
+  },
+
+  // Last-resort relocation when the chosen position still sits on another
+  // connection line: walk the label's own route (with small perpendicular
+  // offsets) for the nearest spot clear of elements, labels, and lines.
+  rescueLabelFromConnectionLineHits({
+    midX,
+    midY,
+    points,
+    textWidth,
+    textHeight,
+    H_PAD,
+    V_PAD,
+    placedLabels,
+    obstacleNodes,
+    boxesOverlap,
+    checkLabelCollision,
+    labelBoxAt,
+    labelEdgeHitCount
+  }) {
+    if (!points || points.length < 2) return { x: midX, y: midY };
+    if (labelEdgeHitCount(labelBoxAt(midX, midY, textWidth, textHeight)) === 0) {
+      return { x: midX, y: midY };
+    }
+
+    const halfW = textWidth / 2 + H_PAD;
+    const halfH = textHeight / 2 + V_PAD;
+    const candidates = [];
+    for (let i = 0; i < points.length - 1; i++) {
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const len = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      if (len < 1) continue;
+      const isHorizontal = Math.abs(p1.y - p2.y) < 2;
+      const steps = Math.max(2, Math.min(24, Math.round(len / 30)));
+      for (let s = 1; s < steps; s++) {
+        const t = s / steps;
+        const x = p1.x + (p2.x - p1.x) * t;
+        const y = p1.y + (p2.y - p1.y) * t;
+        candidates.push({ x, y });
+        if (isHorizontal) {
+          candidates.push({ x, y: y - (halfH + 2) });
+          candidates.push({ x, y: y + (halfH + 2) });
+        } else {
+          candidates.push({ x: x - (halfW + 2), y });
+          candidates.push({ x: x + (halfW + 2), y });
+        }
+      }
+    }
+
+    let best = null;
+    for (const cand of candidates) {
+      const box = labelBoxAt(cand.x, cand.y, textWidth, textHeight);
+      if (labelEdgeHitCount(box) > 0) continue;
+      if (checkLabelCollision(cand.x, cand.y, textWidth, textHeight, obstacleNodes)) continue;
+      if (placedLabels.some(pl => boxesOverlap(box, pl))) continue;
+      const dist = Math.hypot(cand.x - midX, cand.y - midY);
+      if (!best || dist < best.dist) best = { x: cand.x, y: cand.y, dist };
+    }
+    return best ? { x: best.x, y: best.y } : { x: midX, y: midY };
   },
 
   boxesOverlap(boxA, boxB) {
