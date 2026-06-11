@@ -128,6 +128,7 @@ window.NudgeRenderer.connectionLabelRendering = {
     ({ midX, midY } = window.NudgeRenderer.connectionLabelPlacement.adjustFinalLabelPlacement({
       midX,
       midY,
+      points,
       textWidth,
       textHeight,
       H_PAD,
@@ -136,6 +137,7 @@ window.NudgeRenderer.connectionLabelRendering = {
       obstacleNodes,
       boxesOverlap,
       checkLabelCollision,
+      labelBoxAt,
       targetNode,
       targetId,
       labelEdgeHitCount
