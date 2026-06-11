@@ -399,8 +399,11 @@ async function runTests() {
     });
     await svgElement.screenshot({ path: screenshotPath });
 
-    const svgMarkup = await page.locator('#svg-root').innerHTML();
-    fs.writeFileSync(svgPath, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${result.width} ${result.height}">${svgMarkup}</svg>`);
+    const [svgMarkup, styles] = await Promise.all([
+      page.locator('#svg-root').innerHTML(),
+      page.evaluate(() => document.querySelector('head style')?.textContent ?? '')
+    ]);
+    fs.writeFileSync(svgPath, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${result.width} ${result.height}"><style>${styles}</style>${svgMarkup}</svg>`);
 
     // Geometric critique
     const report = analyzeLayout(result);

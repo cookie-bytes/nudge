@@ -178,6 +178,8 @@ window.NudgeRenderer.connectionLabelRendering = {
     bgRect.setAttribute("y", midY - textHeight / 2 - V_PAD);
     bgRect.setAttribute("width", textWidth + 2 * H_PAD);
     bgRect.setAttribute("height", textHeight + 2 * V_PAD);
+    bgRect.setAttribute("fill", "#0f172a");
+    bgRect.setAttribute("rx", "4");
     bgRect.setAttribute("class", "edge-label-bg");
     labelsLayer.appendChild(bgRect);
   },
@@ -203,6 +205,8 @@ window.NudgeRenderer.connectionLabelRendering = {
         const textEl = document.createElementNS("http://www.w3.org/2000/svg", "text");
         textEl.setAttribute("x", midX);
         textEl.setAttribute("y", lineY);
+        textEl.setAttribute("fill", "#cbd5e1");
+        textEl.setAttribute("text-anchor", "middle");
         textEl.setAttribute("class", "edge-label-text");
         textEl.textContent = line;
         labelsLayer.appendChild(textEl);
@@ -212,6 +216,8 @@ window.NudgeRenderer.connectionLabelRendering = {
       const techEl = document.createElementNS("http://www.w3.org/2000/svg", "text");
       techEl.setAttribute("x", midX);
       techEl.setAttribute("y", lineY);
+      techEl.setAttribute("fill", "#cbd5e1");
+      techEl.setAttribute("text-anchor", "middle");
       techEl.setAttribute("class", "edge-label-text");
       techEl.setAttribute("style", "opacity: 0.85; font-size: 10px;");
       techEl.textContent = techText;
@@ -225,6 +231,8 @@ window.NudgeRenderer.connectionLabelRendering = {
         const textEl = document.createElementNS("http://www.w3.org/2000/svg", "text");
         textEl.setAttribute("x", midX);
         textEl.setAttribute("y", lineY);
+        textEl.setAttribute("fill", "#cbd5e1");
+        textEl.setAttribute("text-anchor", "middle");
         textEl.setAttribute("class", "edge-label-text");
         textEl.textContent = line;
         labelsLayer.appendChild(textEl);
