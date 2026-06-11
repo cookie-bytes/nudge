@@ -73,11 +73,9 @@ Container diagrams containing boundary blocks bypass ELKjs entirely and use a cu
 Before final container export, the optimizer renders and scores a sequence of visual states:
 
 - `step_0_initial.png` — deterministic container layout.
-- `step_1_top_order.png` — optional top internal row order suggested by `getLLMTopOrder`.
-- `step_2_port_hints.png` — optional source/target side hints suggested by `getLLMPortHints`.
-- `step_3_diagonal_routes.png` — optional route-intent hints suggested by `getLLMDiagonalRouteHints`.
+- `step_1_label_hints.png` — connection label placement overrides (e.g. placing long connection labels at the source or target endpoints instead of the default middle) suggested by `getLLMLabelPlacementHints`.
 
-Each candidate is scored against Element Overlaps, Connection-Line Element Crossings, Connection-Line conflicts, Label-Line Intersections, bend count, and route length. A hint is accepted only when the candidate score is no worse than the current accepted state. Accepted hints are written to `diagramModel._layoutOverrides`, and raw LLM responses are saved to `visual_hints.json`.
+Each candidate is scored against Element Overlaps, Connection-Line Element Crossings, Connection-Line conflicts, Label-Line Intersections, bend count, and route length. A hint is accepted only when the candidate score is no worse than the current accepted state. Accepted hints are written to `diagramModel._layoutOverrides.labelHints`, and raw LLM responses are saved to `visual_hints.json`.
 
 ---
 
@@ -86,7 +84,7 @@ Each candidate is scored against Element Overlaps, Connection-Line Element Cross
 - 🎯 **Deterministic C4 Layout Engine**: Produces a complete layout from structured rules before any LLM enhancement is considered.
 - 📐 **Opinionated, Consistent C4 Geometry**: Standardized sizing, dedicated Utility Rows, External Zone sorting, and repeatable route scoring make diagrams feel consistent from run to run.
 - 🔍 **Automatic Defect Detection**: Finds Element Overlaps, Connection-Line Element Crossings, Connection-Label Element Crossings, and poor aspect ratios.
-- ✨ **Optional AI Polish**: Local LLM reviewers can suggest top-row ordering, port-side hints, diagonal route intent hints, or ELKjs patches. Suggestions are accepted only through score-gated checks.
+- ✨ **Optional AI Polish**: Local LLM reviewers can suggest connection label placements (source/target/middle) for container diagrams, or ELKjs patches for flat diagrams. Suggestions are accepted only through score-gated checks.
 - 🔌 **MCP Server**: Exposes an `optimize_diagram` tool over stdio so Claude Desktop and other MCP clients can generate and render diagrams conversationally.
 - 🎨 **Supports Mermaid & YAML**: Seamless support for C4 diagrams in `.mermaid`/`.mmd` syntax and structured `.yaml` specifications.
 - 📏 **Standardized Sizing & Grid**: All nodes are standardized to a width of `200px`. Heights: `200px` for Person, `140px` for Container/Database/External, `80px` for MessageBus — ensuring consistent alignment and a clean grid.
@@ -217,7 +215,7 @@ See [`examples/`](examples/) for full working examples including container diagr
 
 **Outputs** are written to `.nudge/`:
 - `iteration_N.png` — screenshot at each flat-diagram critic-loop pass
-- `step_0_initial.png`, `step_1_top_order.png`, `step_2_port_hints.png`, `step_3_diagonal_routes.png` — staged container visual-hint snapshots; in deterministic mode these are inspection snapshots without LLM calls
+- `step_0_initial.png`, `step_1_label_hints.png` — staged container visual-hint snapshots; in deterministic mode these are inspection snapshots without LLM calls
 - `optimized.png` — final layout as PNG
 - `optimized.svg` — final layout as a self-contained SVG with embedded styles
 - `layout.cache.json` — final ELKjs parameter patch (C4Context diagrams)

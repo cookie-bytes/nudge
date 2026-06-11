@@ -102,7 +102,7 @@ The renderer always produces a deterministic baseline. Container diagrams use th
 
 **Label placement**: Connection labels try midpoint, target-anchored, source-anchored, and segment-clearance positions. Fallback placement now checks all architecture elements, including source/target elements, plus previously placed labels so labels do not settle on top of endpoint boxes.
 
-**Container visual hints**: `optimizer.js` captures `step_0_initial.png`, `step_1_top_order.png`, `step_2_port_hints.png`, and `step_3_diagonal_routes.png` for container diagrams. LLM responses are saved to `visual_hints.json` when present. Set `NUDGE_NO_LLM=1` or leave `enhance: false` to keep the deterministic stages but skip network calls. Product framing should treat these hints as optional polish on top of the deterministic baseline.
+**Container visual hints**: `optimizer.js` runs a single label placement optimization step (`step_1_label_hints.png`) on top of the deterministic baseline (`step_0_initial.png`). It calls `getLLMLabelPlacementHints` to get connection label placement suggestions (`source`, `target`, or `middle`) and accepts them if the layout geometry score does not worsen. LLM responses are saved to `visual_hints.json` when present. Set `NUDGE_NO_LLM=1` or leave `enhance: false` to keep the deterministic baseline and skip network calls. Product framing should treat these hints as optional polish on top of the deterministic baseline.
 
 **Diagram model format**: Both YAML and Mermaid inputs are normalised to the same `diagramModel` JSON schema before rendering. YAML files are loaded directly; Mermaid files are transformed by `parseMermaidC4`. The YAML schema mirrors the internal model directly (see `examples/system_context.yaml`).
 

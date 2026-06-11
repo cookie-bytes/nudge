@@ -56,7 +56,7 @@ Label placement now records actual rendered label coordinates on returned edge l
 
 Status: implemented.
 
-Container optimization now renders staged snapshots for `step_0_initial`, `step_1_top_order`, `step_2_port_hints`, and `step_3_diagonal_routes`. The LLM reviewers can suggest a top-row internal order, targeted source/target port sides, and route intents for long diagonal paths. Each candidate is accepted only when the geometry score is no worse than the current accepted state, keeping the hint pipeline conservative.
+Container optimization now renders staged snapshots for `step_0_initial` and `step_1_label_hints`. The LLM reviewer calls `getLLMLabelPlacementHints` to suggest connection label placement overrides (`source` or `target`) for long or bent lines. Each candidate is accepted only when the geometry score is no worse than the current accepted state, keeping the hint pipeline conservative.
 
 ## Guardrails
 

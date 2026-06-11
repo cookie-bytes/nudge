@@ -15,10 +15,8 @@ Input model
 [core/optimizer.js] Visual-Hint Pipeline   ← runs ONCE for containers
     │  renderDiagram()
     │  → step_0_initial
-    │  → step_1_top_order
-    │  → step_2_port_hints
-    │  → step_3_diagonal_routes
-    │  → accepts only score-improving _layoutOverrides
+    │  → step_1_label_hints
+    │  → accepts only score-improving _layoutOverrides.labelHints
     │
     ▼
 [core/optimizer.js] Final critique + export
@@ -228,85 +226,31 @@ Container diagrams do not use the flat-diagram ELKjs parameter loop. Instead, th
 
 `renderContainerStep('step_0_initial')` calls `window.renderDiagram` with the current model and captures `step_0_initial.png`. This result becomes the baseline accepted state.
 
-### Stage 1 — Top internal row order
+### Stage 1 — Connection label placement hints
 
-`getLLMTopOrder` reviews the rendered top row of internal containers and may return a replacement order for that row:
-
-```json
-{
-  "layerIndex": 0,
-  "currentOrder": ["web", "mobile"],
-  "suggestedOrder": ["mobile", "web"],
-  "confidence": "medium",
-  "reason": "..."
-}
-```
-
-If the suggested order contains exactly the same IDs as the current row, the optimizer tries it as:
-
-```js
-diagramModel._layoutOverrides.internalOrder[0] = suggestedOrder;
-```
-
-The rendered candidate is saved as `step_1_top_order.png` and accepted only if its score is no worse than the previous accepted state.
-
-### Stage 2 — Port hints
-
-`getLLMPortHints` focuses on crossing edges and message-bus edges. It may request explicit source and target sides for a few edge IDs:
+`getLLMLabelPlacementHints` reviews all connection lines in the diagram and suggests optimal placement overrides for their labels (`source`, `target`, or `middle`):
 
 ```json
 {
   "suggestions": [
     {
-      "edgeId": "edge_7",
-      "sourceSide": "RIGHT",
-      "targetSide": "LEFT",
-      "confidence": "medium",
-      "reason": "..."
+      "edgeId": "edge_16",
+      "placement": "source",
+      "confidence": "high",
+      "reason": "Very long route (2131px). Source placement is necessary to keep the label near the DRM Adapter before it traverses a large gap."
     }
   ],
   "rationale": "..."
 }
 ```
 
-Accepted hints are stored as:
+Accepted overrides are written to:
 
 ```js
-diagramModel._layoutOverrides.portHints.edge_7 = {
-  sourceSide: "RIGHT",
-  targetSide: "LEFT"
-};
+diagramModel._layoutOverrides.labelHints.edge_16 = "source";
 ```
 
-The candidate is saved as `step_2_port_hints.png`.
-
-### Stage 3 — Diagonal route hints
-
-`getLLMDiagonalRouteHints` reviews long diagonal segments and may request a route intent:
-
-```json
-{
-  "suggestions": [
-    {
-      "edgeId": "edge_12",
-      "routeIntent": "LEFT_LANE",
-      "confidence": "medium",
-      "reason": "..."
-    }
-  ],
-  "rationale": "..."
-}
-```
-
-`KEEP_DIAGONAL` is ignored because it leaves the deterministic route untouched. Other accepted intents are stored as:
-
-```js
-diagramModel._layoutOverrides.routeHints.edge_12 = {
-  routeIntent: "LEFT_LANE"
-};
-```
-
-The candidate is saved as `step_3_diagonal_routes.png`.
+The rendered candidate is saved as `step_1_label_hints.png` and accepted only if its score is no worse than the previous deterministic baseline.
 
 ### Candidate scoring and outputs
 
