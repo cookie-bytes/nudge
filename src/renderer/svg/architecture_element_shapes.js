@@ -1,5 +1,5 @@
 window.NudgeRenderer.architectureElementShapes = {
-  // Helper to generate capitalized node type label, appending technology if present
+  // Helper to generate capitalized node type label
   getNodeTypeLabel(node) {
     let typeName = node.type;
     if (node.type === 'container') typeName = 'Container';
@@ -10,7 +10,7 @@ window.NudgeRenderer.architectureElementShapes = {
     else {
       typeName = node.type.charAt(0).toUpperCase() + node.type.slice(1);
     }
-    return node.tech ? `${typeName}: ${node.tech}` : typeName;
+    return typeName;
   },
 
   // Helper for rendering the foreignObject text container
@@ -33,6 +33,13 @@ window.NudgeRenderer.architectureElementShapes = {
     typeLabel.className = "node-type";
     typeLabel.textContent = typeLabelText;
     wrapper.appendChild(typeLabel);
+
+    if (node.tech) {
+      const techLabel = document.createElement("div");
+      techLabel.className = "node-tech";
+      techLabel.textContent = node.tech;
+      wrapper.appendChild(techLabel);
+    }
 
     if (node.description) {
       const desc = document.createElement("div");

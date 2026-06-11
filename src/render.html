@@ -26,9 +26,11 @@
     }
     /* SVG Styling */
     .boundary {
-      fill: #526174; /* Slightly brighter slate for clearer boundary contrast */
-      stroke: #94a3b8;
+      fill: transparent;
+      stroke: #cbd5e1; /* Light grey (Slate 300) */
+      stroke-opacity: 0.5;
       stroke-width: 3px;
+      stroke-dasharray: 8, 8; /* Dashed */
       rx: 8;
     }
     .boundary-label {
@@ -122,7 +124,7 @@
       text-align: center;
     }
     .node-title {
-      font-size: 14px;
+      font-size: 16px;
       font-weight: bold;
       margin-bottom: 2px;
       line-height: 1.2;
@@ -133,6 +135,13 @@
       opacity: 0.7;
       margin-bottom: 4px;
       letter-spacing: 0.05em;
+      line-height: 1.2;
+    }
+    .node-tech {
+      font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 9px;
+      opacity: 0.7;
+      margin-bottom: 4px;
       line-height: 1.2;
     }
     .node-desc {
