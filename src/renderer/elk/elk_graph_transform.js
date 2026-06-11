@@ -11,6 +11,8 @@ window.NudgeRenderer.elkGraphTransform = {
         "elk.spacing.edgeNode": String(options["elk.spacing.edgeNode"] || 40),
         "elk.spacing.edgeEdge": String(options["elk.spacing.edgeEdge"] || 30),
         "elk.padding": options["elk.padding"] || "[top=30,left=30,bottom=30,right=30]",
+        "elk.edgeRouting": "ORTHOGONAL",
+        "org.eclipse.elk.edgeRouting": "ORTHOGONAL",
         // Enforce model order constraints on the layout engine
         "elk.layered.crossingMinimization.semiInteractive": "true",
         "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
@@ -164,7 +166,10 @@ window.NudgeRenderer.elkGraphTransform = {
       sources: [e.from],
       targets: [e.to],
       labels: e.label ? [createConnectionLabel(e.label)] : [],
-      layoutOptions: {}
+      layoutOptions: {
+        "elk.edgeRouting": "ORTHOGONAL",
+        "org.eclipse.elk.edgeRouting": "ORTHOGONAL"
+      }
     };
   },
 

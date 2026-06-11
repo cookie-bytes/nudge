@@ -48,30 +48,15 @@ window.NudgeRenderer.connectionLineRendering = {
 
     let pathD = '';
     if (hasBendPoints) {
-      // Honour the chosen route while rounding turns generously so
-      // obstacle-avoiding paths read as soft routes rather than boxy
-      // right-angle wiring.
-      const CORNER_RADIUS = 32;
       const allPts = [
         pStart,
         ...section.bendPoints.map(b => ({ x: b.x + absX, y: b.y + absY })),
         pEnd
       ];
       pathD = `M ${allPts[0].x} ${allPts[0].y}`;
-      for (let i = 1; i < allPts.length - 1; i++) {
-        const prev = allPts[i - 1], cur = allPts[i], next = allPts[i + 1];
-        const dxIn = cur.x - prev.x, dyIn = cur.y - prev.y;
-        const lenIn = Math.sqrt(dxIn * dxIn + dyIn * dyIn);
-        const dxOut = next.x - cur.x, dyOut = next.y - cur.y;
-        const lenOut = Math.sqrt(dxOut * dxOut + dyOut * dyOut);
-        const r = Math.min(CORNER_RADIUS, lenIn / 2, lenOut / 2);
-        const ax = lenIn > 0 ? cur.x - (dxIn / lenIn) * r : cur.x;
-        const ay = lenIn > 0 ? cur.y - (dyIn / lenIn) * r : cur.y;
-        const bx = lenOut > 0 ? cur.x + (dxOut / lenOut) * r : cur.x;
-        const by = lenOut > 0 ? cur.y + (dyOut / lenOut) * r : cur.y;
-        pathD += ` L ${ax} ${ay} Q ${cur.x} ${cur.y} ${bx} ${by}`;
+      for (let i = 1; i < allPts.length; i++) {
+        pathD += ` L ${allPts[i].x} ${allPts[i].y}`;
       }
-      pathD += ` L ${allPts[allPts.length - 1].x} ${allPts[allPts.length - 1].y}`;
     } else {
       pathD = `M ${pStart.x} ${pStart.y} L ${pEnd.x} ${pEnd.y}`;
     }
@@ -98,4 +83,3 @@ window.NudgeRenderer.connectionLineRendering = {
     return prepared;
   }
 };
-

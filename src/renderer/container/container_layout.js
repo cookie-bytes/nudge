@@ -84,7 +84,10 @@ window.NudgeRenderer.containerLayout = {
     leftCorrGap,
     rightCorrGap,
     H_GAP,
-    V_GAP
+    V_GAP,
+    allEdges,
+    children,
+    childPos
   }) {
     const absPos = {};
 
@@ -106,9 +109,72 @@ window.NudgeRenderer.containerLayout = {
       for (const n of belowNodes) { absPos[n.id] = { x, y }; x += (n.width || 200) + H_GAP; }
     }
 
-    // Left/right overflow nodes: stacked beside boundary
-    { let y = bndY; for (const n of leftNodes)  { absPos[n.id] = { x: bndX - (n.width || 200) - leftCorrGap,  y }; y += (n.height || 80) + V_GAP; } }
-    { let y = bndY; for (const n of rightNodes) { absPos[n.id] = { x: bndX + bndW + rightCorrGap, y }; y += (n.height || 80) + V_GAP; } }
+    // Helper to align left/right nodes to their connected internal nodes
+    const alignSideNodes = (nodes, isLeft) => {
+      const nodeItems = nodes.map((n, idx) => {
+        const connectedChildIds = new Set();
+        if (allEdges) {
+          for (const edge of allEdges) {
+            if (edge.from === n.id && children.some(c => c.id === edge.to)) {
+              connectedChildIds.add(edge.to);
+            }
+            if (edge.to === n.id && children.some(c => c.id === edge.from)) {
+              connectedChildIds.add(edge.from);
+            }
+          }
+        }
+
+        let idealY = bndY + idx * ((n.height || 80) + V_GAP);
+        if (connectedChildIds.size > 0 && childPos) {
+          let sumY = 0;
+          let count = 0;
+          for (const cid of connectedChildIds) {
+            const pos = childPos[cid];
+            const childNode = children.find(c => c.id === cid);
+            if (pos && childNode) {
+              const absChildY = bndY + pos.y;
+              sumY += absChildY + (childNode.height || 80) / 2;
+              count++;
+            }
+          }
+          if (count > 0) {
+            idealY = (sumY / count) - (n.height || 80) / 2;
+          }
+        }
+
+        return {
+          node: n,
+          idealY,
+          height: n.height || 80
+        };
+      });
+
+      nodeItems.sort((a, b) => a.idealY - b.idealY);
+
+      const iterations = 50;
+      for (let iter = 0; iter < iterations; iter++) {
+        for (let i = 0; i < nodeItems.length - 1; i++) {
+          const a = nodeItems[i];
+          const b = nodeItems[i + 1];
+          const minSpacing = a.height + V_GAP;
+          if (b.idealY < a.idealY + minSpacing) {
+            const overlap = (a.idealY + minSpacing) - b.idealY;
+            a.idealY -= overlap / 2;
+            b.idealY += overlap / 2;
+          }
+        }
+      }
+
+      for (const item of nodeItems) {
+        const x = isLeft
+          ? bndX - (item.node.width || 200) - leftCorrGap
+          : bndX + bndW + rightCorrGap;
+        absPos[item.node.id] = { x, y: Math.max(0, item.idealY) };
+      }
+    };
+
+    alignSideNodes(leftNodes, true);
+    alignSideNodes(rightNodes, false);
 
     return { absPos, bndX, bndY };
   },
@@ -161,43 +227,49 @@ window.NudgeRenderer.containerLayout = {
       const layer = layers[i];
       const isPairedRow = layer.length > 0 && layer.every(n => n.type === 'database' || (n.type === 'message_bus' && n.local));
       if (isPairedRow) {
-        const placements = layer.map(node => {
-          let deepest = null, deepestRow = -1;
+        // Anchor each paired node at the barycenter of ALL its consumers
+        // (weighted by connection-line count), so a shared database drifts
+        // between its consumers while a single-owner database stays
+        // column-aligned beneath its owner for the Direct Database Drop.
+        const placements = layer.map((node, origIdx) => {
+          const consumerCenters = [];
           for (const e of intEdges) {
             const otherId = e.from === node.id ? e.to : (e.to === node.id ? e.from : null);
-            if (!otherId) continue;
+            if (!otherId || !childPos[otherId]) continue;
             const otherNode = children.find(c => c.id === otherId);
-            if (!otherNode || !childPos[otherNode.id]) continue;
-            const rowIdx = layers.findIndex(l => l.includes(otherNode));
-            if (rowIdx > deepestRow) { deepestRow = rowIdx; deepest = otherNode; }
+            if (!otherNode) continue;
+            consumerCenters.push(childPos[otherId].x + (otherNode.width || 200) / 2);
           }
-          const parentX = deepest && childPos[deepest.id] ? childPos[deepest.id].x : contentLeft + (contentW - (node.width || 200)) / 2;
-          const parentCenter = parentX + (deepest ? (deepest.width || 200) : 200) / 2;
-          return { node, parentX, parentCenter };
+          const idealCenter = consumerCenters.length > 0
+            ? consumerCenters.reduce((s, v) => s + v, 0) / consumerCenters.length
+            : contentLeft + contentW / 2;
+          return { node, origIdx, idealX: idealCenter - (node.width || 200) / 2 };
         });
-        placements.sort((a, b) => a.parentX - b.parentX);
+        placements.sort((a, b) => a.idealX - b.idealX || a.origIdx - b.origIdx);
 
-        // Pack nodes left-to-right from each parent's x (preserves relative order)
-        const rawPositions = [];
-        let nextX = -Infinity;
-        for (const p of placements) {
-          const x = Math.max(p.parentX, nextX);
-          rawPositions.push({ node: p.node, x });
-          nextX = x + (p.node.width || 200) + H_GAP;
+        // Iteratively push overlapping neighbours apart so each node stays
+        // as close to its own barycenter as spacing allows.
+        for (let iter = 0; iter < 50; iter++) {
+          for (let p = 0; p < placements.length - 1; p++) {
+            const a = placements[p], b = placements[p + 1];
+            const minSpacing = (a.node.width || 200) + H_GAP;
+            if (b.idealX < a.idealX + minSpacing) {
+              const overlap = (a.idealX + minSpacing) - b.idealX;
+              a.idealX -= overlap / 2;
+              b.idealX += overlap / 2;
+            }
+          }
         }
 
-        // Shift the packed cluster so it is centred on the parent centroid,
-        // then clamp so no node can escape the boundary.
-        const clusterLeft  = rawPositions[0].x;
-        const clusterRight = rawPositions[rawPositions.length - 1].x + (rawPositions[rawPositions.length - 1].node.width || 200);
-        const clusterWidth = clusterRight - clusterLeft;
-        const parentCentroid = placements.reduce((s, p) => s + p.parentCenter, 0) / placements.length;
-        const desiredStart  = parentCentroid - clusterWidth / 2;
-        const clampedStart  = Math.max(contentLeft, Math.min(contentRight - clusterWidth, desiredStart));
-        const shift = clampedStart - clusterLeft;
+        // Clamp the whole cluster inside the boundary.
+        const clusterLeft  = placements[0].idealX;
+        const clusterRight = placements[placements.length - 1].idealX + (placements[placements.length - 1].node.width || 200);
+        let shift = 0;
+        if (clusterLeft < contentLeft) shift = contentLeft - clusterLeft;
+        else if (clusterRight > contentRight) shift = Math.max(contentLeft - clusterLeft, contentRight - clusterRight);
 
-        for (const p of rawPositions) {
-          childPos[p.node.id] = { x: p.x + shift, y: ry };
+        for (const p of placements) {
+          childPos[p.node.id] = { x: p.idealX + shift, y: ry };
         }
       } else if (layer.some(n => n._cornerAnchor)) {
         // Corner-anchor row (e.g. message bus): right-align
@@ -233,7 +305,14 @@ window.NudgeRenderer.containerLayout = {
     children,
     childPos
   }) {
-    const out = { id: 'root', x: 0, y: 0, width: totalW, height: totalH, children: [], edges: [] };
+    let maxX = totalW;
+    let maxY = totalH;
+    for (const n of extNodes) {
+      const p = absPos[n.id]; if (!p) continue;
+      maxX = Math.max(maxX, p.x + (n.width || 200));
+      maxY = Math.max(maxY, p.y + (n.height || 80));
+    }
+    const out = { id: 'root', x: 0, y: 0, width: maxX, height: maxY, children: [], edges: [] };
 
     for (const n of extNodes) {
       const p = absPos[n.id]; if (!p) continue;

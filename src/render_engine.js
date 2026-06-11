@@ -12,6 +12,178 @@ const elk = new ELK();
           // Two-phase layout: size/centre boundary contents first, then place
           // external nodes above/below and route all edges manually.
           laidOutGraph = await layoutContainerDiagram(diagramData);
+
+          // --- Algorithmic Layout Optimization Rule ---
+          const plan = diagramData._skipFaceRule
+            ? null
+            : window.NudgeRenderer.containerPlan.buildContainerZonePlan(diagramData);
+          if (plan) {
+            const { extNodes } = plan;
+            
+            const getLaidOutNodes = (graph) => {
+              const res = [];
+              for (const item of graph.children || []) {
+                if (item.type === 'boundary') {
+                  res.push({ id: item.id, x: item.x, y: item.y, width: item.width, height: item.height, type: 'boundary' });
+                  for (const child of item.children || []) {
+                    res.push({ id: child.id, x: item.x + child.x, y: item.y + child.y, width: child.width, height: child.height });
+                  }
+                } else {
+                  res.push({ id: item.id, x: item.x, y: item.y, width: item.width, height: item.height });
+                }
+              }
+              return res;
+            };
+
+            const edgeHasCollision = (edge, nodes) => {
+              const section = edge.sections?.[0];
+              if (!section) return false;
+              const pts = [section.startPoint, ...(section.bendPoints || []), section.endPoint];
+              for (let i = 0; i < pts.length - 1; i++) {
+                const p1 = pts[i], p2 = pts[i + 1];
+                for (const node of nodes) {
+                  if (node.type === 'boundary' || node.id === 'boundary') continue;
+                  if (edge.sources?.includes(node.id) || edge.targets?.includes(node.id)) continue;
+                  
+                  // Add a safety margin to check for tight clearance/proximity collisions (e.g. 45px)
+                  const marginX = 45;
+                  const marginY = 10;
+                  const rect = { 
+                    x: node.x - marginX, 
+                    y: node.y - marginY, 
+                    width: node.width + marginX * 2, 
+                    height: node.height + marginY * 2 
+                  };
+                  if (lineSegmentIntersectsRect(p1, p2, rect)) {
+                    return true;
+                  }
+                }
+              }
+              return false;
+            };
+
+            // Detect connection-line crossings: a proper interior intersection
+            // between this connection line and any other routed line. Touches
+            // at shared connection points do not count.
+            const sectionPts = (edge) => {
+              const s = edge.sections?.[0];
+              if (!s) return [];
+              return [s.startPoint, ...(s.bendPoints || []), s.endPoint];
+            };
+            const properIntersect = (a, b, c, d) => {
+              const orient = (p, q, r) => {
+                const v = (q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x);
+                if (Math.abs(v) < 1e-9) return 0;
+                return v > 0 ? 1 : -1;
+              };
+              const o1 = orient(a, b, c), o2 = orient(a, b, d);
+              const o3 = orient(c, d, a), o4 = orient(c, d, b);
+              return o1 !== 0 && o2 !== 0 && o3 !== 0 && o4 !== 0 && o1 !== o2 && o3 !== o4;
+            };
+            const edgeCrossesOtherLines = (edge, graph) => {
+              const ptsA = sectionPts(edge);
+              for (const other of graph.edges || []) {
+                if (other === edge || other.id === edge.id) continue;
+                const ptsB = sectionPts(other);
+                for (let i = 0; i < ptsA.length - 1; i++) {
+                  for (let j = 0; j < ptsB.length - 1; j++) {
+                    if (properIntersect(ptsA[i], ptsA[i + 1], ptsB[j], ptsB[j + 1])) return true;
+                  }
+                }
+              }
+              return false;
+            };
+
+            // Count the connection points actually present on each face of the
+            // destination element, classified from the routed sections rather
+            // than inferred from plan layers/zones. Skips the connection line
+            // being rerouted (excludeExtId) and lines from external entities
+            // this pass already relocated (skipExtIds): a face stays eligible
+            // when its only connection points came from earlier moves.
+            const getFaceCounts = (destNodeId, graph, nodes, excludeExtId, skipExtIds) => {
+              const counts = { top: 0, bottom: 0, left: 0, right: 0 };
+              const dest = nodes.find(n => n.id === destNodeId);
+              if (!dest) return counts;
+              for (const ge of graph.edges || []) {
+                const src = ge.sources?.[0], tgt = ge.targets?.[0];
+                if (src !== destNodeId && tgt !== destNodeId) continue;
+                const otherId = src === destNodeId ? tgt : src;
+                if (otherId === excludeExtId) continue;
+                if (skipExtIds && skipExtIds.has(otherId)) continue;
+                const section = ge.sections?.[0];
+                if (!section) continue;
+                const pt = src === destNodeId ? section.startPoint : section.endPoint;
+                const dTop = Math.abs(pt.y - dest.y);
+                const dBottom = Math.abs(pt.y - (dest.y + dest.height));
+                const dLeft = Math.abs(pt.x - dest.x);
+                const dRight = Math.abs(pt.x - (dest.x + dest.width));
+                const min = Math.min(dTop, dBottom, dLeft, dRight);
+                if (min === dTop) counts.top++;
+                else if (min === dBottom) counts.bottom++;
+                else if (min === dLeft) counts.left++;
+                else counts.right++;
+              }
+              return counts;
+            };
+
+            let currentNodes = getLaidOutNodes(laidOutGraph);
+            diagramData._layoutOverrides = diagramData._layoutOverrides || {};
+            diagramData._layoutOverrides.zoneOverrides = diagramData._layoutOverrides.zoneOverrides || {};
+
+            const movedByLoop = new Set();
+            console.log("[Optimizer] Loop started. extNodes count:", extNodes.length);
+            for (const extNode of extNodes) {
+              const connectedEdges = (laidOutGraph.edges || []).filter(e =>
+                e.sources?.includes(extNode.id) || e.targets?.includes(extNode.id)
+              );
+              console.log(`[Optimizer] Ext node '${extNode.id}': edges count = ${connectedEdges.length}`);
+              if (connectedEdges.length !== 1) continue;
+
+              const edge = connectedEdges[0];
+
+              const hasCol = edgeHasCollision(edge, currentNodes);
+              const hasCross = !hasCol && edgeCrossesOtherLines(edge, laidOutGraph);
+              console.log(`[Optimizer] Ext node '${extNode.id}' edge collision check: ${hasCol}, line crossing check: ${hasCross}`);
+              if (hasCol || hasCross) {
+                const destId = edge.sources[0] === extNode.id ? edge.targets[0] : edge.sources[0];
+                const faceCounts = getFaceCounts(destId, laidOutGraph, currentNodes, extNode.id, movedByLoop);
+                console.log(`[Optimizer] Face counts for '${destId}': ${JSON.stringify(faceCounts)}`);
+                // Free faces first, then least-occupied; the collision
+                // re-check below still gates every candidate move.
+                const orderedFaces = ['bottom', 'left', 'right', 'top']
+                  .sort((a, b) => faceCounts[a] - faceCounts[b]);
+
+                for (const face of orderedFaces) {
+                  const newZone = face === 'top' ? 'above' : (face === 'bottom' ? 'below' : face);
+                  const oldZone = diagramData._layoutOverrides.zoneOverrides[extNode.id];
+                  
+                  diagramData._layoutOverrides.zoneOverrides[extNode.id] = newZone;
+                  
+                  const testGraph = await layoutContainerDiagram(diagramData);
+                  if (testGraph) {
+                    const testNodes = getLaidOutNodes(testGraph);
+                    const testEdges = (testGraph.edges || []).filter(e =>
+                      e.sources?.includes(extNode.id) || e.targets?.includes(extNode.id)
+                    );
+                    if (testEdges.length === 1 &&
+                        !edgeHasCollision(testEdges[0], testNodes) &&
+                        !edgeCrossesOtherLines(testEdges[0], testGraph)) {
+                      laidOutGraph = testGraph;
+                      currentNodes = testNodes;
+                      movedByLoop.add(extNode.id);
+                      console.log(`[Optimizer] Shifted external node '${extNode.id}' to face '${face}' (${newZone}) to resolve collision.`);
+                      break;
+                    }
+                  }
+                  if (oldZone !== undefined) {
+                    diagramData._layoutOverrides.zoneOverrides[extNode.id] = oldZone;
+                  } else {
+                    delete diagramData._layoutOverrides.zoneOverrides[extNode.id];
+                  }
+                }
+              }
+            }
+          }
         } else {
           // Standard ELK layered layout for flat diagrams (C4Context etc.)
           const { graph: elkGraph, ranks: newRanks } = window.NudgeRenderer.elkGraphTransform.transformToElkGraph({
@@ -99,6 +271,8 @@ const elk = new ELK();
             laidOutGraph = await elk.layout(elkGraph);
           }
         }
+
+        window.NudgeRenderer.routeGeometry.orthogonalizeGraphConnectionLines(laidOutGraph);
 
         // Render the graph using SVG (with 50px vertical offset for title)
         window.NudgeRenderer.svgRenderer.drawGraph({
@@ -340,7 +514,10 @@ const elk = new ELK();
         leftCorrGap,
         rightCorrGap,
         H_GAP,
-        V_GAP
+        V_GAP,
+        allEdges,
+        children,
+        childPos
       });
 
       // ── Phase 2d: Edge routing ─────────────────────────────────────────────
@@ -481,11 +658,12 @@ const elk = new ELK();
             }
           }
 
-          for (const child of children) {
-            if (child.id === edge.from || child.id === edge.to) continue;
-            const childAbsX = bndX + childPos[child.id].x;
-            const childAbsY = bndY + childPos[child.id].y;
-            const rect = { x: childAbsX, y: childAbsY, width: child.width || 200, height: child.height || 80 };
+          const allNodes = [...children, ...extNodes];
+          for (const node of allNodes) {
+            if (node.id === edge.from || node.id === edge.to) continue;
+            const pos = getAbs(node.id);
+            const sz = getSz(node.id);
+            const rect = { x: pos.x, y: pos.y, width: sz.w, height: sz.h };
             if (lineSegmentIntersectsRect(segment.a, segment.b, rect)) {
               nodeCrossings++;
               break;
@@ -523,7 +701,10 @@ const elk = new ELK();
         routedEdgeSegments,
         edgeConflictScore,
         LANE_OFFSETS,
-        LANE_OVERLAP_THRESHOLD
+        LANE_OVERLAP_THRESHOLD,
+        getAbs,
+        getSz,
+        getNode
       });
 
       const {
@@ -532,6 +713,9 @@ const elk = new ELK();
       } = window.NudgeRenderer.routeSetAnalysis.createEvaluator({
         allEdges,
         children,
+        extNodes,
+        getAbs,
+        getSz,
         bndX,
         bndY,
         childPos,
@@ -612,7 +796,8 @@ const elk = new ELK();
         sourceReservedDropCrossings,
         routedEdgeSegments,
         canBundleEdges,
-        candidateRules
+        candidateRules,
+        extNodes
       });
       const routedSections = [];
       for (let idx = 0; idx < allEdges.length; idx++) {

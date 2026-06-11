@@ -49,6 +49,41 @@ window.NudgeRenderer.containerPlan = {
       }
     }
 
+    // Sink satellites: a service with no internal service relationships
+    // (zero in-degree and zero out-degree after the database/bus exclusions)
+    // carries no layering information and defaults to layer 0. When it shares
+    // a database with a service that does have a place in the flow, seat it
+    // in the deepest co-consumer's layer instead, so it sits adjacent to the
+    // database row that will be inserted beneath that consumer.
+    if (layers.length > 1 && excludeIds.size > 0) {
+      const touchedBySortEdges = new Set();
+      for (const e of sortEdges) { touchedBySortEdges.add(e.from); touchedBySortEdges.add(e.to); }
+      const layerOf = new Map();
+      layers.forEach((l, idx) => l.forEach(n => layerOf.set(n.id, idx)));
+
+      const satellites = layers[0].filter(n => !touchedBySortEdges.has(n.id));
+      for (const sat of satellites) {
+        const sharedDbs = [...dbIds].filter(dbId =>
+          intEdges.some(e => (e.from === sat.id && e.to === dbId) || (e.to === sat.id && e.from === dbId))
+        );
+        let targetLayer = -1;
+        for (const dbId of sharedDbs) {
+          for (const e of intEdges) {
+            const consumer = e.from === dbId ? e.to : (e.to === dbId ? e.from : null);
+            if (!consumer || consumer === sat.id) continue;
+            const l = layerOf.get(consumer);
+            if (l !== undefined && l > targetLayer) targetLayer = l;
+          }
+        }
+        if (targetLayer > 0) {
+          layers[0] = layers[0].filter(n => n.id !== sat.id);
+          layers[targetLayer].push(sat);
+          layerOf.set(sat.id, targetLayer);
+        }
+      }
+      if (layers[0].length === 0) layers.shift();
+    }
+
     // Barycenter sort within each layer to reduce edge crossings.
     // Two-pass sweep:
     // 1. Downward (1 to N): pull each layer toward its parents above.

@@ -2,6 +2,9 @@ window.NudgeRenderer.routeSetAnalysis = {
   createEvaluator({
     allEdges,
     children,
+    extNodes = [],
+    getAbs,
+    getSz,
     bndX,
     bndY,
     childPos,
@@ -27,12 +30,13 @@ window.NudgeRenderer.routeSetAnalysis = {
 
     function sectionNodeCrossings(section, edge) {
       let crossings = 0;
+      const allNodes = [...children, ...extNodes];
       for (const segment of pointsToSegments(sectionToPoints(section))) {
-        for (const child of children) {
-          if (child.id === edge.from || child.id === edge.to) continue;
-          const childAbsX = bndX + childPos[child.id].x;
-          const childAbsY = bndY + childPos[child.id].y;
-          const rect = { x: childAbsX, y: childAbsY, width: child.width || 200, height: child.height || 80 };
+        for (const node of allNodes) {
+          if (node.id === edge.from || node.id === edge.to) continue;
+          const pos = getAbs(node.id);
+          const sz = getSz(node.id);
+          const rect = { x: pos.x, y: pos.y, width: sz.w, height: sz.h };
           if (lineSegmentIntersectsRect(segment.a, segment.b, rect)) {
             crossings++;
             break;
@@ -335,8 +339,11 @@ window.NudgeRenderer.connectionLineRouter = {
     routeCrossingCount,
     routeEdgeConflictStats,
     routeLength,
-    routeDiagonalLength
+    routeDiagonalLength,
+    preferVerticalEntry = false,
+    debugTag = null
   }) {
+    const debugActive = () => debugTag && window.__nudgeDebugRoute === debugTag;
     function chooseBestRoute(candidates) {
       const orthogonalHintActive = !(targetNode && targetNode.type === 'database') && (
         routeIntent === 'LEFT_LANE' ||
@@ -345,6 +352,7 @@ window.NudgeRenderer.connectionLineRouter = {
       );
       return candidates
         .filter(Boolean)
+        .map(route => window.NudgeRenderer.routeGeometry.orthogonalizeSection(route, preferVerticalEntry))
         .map((route, order) => ({
           route,
           order,
@@ -374,6 +382,15 @@ window.NudgeRenderer.connectionLineRouter = {
           a.score - b.score ||
           a.order - b.order
         )
+        .map((candidate, rank) => {
+          if (debugActive()) {
+            const { route, ...stats } = candidate;
+            const pts = [route.startPoint, ...(route.bendPoints || []), route.endPoint]
+              .map(p => `(${Math.round(p.x)},${Math.round(p.y)})`).join(' ');
+            console.log(`[RouteDebug ${debugTag}] #${rank} ${JSON.stringify(stats)} pts: ${pts}`);
+          }
+          return candidate;
+        })
         .map(({ route }) => {
           const { _scoreBias, ...cleanRoute } = route;
           return cleanRoute;
@@ -381,6 +398,7 @@ window.NudgeRenderer.connectionLineRouter = {
     }
 
     function chooseBestRouteWithStandardGuard(candidates, standard) {
+      standard = window.NudgeRenderer.routeGeometry.orthogonalizeSection(standard, preferVerticalEntry);
       const chosen = chooseBestRoute(candidates);
       if (!routeIntent || !chosen || chosen === standard) return chosen;
 
@@ -411,7 +429,10 @@ window.NudgeRenderer.connectionLineRouter = {
     routedEdgeSegments,
     edgeConflictScore,
     LANE_OFFSETS,
-    LANE_OVERLAP_THRESHOLD
+    LANE_OVERLAP_THRESHOLD,
+    getAbs,
+    getSz,
+    getNode
   }) {
     function shiftSegment(points, segmentIndex, offset) {
       const shifted = clonePoints(points);
@@ -428,6 +449,20 @@ window.NudgeRenderer.connectionLineRouter = {
     }
 
     function reserveRouteLanes(section, edge) {
+      let preferVerticalEntry = false;
+      if (edge && getNode && getAbs && getSz) {
+        const targetNode = getNode(edge.to);
+        if (targetNode && targetNode.type === 'database') {
+          const sp = getAbs(edge.from);
+          const tp = getAbs(edge.to);
+          const ss = getSz(edge.from);
+          const ts = getSz(edge.to);
+          if (sp && tp && ss && ts) {
+            preferVerticalEntry = (tp.y >= sp.y + ss.h - 2 || sp.y >= tp.y + ts.h - 2);
+          }
+        }
+      }
+      section = window.NudgeRenderer.routeGeometry.orthogonalizeSection(section, preferVerticalEntry);
       let points = sectionToPoints(section);
       if (points.length < 4 || routedEdgeSegments.length === 0) return section;
 
@@ -498,7 +533,8 @@ window.NudgeRenderer.connectionLineRouter = {
     sourceReservedDropCrossings,
     routedEdgeSegments,
     canBundleEdges,
-    candidateRules
+    candidateRules,
+    extNodes = []
   }) {
   function routeEdge(e, idx) {
     const sp = getAbs(e.from), tp = getAbs(e.to);
@@ -605,13 +641,14 @@ window.NudgeRenderer.connectionLineRouter = {
     function routeCrossingCount(route) {
       let crossings = 0;
       const pts = [route.startPoint, ...(route.bendPoints || []), route.endPoint];
+      const allNodes = [...children, ...extNodes];
       for (let i = 0; i < pts.length - 1; i++) {
         const p1 = pts[i], p2 = pts[i+1];
-        for (const child of children) {
-          if (child.id === e.from || child.id === e.to) continue;
-          const childAbsX = bndX + childPos[child.id].x;
-          const childAbsY = bndY + childPos[child.id].y;
-          const rect = { x: childAbsX, y: childAbsY, width: child.width || 200, height: child.height || 80 };
+        for (const node of allNodes) {
+          if (node.id === e.from || node.id === e.to) continue;
+          const pos = getAbs(node.id);
+          const sz = getSz(node.id);
+          const rect = { x: pos.x, y: pos.y, width: sz.w, height: sz.h };
           if (lineSegmentIntersectsRect(p1, p2, rect)) {
             crossings++;
             break;
@@ -859,6 +896,9 @@ window.NudgeRenderer.connectionLineRouter = {
         sourcePortXs
       );
     }
+    const preferVerticalEntry = targetNode && targetNode.type === 'database' &&
+      (tp.y >= sp.y + ss.h - 2 || sp.y >= tp.y + ts.h - 2);
+
     const {
       chooseBestRoute,
       chooseBestRouteWithStandardGuard
@@ -868,7 +908,9 @@ window.NudgeRenderer.connectionLineRouter = {
       routeCrossingCount,
       routeEdgeConflictStats,
       routeLength,
-      routeDiagonalLength
+      routeDiagonalLength,
+      preferVerticalEntry,
+      debugTag: `${e.from}->${e.to}`
     });
 
     // Horizontal Z/S-curve routing for left/right column nodes
@@ -930,7 +972,12 @@ window.NudgeRenderer.connectionLineRouter = {
           horizontalLaneAboveTarget,
           orderedMessageBusGutterX,
           sourceSafeBottomExitXs,
-          hintedOrthogonalRouteCandidates
+          hintedOrthogonalRouteCandidates,
+          sp,
+          tp,
+          ss,
+          ts,
+          sCy
         }));
       } else if (sp.y >= tp.y + ts.h - 2) {
         candidates.push(...candidateRules.internalAboveTargetRouteCandidates({
@@ -943,7 +990,12 @@ window.NudgeRenderer.connectionLineRouter = {
           horizontalLaneAboveSource,
           horizontalLaneBelowTarget,
           orderedMessageBusGutterX,
-          hintedOrthogonalRouteCandidates
+          hintedOrthogonalRouteCandidates,
+          sp,
+          tp,
+          ss,
+          ts,
+          sCy
         }));
       }
       return chooseBestRouteWithStandardGuard(candidates, standardRoute);
@@ -1006,4 +1058,3 @@ window.NudgeRenderer.connectionLineRouter = {
     };
   }
 };
-

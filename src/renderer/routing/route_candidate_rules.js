@@ -352,7 +352,12 @@ window.NudgeRenderer.routeCandidateRules = {
       horizontalLaneAboveTarget,
       orderedMessageBusGutterX,
       sourceSafeBottomExitXs,
-      hintedOrthogonalRouteCandidates
+      hintedOrthogonalRouteCandidates,
+      sp,
+      tp,
+      ss,
+      ts,
+      sCy
     }) {
       const candidates = [];
       const sourceLane = horizontalLaneBelowSource();
@@ -371,6 +376,27 @@ window.NudgeRenderer.routeCandidateRules = {
         { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: sourceLane }, { x: leftGutterX, y: sourceLane }, { x: leftGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: leftLaneBias },
         { startPoint: { x: scx, y: sBot }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: sourceLane }, { x: rightGutterX, y: sourceLane }, { x: rightGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: rightLaneBias }
       );
+
+      if (sp && ss && ts) {
+        if (tcx < sp.x - 5) {
+          // Target is to the left: exit left side of source
+          candidates.push({
+            startPoint: { x: sp.x, y: sCy },
+            endPoint: { x: tcx, y: endY },
+            bendPoints: [{ x: tcx, y: sCy }],
+            _scoreBias: -200
+          });
+        } else if (tcx > sp.x + ss.w + 5) {
+          // Target is to the right: exit right side of source
+          candidates.push({
+            startPoint: { x: sp.x + ss.w, y: sCy },
+            endPoint: { x: tcx, y: endY },
+            bendPoints: [{ x: tcx, y: sCy }],
+            _scoreBias: -200
+          });
+        }
+      }
+
       candidates.push(...hintedOrthogonalRouteCandidates(sBot, endY, sourceLane, targetLane, hintedSourceXs));
       for (const safeX of hintedSourceXs.filter(x => Math.abs(x - scx) > 4)) {
         candidates.push(
@@ -391,7 +417,12 @@ window.NudgeRenderer.routeCandidateRules = {
       horizontalLaneAboveSource,
       horizontalLaneBelowTarget,
       orderedMessageBusGutterX,
-      hintedOrthogonalRouteCandidates
+      hintedOrthogonalRouteCandidates,
+      sp,
+      tp,
+      ss,
+      ts,
+      sCy
     }) {
       const candidates = [];
       const sourceLane = horizontalLaneAboveSource();
@@ -409,6 +440,27 @@ window.NudgeRenderer.routeCandidateRules = {
         { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: sourceLane }, { x: leftGutterX, y: sourceLane }, { x: leftGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: leftLaneBias },
         { startPoint: { x: scx, y: sTop }, endPoint: { x: tcx, y: endY }, bendPoints: [{ x: scx, y: sourceLane }, { x: rightGutterX, y: sourceLane }, { x: rightGutterX, y: targetLane }, { x: tcx, y: targetLane }], _scoreBias: rightLaneBias }
       );
+
+      if (sp && ss && ts) {
+        if (tcx < sp.x - 5) {
+          // Target is to the left: exit left side of source
+          candidates.push({
+            startPoint: { x: sp.x, y: sCy },
+            endPoint: { x: tcx, y: endY },
+            bendPoints: [{ x: tcx, y: sCy }],
+            _scoreBias: -200
+          });
+        } else if (tcx > sp.x + ss.w + 5) {
+          // Target is to the right: exit right side of source
+          candidates.push({
+            startPoint: { x: sp.x + ss.w, y: sCy },
+            endPoint: { x: tcx, y: endY },
+            bendPoints: [{ x: tcx, y: sCy }],
+            _scoreBias: -200
+          });
+        }
+      }
+
       candidates.push(...hintedOrthogonalRouteCandidates(sTop, endY, sourceLane, targetLane));
       return candidates;
     }
