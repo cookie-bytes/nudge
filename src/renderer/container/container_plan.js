@@ -33,7 +33,18 @@ window.NudgeRenderer.containerPlan = {
     }
     const layers = [];
     const done   = new Set();
-    const zeroIndeg = sortChildren.filter(n => inDeg.get(n.id) === 0);
+    let zeroIndeg = sortChildren.filter(n => inDeg.get(n.id) === 0);
+    if (zeroIndeg.length === 0 && sortChildren.length > 0) {
+      // Every element sits on a relationship cycle (e.g. mutual
+      // request/response pairs), so Kahn cannot seed the first layer.
+      // Break the cycle by seeding with the most source-like element(s):
+      // maximum out-degree minus in-degree.
+      const outDeg = new Map(sortChildren.map(n => [n.id, 0]));
+      for (const e of sortEdges) outDeg.set(e.from, (outDeg.get(e.from) || 0) + 1);
+      const sourceScore = n => (outDeg.get(n.id) || 0) - (inDeg.get(n.id) || 0);
+      const best = Math.max(...sortChildren.map(sourceScore));
+      zeroIndeg = sortChildren.filter(n => sourceScore(n) === best);
+    }
     layers.push(zeroIndeg);
     for (const n of zeroIndeg) {
       done.add(n.id);
