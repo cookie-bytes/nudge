@@ -5,6 +5,7 @@ import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { chromium } from 'playwright';
 import { parseMermaidC4 } from '../src/mermaid_parser.js';
+import { parsePlantUMLC4 } from '../src/plantuml_parser.js';
 
 const WORKSPACE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_OUTPUT_DIR = path.join(WORKSPACE_ROOT, 'test_outputs', 'refactor_rig');
@@ -120,7 +121,7 @@ function listFixtureFiles(fixturesDir) {
     const entryPath = path.join(fixturesDir, entry.name);
     if (entry.isDirectory()) {
       files.push(...listFixtureFiles(entryPath));
-    } else if (entry.isFile() && entry.name.endsWith('.mermaid')) {
+    } else if (entry.isFile() && (entry.name.endsWith('.mermaid') || entry.name.endsWith('.puml'))) {
       files.push(entryPath);
     }
   }
@@ -180,7 +181,7 @@ async function createRendererPage(browser, runtimeDir, onBrowserMessage) {
 
 async function renderFixture(page, fixturePath) {
   const content = fs.readFileSync(fixturePath, 'utf8');
-  const diagramModel = parseMermaidC4(content);
+  const diagramModel = fixturePath.endsWith('.puml') ? parsePlantUMLC4(content) : parseMermaidC4(content);
   const result = await page.evaluate(async (data) => window.renderDiagram(data), diagramModel);
   const svgMarkup = await page.locator('#svg-root').innerHTML();
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${result.width} ${result.height}">${svgMarkup}</svg>\n`;
@@ -192,7 +193,7 @@ async function renderFixture(page, fixturePath) {
 
 function writeArtifact(outputDir, lane, fixturePath, extension, content) {
   const relativeName = path.relative(WORKSPACE_ROOT, fixturePath)
-    .replace(/\.mermaid$/, '')
+    .replace(/\.(mermaid|puml)$/, '')
     .replaceAll(path.sep, '__');
   const baseName = relativeName.replace(/^test__/, '');
   const filePath = path.join(outputDir, lane, `${baseName}.${extension}`);
@@ -205,7 +206,7 @@ async function run() {
   const args = parseArgs(process.argv.slice(2));
   const fixtureFiles = listFixtureFiles(args.fixturesDir);
   if (fixtureFiles.length === 0) {
-    throw new Error(`No .mermaid fixtures found in ${args.fixturesDir}`);
+    throw new Error(`No .mermaid or .puml fixtures found in ${args.fixturesDir}`);
   }
 
   fs.rmSync(args.outputDir, { recursive: true, force: true });

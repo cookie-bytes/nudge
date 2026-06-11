@@ -1,0 +1,74 @@
+@startuml
+!include <C4/C4_Container>
+    title C4 Container Diagram: Realistic Core Banking System
+
+    Person(customer, "Retail Customer", "Uses mobile and web banking channels.")
+    Person(teller, "Branch Teller", "Internal staff processing customer requests.")
+
+    System_Boundary(core_banking, "Core Banking System") {
+        
+        Container(mobile, "Mobile App", "Swift/Kotlin", "Customer mobile banking interface.")
+        Container(web, "Web Portal", "React", "Customer web banking interface.")
+        
+        Container(bff, "Channel BFF", "Node.js", "Aggregates and routes requests from client channels.")
+        
+        Container(auth, "AuthZ Service", "Go", "Handles OAuth2/OIDC token issuance and validation.")
+        
+        Container(account_service, "Account Service", "Java/Spring", "Manages account state and lifecycle.")
+        ContainerDb(account_db, "Account Store", "PostgreSQL", "Account master records.")
+        
+        Container(payment_orch, "Payments Orchestrator", "Go", "Coordinates multi-step payment routing and sagas.")
+        
+        Container(ledger_engine, "Ledger Engine", "Rust", "Handles high-performance double-entry ledger postings.")
+        ContainerDb(ledger_db, "Ledger Store", "PostgreSQL", "Immutable transaction journal.")
+        
+        Container(event_bus, "Event Bus", "Kafka", "Central streaming platform for domain events.")
+        
+        Container(fraud_engine, "Fraud Engine", "Python/Flink", "Asynchronous real-time streaming fraud analysis.")
+        Container(reg_service, "Reg Reporting Service", "Scala", "Consumes events to build regulatory compliance extracts.")
+        ContainerDb(reg_db, "Reporting Store", "PostgreSQL", "Optimized read-model for compliance reporting.")
+    }
+
+    System_Ext(swift, "SWIFT Network", "Interbank messaging rails.")
+    System_Ext(card_scheme, "Card Scheme", "Visa/Mastercard processing rails.")
+    System_Ext(kyc_provider, "KYC/AML Provider", "External identity and sanctions screening.")
+    System_Ext(reg_gateway, "Regulatory Gateway", "Central bank reporting submissions.")
+
+  ' Client and Edge Relationships
+    Rel(customer, mobile, "Uses", "HTTPS")
+    Rel(customer, web, "Uses", "HTTPS")
+    Rel(teller, web, "Uses", "HTTPS")
+    
+    Rel(mobile, bff, "Calls", "REST/JSON")
+    Rel(web, bff, "Calls", "REST/JSON")
+    
+    Rel_R(bff, auth, "Validates token", "OIDC")
+    
+  ' Core Domain Services
+    Rel(bff, account_service, "Reads/Writes", "gRPC")
+    Rel(bff, payment_orch, "Initiates payment", "gRPC")
+    
+    Rel(account_service, account_db, "Persists state", "SQL")
+    
+  ' Asynchronous Event Flows (Fixing the spaghetti and database sharing)
+    Rel(account_service, event_bus, "Publishes account events", "Kafka")
+    Rel(payment_orch, event_bus, "Publishes transaction events", "Kafka")
+    Rel(ledger_engine, event_bus, "Publishes posting events", "Kafka")
+    
+  ' Ledger isolation
+    Rel(payment_orch, ledger_engine, "Requests posting", "gRPC")
+    Rel(ledger_engine, ledger_db, "Appends journal", "SQL")
+    
+  ' Stream Consumers
+    Rel(event_bus, fraud_engine, "Consumes events for scoring", "Kafka")
+    Rel(event_bus, reg_service, "Consumes events for reporting", "Kafka")
+    
+    Rel(reg_service, reg_db, "Persists read-models", "SQL")
+
+  ' External Systems Interfacing
+    Rel_R(payment_orch, swift, "Sends messages", "MQ")
+    Rel_R(payment_orch, card_scheme, "Authorizes", "ISO8583")
+    Rel_R(payment_orch, kyc_provider, "Screens parties", "REST")
+    
+    Rel_R(reg_service, reg_gateway, "Submits extracts", "SFTP")
+@enduml

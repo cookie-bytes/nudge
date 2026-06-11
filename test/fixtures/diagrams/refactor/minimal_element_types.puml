@@ -1,0 +1,22 @@
+@startuml
+!include <C4/C4_Container>
+    title Minimal Element Types
+
+    Person(person, "Person", "A person.")
+    Person_Ext(externalPerson, "External Person", "An external person.")
+    System_Boundary(systemBoundary, "System Boundary") {
+        Container(container, "Container", "Node.js", "A container.")
+        ContainerDb(database, "Database", "PostgreSQL", "A database.")
+        ContainerQueue(queue, "Queue", "Kafka", "A message bus.")
+    }
+    System_Ext(externalSystem, "External System", "An external system.")
+    ContainerDb_Ext(externalDatabase, "External Database", "PostgreSQL", "An external database.")
+
+    Rel(person, container, "Uses")
+    Rel(externalPerson, container, "Uses")
+    Rel(container, database, "Reads")
+    Rel(container, queue, "Publishes")
+    Rel(queue, externalSystem, "Notifies")
+    Rel(externalSystem, externalDatabase, "Writes")
+
+@enduml

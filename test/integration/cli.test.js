@@ -29,3 +29,19 @@ test('CLI renders a valid diagram successfully and exits with code 0', (t, done)
     done();
   });
 });
+
+test('CLI renders a valid PlantUML diagram successfully and exits with code 0', (t, done) => {
+  const pumlFixturePath = FIXTURE_PATH.replace(/\.mermaid$/, '.puml');
+  execFile('node', [CLI_PATH, pumlFixturePath], (error, stdout, stderr) => {
+    assert.equal(error, null);
+    assert.match(stdout, /=== Nudge: Deterministic C4 Layout Engine ===/);
+    assert.match(stdout, /Input identified as PlantUML/);
+    assert.match(stdout, /Success! Optimized assets exported/);
+    
+    // Verify output files exist in .nudge/
+    assert.ok(fs.existsSync('.nudge/optimized.svg'));
+    assert.ok(fs.existsSync('.nudge/optimized.png'));
+    
+    done();
+  });
+});

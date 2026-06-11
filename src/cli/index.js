@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import yaml from 'js-yaml';
 import { parseMermaidC4 } from '../mermaid_parser.js';
+import { parsePlantUMLC4 } from '../plantuml_parser.js';
 import { optimizeDiagram } from '../core/optimizer.js';
 
 const args = process.argv.slice(2);
@@ -29,6 +30,9 @@ try {
   if (ext === '.mermaid' || ext === '.mmd') {
     console.log('[Parser] Input identified as Mermaid. Compiling C4Context...');
     diagramModel = parseMermaidC4(content);
+  } else if (ext === '.puml' || ext === '.plantuml') {
+    console.log('[Parser] Input identified as PlantUML. Compiling C4...');
+    diagramModel = parsePlantUMLC4(content);
   } else {
     console.log('[Parser] Input identified as YAML. Parsing...');
     diagramModel = yaml.load(content);

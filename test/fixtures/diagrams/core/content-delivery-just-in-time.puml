@@ -1,0 +1,58 @@
+@startuml
+!include <C4/C4_Container>
+    title Content Delivery & Just-in-Time (JIT) Transcoding Workflow
+    caption Optimized for Dynamic On-The-Fly Delivery Pipeline
+
+    System_Ext(cdn_edge, "CDN Edge", "External System", "Caches and delivers video segments to end users")
+    System_Ext(drm_server, "DRM License Server", "External System", "Key issuance, exchange, and management")
+
+    System_Boundary(streaming_platform, "Streaming Platform") {
+  ' Ingest Tier
+        Container(upload_svc, "Upload Service", "Go", "Ingests raw mezzanine source assets")
+        Container(orchestrator, "Ingest Orchestrator", "Java", "Manages asset validation and mezzanine normalization")
+        ContainerQueue(job_queue, "Analysis Job Queue", "AWS SQS", "Manages video analysis and chunking tasks")
+        Container(analysis_worker, "Analysis Worker", "C++/FFmpeg", "Inspects source profiles and creates index maps")
+
+  ' Control & Data Plane Storage
+        ContainerDb(asset_store, "Asset Store", "AWS S3", "Stores source mezzanine files and dynamically generated cache blocks")
+        ContainerDb(catalog_store, "Catalog Store", "PostgreSQL", "Stores title metadata, manifest definitions, and asset pointers")
+        ContainerQueue(workflow_events, "Workflow Events", "Kafka", "Asset lifecycle and system state event backbone")
+
+  ' Core Metadata Service
+        Container(catalog_svc, "Catalog Service", "Node.js", "Manages and serves title metadata")
+
+  ' Edge / Playback Delivery Tier (The actual JIT Core)
+        Container(playback_api, "Playback API", "Go", "Orchestrates user playback sessions and dynamic manifest generation")
+        ContainerDb(session_cache, "Session Cache", "Redis", "Stores active playback sessions and manifest state tokens")
+        
+        Container(jit_packaging, "JIT Packaging & Transcode Service", "C++/Go", "Transcodes source chunks and packages to HLS/DASH on-the-fly")
+        Container(drm_adapter, "DRM Adapter", "Java", "Dynamic content encryption and license brokering")
+    }
+
+  ' --- INGEST & PROCESSING PIPELINE ---
+    Rel(upload_svc, asset_store, "Pushes raw mezzanine", "S3 API")
+    Rel(upload_svc, workflow_events, "Emits 'Ingested' event", "Kafka")
+    
+    Rel(workflow_events, orchestrator, "Triggers processing", "Kafka")
+    Rel(orchestrator, job_queue, "Enqueues validation/analysis tasks", "SQS")
+    Rel(orchestrator, catalog_svc, "Registers title metadata", "gRPC")
+
+    Rel(job_queue, analysis_worker, "Pulls analysis tasks", "SQS")
+    Rel(analysis_worker, asset_store, "Reads raw headers", "S3 API")
+    Rel(analysis_worker, workflow_events, "Emits 'Asset Ready' event", "Kafka")
+
+    Rel(catalog_svc, catalog_store, "Persists asset metadata", "JDBC")
+    Rel(catalog_svc, workflow_events, "Publishes catalog availability", "Kafka")
+
+  ' --- REAL-TIME PLAYBACK & JIT TRANSCODING PIPELINE ---
+    Rel(cdn_edge, playback_api, "Requests streaming manifest (.m3u8/.mpd)", "HTTPS")
+    Rel(playback_api, session_cache, "Validates/tracks player session", "RESP")
+    Rel(playback_api, catalog_svc, "Fetches asset mapping & source location", "gRPC")
+    
+  ' The CDN requests a specific .ts or .m4s segment. If it misses cache, it hits the JIT packager
+    Rel(cdn_edge, jit_packaging, "Requests video segment chunk (Cache Miss)", "HTTPS")
+    Rel(jit_packaging, asset_store, "Pulls raw mezzanine source block", "S3 API")
+    Rel(jit_packaging, drm_adapter, "Requests dynamic encryption keys", "gRPC")
+    
+    Rel(drm_adapter, drm_server, "Proxies key exchange", "HTTPS")
+@enduml

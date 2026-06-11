@@ -1,0 +1,32 @@
+@startuml
+!include <C4/C4_Container>
+    title Message Bus Sizing And Lane Reservation
+  ' Rule: Person above Container
+  ' Rule: Container above ContainerQueue
+  ' Rule: ContainerQueue above ContainerDb
+
+    Person(user, "User", "Triggers workflows.")
+    System_Boundary(automation, "Automation Platform") {
+        Container(api, "Workflow API", "TypeScript", "Accepts workflow requests.")
+        Container(scheduler, "Scheduler", "Go", "Schedules delayed jobs.")
+        Container(worker, "Worker", "Rust", "Executes workflow steps.")
+        Container(audit, "Audit Writer", "Java", "Writes audit records.")
+        ContainerQueue(commands, "Command Bus", "Kafka", "Routes workflow commands.")
+        ContainerQueue(events, "Event Bus", "Kafka", "Routes workflow events.")
+        ContainerDb(stateDb, "State Store", "PostgreSQL", "Stores workflow state.")
+        ContainerDb(auditDb, "Audit Store", "PostgreSQL", "Stores audit trails.")
+    }
+
+    Rel(user, api, "Starts workflow", "HTTPS")
+    Rel(api, commands, "Publishes start command", "Kafka")
+    Rel(scheduler, commands, "Publishes scheduled command", "Kafka")
+    Rel(commands, worker, "Delivers command", "Kafka")
+    Rel(worker, events, "Publishes step completed", "Kafka")
+    Rel(api, events, "Publishes request accepted", "Kafka")
+    Rel(audit, events, "Subscribes to events", "Kafka")
+    Rel(events, scheduler, "Schedules next step", "Kafka")
+    Rel(worker, stateDb, "Reads and writes state", "SQL")
+    Rel(audit, auditDb, "Writes audit record", "SQL")
+    Rel(api, stateDb, "Reads workflow status", "SQL")
+
+@enduml

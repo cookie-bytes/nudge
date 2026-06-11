@@ -19,6 +19,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { parseMermaidC4 } from '../mermaid_parser.js';
+import { parsePlantUMLC4 } from '../plantuml_parser.js';
 import { optimizeDiagram } from '../core/optimizer.js';
 
 const server = new Server(
@@ -72,10 +73,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   const isMermaid =
     format === 'mermaid' ||
     (!format && (trimmed.startsWith('C4Context') || trimmed.startsWith('C4Container')));
+  const isPlantUML =
+    format === 'plantuml' ||
+    format === 'puml' ||
+    (!format && trimmed.startsWith('@startuml'));
 
   let diagramModel;
   try {
-    diagramModel = isMermaid ? parseMermaidC4(content) : yaml.load(content);
+    if (isMermaid) {
+      diagramModel = parseMermaidC4(content);
+    } else if (isPlantUML) {
+      diagramModel = parsePlantUMLC4(content);
+    } else {
+      diagramModel = yaml.load(content);
+    }
   } catch (err) {
     return {
       content: [{ type: 'text', text: `Failed to parse diagram content: ${err.message}` }],

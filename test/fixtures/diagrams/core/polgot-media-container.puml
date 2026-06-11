@@ -1,0 +1,43 @@
+@startuml
+!include <C4/C4_Container>
+    title Polyglot Media
+
+    Person(Customer, "Customer", "A customer of the products of Polyglot Media")
+    System_Ext(PaymentSystem, "Payment system", "External payment system used by the Polyglot Media system")
+    System_Ext(ExternalMediaAPI, "External media API", "API to search and gain access to media content external to Polyglot Media")
+
+    System_Boundary(PolyglotMedia, "Polyglot Media [Software System]") {
+        Container(CustomerUI, "Customer UI", "Angular", "Customer user interface")
+        Container(CustomerAPI, "Customer API", "TBC", "API for customer actions")
+        Container(PaymentInterface, "Payment interface", "TBC", "Service interface with the external payment system")
+        
+        ContainerQueue(ActivityQueue, "Activity queue", "RabbitMQ", "Queue for activity")
+        Container(ActivityWriter, "Activity data store writer", "TBC", "Service to write activity to the activity data store")
+        ContainerDb(ActivityStore, "Activity data store", "Event store DB", "Storage for activity")
+
+        Container(MediaService, "Media service", "TBC", "Service for searching and accessing media")
+        Container(ExternalMediaInterface, "External media interface", "TBC", "Service interface with the external media API")
+        ContainerDb(MediaStore, "Media data store", "MongoDB", "Storage for media data")
+    }
+
+    Rel(Customer, CustomerUI, "Searches and accesses media using")
+    Rel(Customer, PaymentSystem, "Takes payment using")
+    
+    Rel(CustomerUI, CustomerAPI, "Requests data from")
+    
+    Rel(CustomerAPI, PaymentInterface, "Takes payment using")
+    Rel(CustomerAPI, ActivityQueue, "Writes activity to")
+    Rel(CustomerAPI, ActivityStore, "Reads activity data from")
+    Rel(CustomerAPI, MediaService, "Requests data from")
+
+    Rel(PaymentInterface, PaymentSystem, "Takes payment using")
+
+    Rel(ActivityQueue, ActivityWriter, "Retrieves activity from")
+    Rel(ActivityWriter, ActivityStore, "Writes activity to")
+
+    Rel(MediaService, MediaStore, "Reads data from")
+    Rel(MediaService, ExternalMediaInterface, "Looks up external media data using")
+
+    Rel(ExternalMediaInterface, ExternalMediaAPI, "Accesses external media data using")
+
+@enduml

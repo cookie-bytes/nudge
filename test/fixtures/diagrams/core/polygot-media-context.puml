@@ -1,0 +1,24 @@
+@startuml
+!include <C4/C4_Context>
+    title System Context diagram for Polyglot Media
+
+  ' People / Actors
+    Person(author, "Author", "Person who creates content for Polyglot Media")
+    Person(editor, "Editor", "An employee of Polyglot Media")
+    Person(customer, "Customer", "A customer of the products of Polyglot Media")
+
+  ' Core System
+    System(polyglotMedia, "Polyglot Media", "Online system belonging to Polyglot Media Ltd.")
+
+  ' External Systems
+    System_Ext(paymentSystem, "Payment system", "External payment system used by the Polyglot Media system")
+    System_Ext(externalAPI, "External media API", "API to search and gain access to media content external to Polyglot Media")
+
+  ' Relationships
+    Rel(author, polyglotMedia, "Publishes media content using")
+    Rel(editor, polyglotMedia, "Manages and edits media using")
+    Rel(customer, polyglotMedia, "Searches and accesses media using")
+    Rel(polyglotMedia, paymentSystem, "Takes payment using")
+    Rel(polyglotMedia, externalAPI, "Accesses external media data using")
+
+@enduml

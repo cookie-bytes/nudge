@@ -96,7 +96,7 @@ Flat diagrams run the critic loop: parse input → render in headless browser �
 
 **Container visual hints**: `optimizer.js` runs a single label placement optimization step (`step_1_label_hints.png`) on top of the deterministic baseline (`step_0_initial.png`). It calls `getLLMLabelPlacementHints` to get connection label placement suggestions (`source`, `target`, or `middle`) and accepts them if the layout geometry score does not worsen. LLM responses are saved to `visual_hints.json` when present. Set `NUDGE_NO_LLM=1` or leave `enhance: false` to keep the deterministic baseline and skip network calls.
 
-**Diagram model format**: Both YAML and Mermaid inputs are normalised to the same `diagramModel` JSON schema before rendering. YAML files are loaded directly; Mermaid files are transformed by `parseMermaidC4`. The YAML schema mirrors the internal model directly (see `examples/system_context.yaml`).
+**Diagram model format**: YAML, Mermaid, and C4-PlantUML inputs are normalised to the same `diagramModel` JSON schema before rendering. YAML files are loaded directly; Mermaid files are transformed by `parseMermaidC4`; C4-PlantUML files are transformed by `parsePlantUMLC4`. The YAML schema mirrors the internal model directly (see `examples/system_context.yaml`).
 
 **LLM response handling**: `src/core/llm_client.js` handles the case where `choice.message.content` is empty and falls back to `reasoning_content` — common with reasoning models in LM Studio.
 

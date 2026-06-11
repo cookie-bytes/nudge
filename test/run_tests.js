@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { chromium } from 'playwright';
 import { parseMermaidC4 } from '../src/mermaid_parser.js';
+import { parsePlantUMLC4 } from '../src/plantuml_parser.js';
 import { analyzeLayout } from '../src/core/geometry.js';
 import { getActiveModel, getHeaders } from '../src/core/llm_client.js';
 import { fetchWithTimeout } from '../src/utils.js';
@@ -313,6 +314,53 @@ async function runIntegrationTest() {
     }
   }
 
+  // --- C4-PlantUML sub-test ---
+  // Verifies the PlantUML parser correctly parses and optimizes a .puml file.
+  {
+    const outputDir = path.resolve('test_outputs/integration_test/plantuml');
+    if (fs.existsSync(outputDir)) fs.rmSync(outputDir, { recursive: true, force: true });
+
+    const pumlDiagram = `
+      @startuml
+      !include <C4/C4_Container>
+      title Sample PlantUML Diagram
+      Person(user, "User", "A user of the system")
+      System_Boundary(b, "My Service") {
+        Container(api, "API", "Node.js", "Handles requests")
+        ContainerDb(db, "Database", "Postgres", "Stores data")
+      }
+      Rel(user, api, "Calls", "HTTPS")
+      Rel(api, db, "Reads/writes", "TCP")
+      @enduml
+    `;
+    const model = parsePlantUMLC4(pumlDiagram);
+
+    const callLog = { total: 0, modelList: 0, optimizationPatch: 0, labelPlacementHints: 0 };
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = buildMockFetch(callLog);
+
+    try {
+      const result = await optimizeDiagram({
+        diagramModel: model,
+        outputDir,
+        apiUrl: 'http://mock-api.local',
+        maxIterations: 2,
+        onLog: (msg) => console.log(`  [PlantUML] ${msg.trim()}`),
+        enhance: true,
+      });
+
+      console.log(`  PlantUML test: success=${result.success}, iterations=${result.history.length}, fetches=${callLog.total}`);
+
+      for (const file of ['step_0_initial.png', 'step_1_label_hints.png']) {
+        if (!fs.existsSync(path.join(outputDir, file))) throw new Error(`PlantUML integration test: ${file} was not created.`);
+      }
+      if (!fs.existsSync(path.join(outputDir, 'optimized.svg'))) throw new Error("PlantUML integration test: optimized.svg was not created.");
+      if (!fs.existsSync(path.join(outputDir, 'optimized.png'))) throw new Error("PlantUML integration test: optimized.png was not created.");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
   console.log("✅ Integration tests PASSED successfully!");
   return true;
 }
@@ -335,9 +383,9 @@ async function runTests() {
     fs.mkdirSync(OUTPUT_DIR, { recursive: true });
   }
 
-  const testFiles = fs.readdirSync(TEST_DIR).filter(file => file.endsWith('.mermaid'));
+  const testFiles = fs.readdirSync(TEST_DIR).filter(file => file.endsWith('.mermaid') || file.endsWith('.puml'));
   if (testFiles.length === 0) {
-    console.error("No test mermaid files found in test/fixtures/diagrams/core folder.");
+    console.error("No test diagram files found in test/fixtures/diagrams/core folder.");
     process.exit(1);
   }
 
@@ -357,11 +405,11 @@ async function runTests() {
   let allTestsPassed = true;
 
   for (const file of testFiles) {
-    const baseName = path.basename(file, '.mermaid');
+    const baseName = file.endsWith('.mermaid') ? path.basename(file, '.mermaid') : path.basename(file, '.puml') + '_puml';
     console.log(`\nRendering: ${file}...`);
     
     const content = fs.readFileSync(path.join(TEST_DIR, file), 'utf8');
-    const model = parseMermaidC4(content);
+    const model = file.endsWith('.puml') ? parsePlantUMLC4(content) : parseMermaidC4(content);
 
     // Call window.renderDiagram in the browser context
     const result = await page.evaluate(async (data) => {

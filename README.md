@@ -30,7 +30,7 @@ Nudge is built around a deterministic renderer with an optional accept-only-if-n
 
 ```mermaid
 graph TD
-    A[Input YAML or Mermaid] --> B[Parse Diagram Model]
+    A[Input YAML, Mermaid, or PlantUML] --> B[Parse Diagram Model]
     B --> C{Container diagram?}
     C -->|Yes| D[Deterministic Container Layout Engine]
     C -->|No| E[ELKjs Layered Layout]
@@ -45,7 +45,7 @@ graph TD
     G --> K
 ```
 
-1. **Ingestion**: Parses C4 Context or C4 Container diagrams from `.mermaid` or `.yaml` specifications.
+1. **Ingestion**: Parses C4 Context or C4 Container diagrams from `.mermaid`, `.puml`/`.plantuml`, or `.yaml` specifications.
 2. **Deterministic rendering**: Produces a complete baseline layout without needing cloud services. Container diagrams use Nudge's custom deterministic rules; flat diagrams use ELKjs.
 3. **Geometric critique**: Measures DOM bounding boxes to detect Element Overlaps, Connection-Line Element Crossings, Connection-Label Element Crossings, poor aspect ratio, and tight spacing. Container routing uses A* pathfinding over a sparse orthogonal visibility graph, hardest-first routing, and rip-up-and-reroute to optimize line paths and avoid corridors.
 4. **Optional enhancement**: When LLM calls are enabled, Nudge asks a local OpenAI-compatible model for small layout improvements. Container hints are accepted only when the candidate score is no worse than the current accepted state. Flat diagram patches are applied through the existing critic loop.
@@ -86,7 +86,7 @@ Each candidate is scored against Element Overlaps, Connection-Line Element Cross
 - 🔍 **Automatic Defect Detection**: Finds Element Overlaps, Connection-Line Element Crossings, Connection-Label Element Crossings, and poor aspect ratios.
 - ✨ **Optional AI Polish**: Local LLM reviewers can suggest connection label placements (source/target/middle) for container diagrams, or ELKjs patches for flat diagrams. Suggestions are accepted only through score-gated checks.
 - 🔌 **MCP Server**: Exposes an `optimize_diagram` tool over stdio so Claude Desktop and other MCP clients can generate and render diagrams conversationally.
-- 🎨 **Supports Mermaid & YAML**: Seamless support for C4 diagrams in `.mermaid`/`.mmd` syntax and structured `.yaml` specifications.
+- 🎨 **Supports Mermaid, PlantUML & YAML**: Seamless support for C4 diagrams in `.mermaid`/`.mmd` syntax, `.puml`/`.plantuml` C4-PlantUML syntax, and structured `.yaml` specifications.
 - 📏 **Standardized Sizing & Grid**: All nodes are standardized to a width of `200px`. Heights: `200px` for Person, `140px` for Container/Database/External, `80px` for MessageBus — ensuring consistent alignment and a clean grid.
 - 🧭 **Dedicated Bus & Database Rows**: Message buses and databases are separated from ordinary service layers, with message buses always anchored in the bottom-right and databases visually paired beneath their owner service.
 - 💬 **3-Line Descriptions**: Node descriptions support a 3-line clamp, providing space for detailed technical notes without clipping.
@@ -167,9 +167,11 @@ You can customize Nudge's layout tuning behavior and LLM connections using envir
 node src/cli/index.js test/core-banking-single-boundary.mermaid
 ```
 
-**Run on any Mermaid or YAML file:**
+**Run on any Mermaid, PlantUML, or YAML file:**
+
 ```bash
 node src/cli/index.js path/to/diagram.mermaid
+node src/cli/index.js path/to/diagram.puml
 node src/cli/index.js path/to/diagram.yaml
 ```
 
@@ -244,8 +246,8 @@ By default, the MCP server runs deterministic rendering. Pass the parameter `enh
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `content` | string | yes | Mermaid C4Context/C4Container syntax or YAML diagram source |
-| `format` | `"mermaid"` \| `"yaml"` | no | Auto-detected from content if omitted |
+| `content` | string | yes | Mermaid C4Context/C4Container, C4-PlantUML, or YAML diagram source |
+| `format` | `"mermaid"` \| `"plantuml"` \| `"yaml"` | no | Auto-detected from content if omitted |
 | `enhance` | boolean | no | Enable optional LLM optimization / visual-hint enhancement pipeline (default: `false`) |
 
 **Returns**: a JSON summary (`success`, `iterations`, `finalCollisions`) followed by a self-contained SVG string. A best-effort SVG is always returned even when collisions remain after 4 iterations.
