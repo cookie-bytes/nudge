@@ -1,0 +1,31 @@
+C4Context
+    title C4 Context Diagram : System Context Diagram - Auction Service
+
+    Person(seller, "Seller", "A platform user who creates listings for auction.", "")
+    Person(buyer, "Buyer", "A platform user who participates in auctions and views listings.", "")
+    Person(admin, "Platform Admin", "An admin user who manages the platform and monitors activity.", "")
+
+    System(auction, "Auction Service", "Handles vehicle listings, auction state, and queries.", "")
+
+    System_Ext(delegation, "Delegation GraphQL", "GraphQL queries and schema.", "")
+    System_Ext(eventbridge, "AWS EventBridge", "Serverless event bus routing auction events across the platform.", "")
+    System_Ext(keycloak, "Keycloak Identity Provider", "Handles authentication realms and identity management.", "")
+    System_Ext(apl, "Apollo Federation Gateway", "Aggregates federated subgraphs and routes GraphQL requests.", "")
+    System_Ext(stripe, "Stripe Payment Gateway", "Processes and captures credit card payments.", "")
+    System_Ext(data_service, "Reference Data Service", "Provides lists of valid vehicle makes and models.", "")
+    System_Ext(auction_workflow, "Auction Workflow Service", "Schedules and coordinates the automated auction settlement pipeline.", "")
+
+    Rel(seller, auction, "Creates auctions and uploads vehicle photos", "HTTPS")
+    Rel(buyer, auction, "Browses active auctions and views listings", "HTTPS")
+    Rel(admin, auction, "Performs administrative tasks and force-winds auctions", "HTTPS")
+
+    Rel(auction, delegation, "Validates client JWT authorization tokens", "HTTPS/JWT")
+    Rel(auction, eventbridge, "Publishes state transition and settlement events", "HTTPS")
+    Rel(auction, keycloak, "Queries IAM auth details in realm-specific", "HTTPS")
+    Rel(auction, apl, "Streams vehicle reference data to the gateway", "Gabs StreamTCP")
+    Rel(auction, stripe, "Creates PaymentIntents to charge the winning bidder", "HTTPS")
+    Rel(auction, data_service, "Validates client requests against permitted vehicle metadata", "AWS SOAP/HTTPS")
+    Rel(auction, auction_workflow, "Triggers scheduled state transitions and settlement on auction close", "HTTPS")
+
+    Rel_U(eventbridge, auction, "Trigger uncertain state transitions - HTTPSEventJSON")
+    Rel_U(auction_workflow, auction, "Creates Payment Intents to charge the winning bidder", "HTTPS")

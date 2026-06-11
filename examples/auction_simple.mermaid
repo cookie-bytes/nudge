@@ -1,0 +1,17 @@
+C4Context
+    title Auction Service Context - Simplified
+
+    Person(seller, "Seller", "Creates listings")
+    Person(buyer, "Buyer", "Browses auctions")
+
+    System(auction, "Auction Service", "Core system")
+
+    System_Ext(stripe, "Stripe", "Payments")
+    System_Ext(eventbridge, "EventBridge", "Events")
+    System_Ext(keycloak, "Keycloak", "Auth")
+
+    Rel(seller, auction, "Creates auctions")
+    Rel(buyer, auction, "Browses listings")
+    Rel(auction, stripe, "Process payments")
+    Rel(auction, eventbridge, "Publish events")
+    Rel(auction, keycloak, "Auth requests")
