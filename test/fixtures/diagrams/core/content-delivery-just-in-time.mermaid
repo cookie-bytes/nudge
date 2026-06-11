@@ -1,47 +1,56 @@
 C4Container
-    title Content Delivery & Just-in-Time Transcoding Workflow
-    caption Optimized for Ingest/Delivery Split
+    title Content Delivery & Just-in-Time (JIT) Transcoding Workflow
+    caption Optimized for Dynamic On-The-Fly Delivery Pipeline
 
-    System_Ext(cdn_edge, "CDN Edge", "External System", "Segment delivery to end users")
-    System_Ext(drm_server, "DRM License Server", "External System", "Key issuance and management")
+    System_Ext(cdn_edge, "CDN Edge", "External System", "Caches and delivers video segments to end users")
+    System_Ext(drm_server, "DRM License Server", "External System", "Key issuance, exchange, and management")
 
     System_Boundary(streaming_platform, "Streaming Platform") {
-        Container(upload_svc, "Upload Service", "Go", "Ingests mezzanine assets")
-        Container(playback_api, "Playback API", "Go", "Manifest & session orchestration")
-        
-        Container(orchestrator, "Workflow Orchestrator", "Java", "Transcode state machine")
-        Container(transcode_worker, "Transcode Worker", "C++/FFmpeg", "Handles JIT renditions")
-        Container(packaging_svc, "Packaging Service", "Go", "HLS/DASH packaging")
-        
-        ContainerQueue(job_queue, "Transcode Job Queue", "AWS SQS, local", "Manages transcode tasks")
-        ContainerDb(session_cache, "Session Cache", "Redis", "Stores playback sessions")
-        Container(catalog_svc, "Catalog Service", "Node.js", "Manages titles & metadata")
-        Container(drm_adapter, "DRM Adapter", "Java", "License brokering")
+        %% Ingest Tier
+        Container(upload_svc, "Upload Service", "Go", "Ingests raw mezzanine source assets")
+        Container(orchestrator, "Ingest Orchestrator", "Java", "Manages asset validation and mezzanine normalization")
+        ContainerQueue(job_queue, "Analysis Job Queue", "AWS SQS", "Manages video analysis and chunking tasks")
+        Container(analysis_worker, "Analysis Worker", "C++/FFmpeg", "Inspects source profiles and creates index maps")
 
-        ContainerDb(asset_store, "Asset Store", "AWS S3", "Stores mezzanine & renditions")
-        ContainerDb(catalog_store, "Catalog Store", "PostgreSQL", "Stores title metadata")
+        %% Control & Data Plane Storage
+        ContainerDb(asset_store, "Asset Store", "AWS S3", "Stores source mezzanine files and dynamically generated cache blocks")
+        ContainerDb(catalog_store, "Catalog Store", "PostgreSQL", "Stores title metadata, manifest definitions, and asset pointers")
+        ContainerQueue(workflow_events, "Workflow Events", "Kafka", "Asset lifecycle and system state event backbone")
+
+        %% Core Metadata Service
+        Container(catalog_svc, "Catalog Service", "Node.js", "Manages and serves title metadata")
+
+        %% Edge / Playback Delivery Tier (The actual JIT Core)
+        Container(playback_api, "Playback API", "Go", "Orchestrates user playback sessions and dynamic manifest generation")
+        ContainerDb(session_cache, "Session Cache", "Redis", "Stores active playback sessions and manifest state tokens")
         
-        ContainerQueue(workflow_events, "Workflow Events", "Kafka", "Asset lifecycle event backbone")
+        Container(jit_packaging, "JIT Packaging & Transcode Service", "C++/Go", "Transcodes source chunks and packages to HLS/DASH on-the-fly")
+        Container(drm_adapter, "DRM Adapter", "Java", "Dynamic content encryption and license brokering")
     }
 
-    Rel(upload_svc, asset_store, "Stores mezzanine via", "S3 API")
-    Rel(upload_svc, workflow_events, "Emits ingested event to", "Kafka")
+    %% --- INGEST & PROCESSING PIPELINE ---
+    Rel(upload_svc, asset_store, "Pushes raw mezzanine", "S3 API")
+    Rel(upload_svc, workflow_events, "Emits 'Ingested' event", "Kafka")
     
-    Rel(workflow_events, orchestrator, "Triggers workflow via", "Kafka")
-    Rel(orchestrator, job_queue, "Enqueues transcode via", "SQS")
-    Rel(orchestrator, catalog_svc, "Resolves title via", "gRPC")
+    Rel(workflow_events, orchestrator, "Triggers processing", "Kafka")
+    Rel(orchestrator, job_queue, "Enqueues validation/analysis tasks", "SQS")
+    Rel(orchestrator, catalog_svc, "Registers title metadata", "gRPC")
 
-    Rel(job_queue, transcode_worker, "Delivers job via", "SQS")
-    Rel(transcode_worker, asset_store, "Reads/writes renditions via", "S3 API")
-    Rel(transcode_worker, workflow_events, "Emits completed event to", "Kafka")
+    Rel(job_queue, analysis_worker, "Pulls analysis tasks", "SQS")
+    Rel(analysis_worker, asset_store, "Reads raw headers", "S3 API")
+    Rel(analysis_worker, workflow_events, "Emits 'Asset Ready' event", "Kafka")
 
-    Rel(workflow_events, packaging_svc, "Triggers packaging via", "Kafka")
-    Rel(packaging_svc, asset_store, "Pulls segments via", "S3 API")
-    Rel(packaging_svc, drm_adapter, "Gets license via", "gRPC")
+    Rel(catalog_svc, catalog_store, "Persists asset metadata", "JDBC")
+    Rel(catalog_svc, workflow_events, "Publishes catalog availability", "Kafka")
 
-    Rel(playback_api, session_cache, "Tracks session via", "RESP")
-    Rel(playback_api, cdn_edge, "Returns manifest to", "HTTPS")
-    Rel(drm_adapter, drm_server, "Issues key via", "HTTPS")
-
-    Rel(catalog_svc, catalog_store, "Persists via", "JDBC")
-    Rel(catalog_svc, workflow_events, "Publishes availability to", "Kafka")
+    %% --- REAL-TIME PLAYBACK & JIT TRANSCODING PIPELINE ---
+    Rel(cdn_edge, playback_api, "Requests streaming manifest (.m3u8/.mpd)", "HTTPS")
+    Rel(playback_api, session_cache, "Validates/tracks player session", "RESP")
+    Rel(playback_api, catalog_svc, "Fetches asset mapping & source location", "gRPC")
+    
+    %% The CDN requests a specific .ts or .m4s segment. If it misses cache, it hits the JIT packager
+    Rel(cdn_edge, jit_packaging, "Requests video segment chunk (Cache Miss)", "HTTPS")
+    Rel(jit_packaging, asset_store, "Pulls raw mezzanine source block", "S3 API")
+    Rel(jit_packaging, drm_adapter, "Requests dynamic encryption keys", "gRPC")
+    
+    Rel(drm_adapter, drm_server, "Proxies key exchange", "HTTPS")

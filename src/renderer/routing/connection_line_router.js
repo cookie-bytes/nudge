@@ -867,7 +867,13 @@ window.NudgeRenderer.connectionLineRouter = {
         sCy,
         tCy,
         sourceTopSlot,
-        sourceBottomSlot
+        sourceBottomSlot,
+        tcx,
+        tTop,
+        tBot,
+        V_GAP,
+        e,
+        idx
       });
     }
     function targetFacingRouteCandidates() {
@@ -898,6 +904,8 @@ window.NudgeRenderer.connectionLineRouter = {
     }
     const preferVerticalEntry = targetNode && targetNode.type === 'database' &&
       (tp.y >= sp.y + ss.h - 2 || sp.y >= tp.y + ts.h - 2);
+
+
 
     const {
       chooseBestRoute,

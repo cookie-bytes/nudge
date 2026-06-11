@@ -1,50 +1,72 @@
 C4Container
-    title Core Banking System - Container View
+    title C4 Container Diagram: Realistic Core Banking System
 
-    Person(customer, "Retail Customer", "Uses mobile and web banking")
-    Person(teller, "Branch Teller", "Internal staff")
-    System_Ext(swift, "SWIFT Network", "Interbank messaging")
-    System_Ext(card, "Card Scheme", "Visa/Mastercard rails")
-    System_Ext(kyc, "KYC/AML Provider", "Identity & sanctions screening")
-    System_Ext(regulator, "Regulatory Reporting Gateway", "Central bank submissions")
+    Person(customer, "Retail Customer", "Uses mobile and web banking channels.")
+    Person(teller, "Branch Teller", "Internal staff processing customer requests.")
 
-    System_Boundary(bank, "Core Banking System") {
-        Container(mobile, "Mobile App", "Swift/Kotlin", "Customer mobile banking")
-        Container(web, "Web Portal", "React", "Customer web banking")
-        Container(bff, "Channel BFF", "Node.js", "Backend-for-frontend aggregation")
-        Container(authz, "AuthZ Service", "Go", "OAuth2/OIDC token issuance")
-        Container(accounts, "Account Service", "Java/Spring", "Account lifecycle")
-        Container(ledger, "Ledger Engine", "Rust", "Double-entry posting")
-        Container(payments, "Payments Orchestrator", "Go", "Payment routing & saga")
-        Container(fraud, "Fraud Engine", "Python", "Real-time scoring")
-        Container(screening, "Screening Service", "Java", "Sanctions/PEP checks")
-        Container(reporting, "Reg Reporting Service", "Scala", "Builds regulatory extracts")
-        ContainerQueue(eventbus, "Event Bus", "Kafka", "Domain events")
-        ContainerDb(txndb, "Ledger Store", "PostgreSQL", "Immutable journal")
-        ContainerDb(acctdb, "Account Store", "PostgreSQL", "Account master")
+    System_Boundary(core_banking, "Core Banking System") {
+        
+        Container(mobile, "Mobile App", "Swift/Kotlin", "Customer mobile banking interface.")
+        Container(web, "Web Portal", "React", "Customer web banking interface.")
+        
+        Container(bff, "Channel BFF", "Node.js", "Aggregates and routes requests from client channels.")
+        
+        Container(auth, "AuthZ Service", "Go", "Handles OAuth2/OIDC token issuance and validation.")
+        
+        Container(account_service, "Account Service", "Java/Spring", "Manages account state and lifecycle.")
+        ContainerDb(account_db, "Account Store", "PostgreSQL", "Account master records.")
+        
+        Container(payment_orch, "Payments Orchestrator", "Go", "Coordinates multi-step payment routing and sagas.")
+        
+        Container(ledger_engine, "Ledger Engine", "Rust", "Handles high-performance double-entry ledger postings.")
+        ContainerDb(ledger_db, "Ledger Store", "PostgreSQL", "Immutable transaction journal.")
+        
+        Container(event_bus, "Event Bus", "Kafka", "Central streaming platform for domain events.")
+        
+        Container(fraud_engine, "Fraud Engine", "Python/Flink", "Asynchronous real-time streaming fraud analysis.")
+        Container(reg_service, "Reg Reporting Service", "Scala", "Consumes events to build regulatory compliance extracts.")
+        ContainerDb(reg_db, "Reporting Store", "PostgreSQL", "Optimized read-model for compliance reporting.")
     }
 
+    System_Ext(swift, "SWIFT Network", "Interbank messaging rails.")
+    System_Ext(card_scheme, "Card Scheme", "Visa/Mastercard processing rails.")
+    System_Ext(kyc_provider, "KYC/AML Provider", "External identity and sanctions screening.")
+    System_Ext(reg_gateway, "Regulatory Gateway", "Central bank reporting submissions.")
+
+    %% Client and Edge Relationships
     Rel(customer, mobile, "Uses", "HTTPS")
     Rel(customer, web, "Uses", "HTTPS")
     Rel(teller, web, "Uses", "HTTPS")
+    
     Rel(mobile, bff, "Calls", "REST/JSON")
     Rel(web, bff, "Calls", "REST/JSON")
-    Rel(bff, authz, "Validates token", "OIDC")
-    Rel(bff, accounts, "Reads/writes", "gRPC")
-    Rel(bff, payments, "Initiates payment", "gRPC")
-    Rel(accounts, acctdb, "Persists", "SQL")
-    Rel(accounts, ledger, "Requests posting", "gRPC")
-    Rel(ledger, txndb, "Appends journal", "SQL")
-    Rel(payments, ledger, "Posts settlement", "gRPC")
-    Rel(payments, fraud, "Scores txn", "gRPC")
-    Rel(payments, screening, "Screens party", "REST")
-    Rel(payments, swift, "Sends message", "MQ")
-    Rel(payments, card, "Authorizes", "ISO8583")
-    Rel(screening, kyc, "Checks", "REST")
-    Rel(accounts, eventbus, "Publishes events", "Kafka")
-    Rel(ledger, eventbus, "Publishes postings", "Kafka")
-    Rel(payments, eventbus, "Publishes events", "Kafka")
-    Rel(fraud, eventbus, "Consumes events", "Kafka")
-    Rel(reporting, eventbus, "Consumes events", "Kafka")
-    Rel(reporting, txndb, "Reads journal", "SQL")
-    Rel(reporting, regulator, "Submits", "SFTP")
+    
+    Rel_R(bff, auth, "Validates token", "OIDC")
+    
+    %% Core Domain Services
+    Rel(bff, account_service, "Reads/Writes", "gRPC")
+    Rel(bff, payment_orch, "Initiates payment", "gRPC")
+    
+    Rel(account_service, account_db, "Persists state", "SQL")
+    
+    %% Asynchronous Event Flows (Fixing the spaghetti and database sharing)
+    Rel(account_service, event_bus, "Publishes account events", "Kafka")
+    Rel(payment_orch, event_bus, "Publishes transaction events", "Kafka")
+    Rel(ledger_engine, event_bus, "Publishes posting events", "Kafka")
+    
+    %% Ledger isolation
+    Rel(payment_orch, ledger_engine, "Requests posting", "gRPC")
+    Rel(ledger_engine, ledger_db, "Appends journal", "SQL")
+    
+    %% Stream Consumers
+    Rel(event_bus, fraud_engine, "Consumes events for scoring", "Kafka")
+    Rel(event_bus, reg_service, "Consumes events for reporting", "Kafka")
+    
+    Rel(reg_service, reg_db, "Persists read-models", "SQL")
+
+    %% External Systems Interfacing
+    Rel_R(payment_orch, swift, "Sends messages", "MQ")
+    Rel_R(payment_orch, card_scheme, "Authorizes", "ISO8583")
+    Rel_R(payment_orch, kyc_provider, "Screens parties", "REST")
+    
+    Rel_R(reg_service, reg_gateway, "Submits extracts", "SFTP")

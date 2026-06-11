@@ -86,7 +86,13 @@ window.NudgeRenderer.routeCandidateRules = {
       sCy,
       tCy,
       sourceTopSlot,
-      sourceBottomSlot
+      sourceBottomSlot,
+      tcx,
+      tTop,
+      tBot,
+      V_GAP,
+      e,
+      idx
     }) {
       const candidates = [];
       const targetOnRight = sp.x + ss.w <= tp.x + 10;
@@ -105,6 +111,59 @@ window.NudgeRenderer.routeCandidateRules = {
       const bottomSlot = targetOnRight ? 0.76 : 0.24;
       const topX = sourceTopSlot(topSlot);
       const bottomX = sourceBottomSlot(bottomSlot);
+
+      const isFromOutsideToInside = e && (leftSet.has(e.from) || rightSet.has(e.from)) && childIds.has(e.to);
+      let targetHasConnectionsBelow = false;
+      let targetHasConnectionsAbove = false;
+
+      if (isFromOutsideToInside) {
+        const targetId = e.to;
+        const targetAbs = getAbs(targetId);
+        const targetSz = getSz(targetId);
+        const targetBottomY = targetAbs ? targetAbs.y + targetSz.h : 0;
+
+        allEdges.forEach((ge, edgeIdx) => {
+          if (edgeIdx !== idx && (ge.from === targetId || ge.to === targetId)) {
+            const otherId = ge.from === targetId ? ge.to : ge.from;
+            const otherAbs = getAbs(otherId);
+            const otherSz = getSz(otherId);
+            if (otherAbs) {
+              if (otherAbs.y >= targetBottomY - 10) {
+                targetHasConnectionsBelow = true;
+              }
+              if (otherAbs.y + otherSz.h <= targetAbs.y + 10) {
+                targetHasConnectionsAbove = true;
+              }
+            }
+          }
+        });
+      }
+
+      // If the external source is below the target, try connecting to the target's bottom face first
+      if (isFromOutsideToInside && sTop >= tBot - 2 && tcx !== undefined && tBot !== undefined && V_GAP !== undefined && !targetHasConnectionsBelow) {
+        candidates.push({
+          startPoint: { x: topX, y: sTop },
+          endPoint: { x: tcx, y: tBot },
+          bendPoints: [
+            { x: topX, y: tBot + V_GAP / 2 },
+            { x: tcx, y: tBot + V_GAP / 2 }
+          ],
+          _scoreBias: -100 // High priority / bias to prefer bottom-entry when possible
+        });
+      }
+
+      // Symmetrical rule: if the external source is above the target, try connecting to the target's top face first
+      if (isFromOutsideToInside && sBot <= tTop + 2 && tcx !== undefined && tTop !== undefined && V_GAP !== undefined && !targetHasConnectionsAbove) {
+        candidates.push({
+          startPoint: { x: bottomX, y: sBot },
+          endPoint: { x: tcx, y: tTop },
+          bendPoints: [
+            { x: bottomX, y: tTop - V_GAP / 2 },
+            { x: tcx, y: tTop - V_GAP / 2 }
+          ],
+          _scoreBias: -100
+        });
+      }
 
       if (tCy <= sCy + 20) {
         candidates.push({
