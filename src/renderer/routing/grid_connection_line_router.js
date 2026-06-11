@@ -620,6 +620,123 @@ globalThis.NudgeRenderer.gridConnectionLineRouter = (() => {
       });
     }
 
+    // ── Terminal approach lengthening ────────────────────────────────────────
+    // A port drop is only `clearance` (~18px) long, but the arrowhead marker
+    // covers ~15px of it — so the last bend sits right at the arrowhead base and
+    // no dash shows on the straight approach. Lengthen the final straight run to
+    // at least MIN_APPROACH, leaving room for the arrowhead plus a visible dash:
+    //   • Slide — when the corner behind the drop is interior, push it and its
+    //     perpendicular neighbour outward together (the route stays orthogonal).
+    //   • Jog — when the route is a bare L whose corner is pinned between two
+    //     ports, insert a small step at the far (non-arrowhead) end so the
+    //     arrowhead end still gets its straight run.
+    // Either move is kept only if it crosses no element and does not raise the
+    // line's conflict cost. The jog is applied only to the target (end) approach,
+    // since the arrowhead sits there by default and the step must land away from it.
+    const MIN_APPROACH = 30;
+
+    function lengthenTerminalApproaches(sections) {
+      const pointsByEdge = sections.map(section =>
+        section
+          ? [section.startPoint, ...(section.bendPoints || []), section.endPoint].map(p => ({ x: p.x, y: p.y }))
+          : null
+      );
+
+      function segmentHitsObstacle(vertical, c1, c2, lane) {
+        const lo = Math.min(c1, c2), hi = Math.max(c1, c2), m = 2;
+        for (const o of obstacles) {
+          if (vertical) {
+            if (lane > o.x + m && lane < o.x + o.width - m &&
+                Math.max(lo, o.y + m) < Math.min(hi, o.y + o.height - m)) return true;
+          } else {
+            if (lane > o.y + m && lane < o.y + o.height - m &&
+                Math.max(lo, o.x + m) < Math.min(hi, o.x + o.width - m)) return true;
+          }
+        }
+        return false;
+      }
+
+      // Replace pts in place with newPts, but only if no element is crossed and
+      // the line's conflict cost does not rise; otherwise restore and report false.
+      function commitIfClear(pts, idx, newPts, segmentsClear) {
+        if (!segmentsClear()) return false;
+        const saved = pts.map(p => ({ x: p.x, y: p.y }));
+        const before = edgeConflictCostIn(pointsByEdge, idx);
+        pts.length = 0;
+        pts.push(...newPts);
+        if (edgeConflictCostIn(pointsByEdge, idx) > before) {
+          pts.length = 0;
+          pts.push(...saved);
+          return false;
+        }
+        return true;
+      }
+
+      function extendEnd(pts, idx, atStart) {
+        if (pts.length < 3) return false;
+        const last = pts.length - 1;
+        const P = atStart ? pts[0] : pts[last];
+        const C = atStart ? pts[1] : pts[last - 1];
+        const B = atStart ? pts[2] : pts[last - 2];
+
+        const vertical = Math.abs(P.x - C.x) <= 0.5 && Math.abs(P.y - C.y) > 0.5;
+        const horizontal = Math.abs(P.y - C.y) <= 0.5 && Math.abs(P.x - C.x) > 0.5;
+        if (!vertical && !horizontal) return false;
+        // B–C must be perpendicular to the P–C approach for the move to stay orthogonal.
+        if (vertical ? Math.abs(B.y - C.y) > 0.5 : Math.abs(B.x - C.x) > 0.5) return false;
+
+        const approachLen = vertical ? Math.abs(C.y - P.y) : Math.abs(C.x - P.x);
+        if (approachLen >= MIN_APPROACH - 0.5) return false;
+
+        const sign = Math.sign((vertical ? C.y : C.x) - (vertical ? P.y : P.x)) || 1;
+        const newCoord = (vertical ? P.y : P.x) + sign * MIN_APPROACH;
+        const bIsPort = atStart ? (2 === last) : (last - 2 === 0);
+
+        if (!bIsPort) {
+          // SLIDE: move C and B outward together; the run behind B absorbs the change.
+          const A = atStart ? pts[3] : pts[last - 3];
+          const newPts = pts.map(p => ({ x: p.x, y: p.y }));
+          const nC = atStart ? newPts[1] : newPts[last - 1];
+          const nB = atStart ? newPts[2] : newPts[last - 2];
+          if (vertical) { nC.y = newCoord; nB.y = newCoord; } else { nC.x = newCoord; nB.x = newCoord; }
+          return commitIfClear(pts, idx, newPts, () => !(vertical
+            ? segmentHitsObstacle(false, nB.x, nC.x, newCoord) ||
+              segmentHitsObstacle(true, P.y, newCoord, nC.x) ||
+              segmentHitsObstacle(true, A.y, newCoord, nB.x)
+            : segmentHitsObstacle(true, nB.y, nC.y, newCoord) ||
+              segmentHitsObstacle(false, P.x, newCoord, nC.y) ||
+              segmentHitsObstacle(false, A.x, newCoord, nB.y)));
+        }
+
+        // JOG: bare L with a pinned corner. Only fix the target (arrowhead) end so
+        // the inserted step lands at the source. Insert N + moved corner Cp:
+        //   B → N (along approach axis) → Cp (along old B–C axis) → P (approach)
+        if (atStart) return false;
+        const Cp = vertical ? { x: C.x, y: newCoord } : { x: newCoord, y: C.y };
+        const N = vertical ? { x: B.x, y: newCoord } : { x: newCoord, y: B.y };
+        const newPts = [...pts.slice(0, last - 1).map(p => ({ x: p.x, y: p.y })), N, Cp, { x: P.x, y: P.y }];
+        return commitIfClear(pts, idx, newPts, () => !(vertical
+          ? segmentHitsObstacle(true, B.y, newCoord, B.x) ||      // B → N
+            segmentHitsObstacle(false, B.x, C.x, newCoord) ||     // N → Cp
+            segmentHitsObstacle(true, P.y, newCoord, C.x)         // Cp → P
+          : segmentHitsObstacle(false, B.x, newCoord, B.y) ||
+            segmentHitsObstacle(true, B.y, C.y, newCoord) ||
+            segmentHitsObstacle(false, P.x, newCoord, C.y)));
+      }
+
+      pointsByEdge.forEach((pts, idx) => {
+        if (!pts) return;
+        extendEnd(pts, idx, false);
+        extendEnd(pts, idx, true);
+      });
+
+      return sections.map((section, idx) => {
+        if (!section) return section;
+        const points = collapseCollinear(pointsByEdge[idx]);
+        return points.length >= 2 ? pointsToSection(points) : section;
+      });
+    }
+
     function routeAll() {
       const sections = new Array(allEdges.length).fill(null);
 
@@ -683,7 +800,7 @@ globalThis.NudgeRenderer.gridConnectionLineRouter = (() => {
         }
       }
 
-      return straightenKinks(nudgeSections(sections));
+      return lengthenTerminalApproaches(straightenKinks(nudgeSections(sections)));
     }
 
     return { routeAll, graph };

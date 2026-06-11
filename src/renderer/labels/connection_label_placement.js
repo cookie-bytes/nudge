@@ -198,6 +198,7 @@ window.NudgeRenderer.connectionLabelPlacement = {
 
   createPlacementAdapters({
     preferSourceSideLabel,
+    arrowAtSource,
     points,
     totalLen,
     segLens,
@@ -214,6 +215,7 @@ window.NudgeRenderer.connectionLabelPlacement = {
     function labelAnchorCandidate(anchor) {
       return window.NudgeRenderer.connectionLabelPlacement.createAnchorCandidate({
         anchor,
+        arrowAtSource,
         points,
         totalLen,
         textWidth,
@@ -643,6 +645,7 @@ window.NudgeRenderer.connectionLabelPlacement = {
 
   createAnchorCandidate({
     anchor,
+    arrowAtSource,
     points,
     totalLen,
     textWidth,
@@ -656,9 +659,14 @@ window.NudgeRenderer.connectionLabelPlacement = {
     const pA = isSource ? points[0] : points[points.length - 2];
     const pB = isSource ? points[1] : points[points.length - 1];
     const isHorizontal = Math.abs(pA.y - pB.y) < 2;
-    const anchorDist = isHorizontal
+    // The arrowhead marker (10 units at markerUnits=strokeWidth, 1.8px stroke)
+    // extends ~15px back from the endpoint it points at; keep the label clear
+    // of it plus a visible gap so text never crowds the arrowhead. Consume→bus
+    // lines flip the arrowhead to the source end.
+    const arrowClearance = isSource === Boolean(arrowAtSource) ? 30 : 0;
+    const anchorDist = (isHorizontal
       ? Math.max(45, (textWidth / 2) + 20)
-      : Math.max(45, (textHeight / 2) + 20);
+      : Math.max(45, (textHeight / 2) + 20)) + arrowClearance;
 
     if (totalLen < 2 * anchorDist) return false;
 

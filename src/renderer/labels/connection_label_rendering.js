@@ -96,6 +96,7 @@ window.NudgeRenderer.connectionLabelRendering = {
       tryPlaceClearMidpoint
     } = window.NudgeRenderer.connectionLabelPlacement.createPlacementAdapters({
       preferSourceSideLabel,
+      arrowAtSource: isConsumeBusLabel,
       points,
       totalLen,
       segLens,

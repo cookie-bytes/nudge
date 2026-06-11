@@ -22,6 +22,10 @@ Nudge runs as a **CLI tool** for direct use from the terminal, and as a local **
 
 See the full comparison source in [docs/core-banking-single-boundary-comparison.md](docs/core-banking-single-boundary-comparison.md).
 
+A second optimized container example — the search service — shows the grid router's orthogonal connection lines, with each connection label and arrowhead kept clear of its line so a dash always precedes the arrowhead:
+
+<p align="center"><img src="docs/search_service_container.png" height="480" alt="Search service container Nudge optimized layout" /></p>
+
 ---
 
 ## How It Works
