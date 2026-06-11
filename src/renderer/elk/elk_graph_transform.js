@@ -277,6 +277,7 @@ window.NudgeRenderer.elkGraphTransform = {
       width: rawNode.width || 150,
       height: rawNode.height || 80,
       type: rawNode.type || "container",
+      typeLabel: rawNode.typeLabel,
       label: rawNode.label || rawNode.id,
       tech: rawNode.tech || "",
       description: rawNode.description || "",

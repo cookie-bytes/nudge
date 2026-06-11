@@ -54,9 +54,11 @@ src/
 
 Flat diagrams run the critic loop: parse input → render in headless browser → run geometric critique → query LLM for an ELKjs parameter patch → repeat (max 4 times). Container diagrams use the custom renderer plus a one-pass visual-hint pipeline: top-row order, port hints, and diagonal-route hints are tried as staged renders, and only non-worsening candidates are accepted.
 
+C4Context diagrams reuse the container pipeline: `normalizeDiagramModel` in `optimizer.js` wraps their internal architecture elements in a hidden synthetic boundary (`_synthetic: true`, never drawn), while persons and external systems stay outside in the container plan's external zones. Only diagrams with no person/external elements (or no internal elements) take the flat ELKjs path.
+
 ### Data flow
 
-1. **`src/core/optimizer.js`** — The optimization loop. Accepts `{ diagramModel, outputDir, apiUrl, maxIterations, onLog, signal, checkpointTimeout, optimizationTimeout, enhance }`. Drives Playwright, calls `analyzeLayout`, runs the visual-hint pipeline for containers, and calls `getLLMOptimizationPatch` for flat diagrams. Returns `{ success, history, svgContent, pngPath }`. SVG is always returned — on zero-collision success or as best-effort from the last rendered iteration. The `captureSvg` helper extracts both `#svg-root` innerHTML and the page's `<head><style>` block, embedding styles inline so the exported SVG is self-contained.
+1. **`src/core/optimizer.js`** — The optimization loop. Accepts `{ diagramModel, outputDir, apiUrl, maxIterations, onLog, signal, checkpointTimeout, optimizationTimeout, enhance }`. Calls `normalizeDiagramModel` first (diagram-type inference plus the synthetic context boundary), so every entry point gets the same model normalisation. Drives Playwright, calls `analyzeLayout`, runs the visual-hint pipeline for containers, and calls `getLLMOptimizationPatch` for flat diagrams. Returns `{ success, history, svgContent, pngPath }`. SVG is always returned — on zero-collision success or as best-effort from the last rendered iteration. The `captureSvg` helper extracts both `#svg-root` innerHTML and the page's `<head><style>` block, embedding styles inline so the exported SVG is self-contained.
 
 2. **`src/cli/index.js`** — Thin CLI entry point. Reads the input file from `process.argv[2]`, parses it, calls `optimizeDiagram`, prints the summary table, and exits with code 1 on failure. All logging goes to stdout via `onLog`.
 

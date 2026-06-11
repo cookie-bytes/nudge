@@ -7,6 +7,38 @@ import {
   getLLMLabelPlacementHints
 } from './llm_client.js';
 
+/**
+ * Normalise a parsed diagram model before rendering, shared by every entry
+ * point (CLI, MCP). Infers the diagram type when the input format does not
+ * declare one (YAML), and wraps a C4Context diagram's internal architecture
+ * elements in a hidden synthetic boundary so context diagrams reuse the
+ * container layout pipeline. Persons and external systems stay outside the
+ * boundary, where the container plan places them in its external zones.
+ */
+export function normalizeDiagramModel(diagramModel) {
+  const hasBoundary = (diagramModel.nodes || []).some(n => n.type === 'boundary');
+  if (!diagramModel.diagramType) {
+    diagramModel.diagramType = hasBoundary ? 'C4Container' : 'C4Context';
+  }
+  if (hasBoundary || diagramModel._contextBoundaryAdded) return diagramModel;
+  if (!String(diagramModel.diagramType).startsWith('C4Context')) return diagramModel;
+
+  const outsideTypes = new Set(['person', 'person_ext', 'external']);
+  const insideNodes = (diagramModel.nodes || []).filter(n => !outsideTypes.has(n.type));
+  const outsideNodes = (diagramModel.nodes || []).filter(n => outsideTypes.has(n.type));
+  if (insideNodes.length === 0 || outsideNodes.length === 0) return diagramModel;
+
+  diagramModel.nodes = [...outsideNodes, {
+    id: '__context_boundary',
+    label: 'System Context',
+    type: 'boundary',
+    children: insideNodes,
+    _synthetic: true
+  }];
+  diagramModel._contextBoundaryAdded = true;
+  return diagramModel;
+}
+
 async function captureSvg(page, width, height) {
   const [svgMarkup, styles] = await Promise.all([
     page.locator('#svg-root').innerHTML(),
@@ -36,6 +68,8 @@ export async function optimizeDiagram({
   enhance = false,
 }) {
   fs.mkdirSync(outputDir, { recursive: true });
+
+  normalizeDiagramModel(diagramModel);
 
   // Container connection lines default to the grid router (A* over the
   // orthogonal visibility graph, docs/nudge_next_generation_design.md §3).

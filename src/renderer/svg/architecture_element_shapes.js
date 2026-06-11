@@ -1,6 +1,7 @@
 window.NudgeRenderer.architectureElementShapes = {
   // Helper to generate capitalized node type label
   getNodeTypeLabel(node) {
+    if (node.typeLabel) return node.typeLabel;
     let typeName = node.type;
     if (node.type === 'container') typeName = 'Container';
     else if (node.type === 'external') typeName = 'External System';
@@ -57,6 +58,9 @@ window.NudgeRenderer.architectureElementShapes = {
 
     return {
       boundary(node, absX, absY, layers) {
+        // Synthetic boundaries exist only to drive the container layout
+        // (e.g. C4Context diagrams) and are not drawn.
+        if (node._synthetic) return;
         const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
         rect.setAttribute("x", absX);
         rect.setAttribute("y", absY);

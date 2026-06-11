@@ -352,7 +352,7 @@ const elk = new ELK();
       const DB_V_GAP = V_GAP;
       const isPairedLayer = window.NudgeRenderer.utilityRowRules.isPairedLayer;
       const layerW = layers.map(l => l.reduce((s, n) => s + (n.width || 200), 0) + Math.max(0, l.length - 1) * H_GAP);
-      const layerH = layers.map(l => Math.max(...l.map(n => n.height || 80)));
+      const layerH = layers.map(l => Math.max(0, ...l.map(n => n.height || 80)));
       const maxLW  = Math.max(...layerW, 200);
       const contentW = maxLW;
 
