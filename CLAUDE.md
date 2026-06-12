@@ -52,7 +52,7 @@ src/
   utils.js              ← fetchWithTimeout helper
 ```
 
-Flat diagrams run the critic loop: parse input → render in headless browser → run geometric critique → query LLM for an ELKjs parameter patch → repeat (max 4 times). Container diagrams use the custom renderer plus a one-pass visual-hint pipeline: top-row order, port hints, and diagonal-route hints are tried as staged renders, and only non-worsening candidates are accepted.
+Flat diagrams run the critic loop: parse input → render in headless browser → run geometric critique → query LLM for an ELKjs parameter patch → repeat (max 4 times). Container and context diagrams use the custom renderer plus a visual-hint pipeline: connection label placement hints are tried as staged renders, and only non-worsening candidates are accepted.
 
 C4Context diagrams reuse the container pipeline: `normalizeDiagramModel` in `optimizer.js` wraps their internal architecture elements in a hidden synthetic boundary (`_synthetic: true`, never drawn), while persons and external systems stay outside in the container plan's external zones. Only diagrams with no person/external elements (or no internal elements) take the flat ELKjs path.
 
@@ -70,7 +70,7 @@ C4Context diagrams reuse the container pipeline: `normalizeDiagramModel` in `opt
 
 6. **`src/core/geometry.js`** — Stateless geometry analyzer (`analyzeLayout`). Detects element overlaps, connection-line element crossings, connection-label element crossings, poor aspect ratio, and tight spacing (<45px).
 
-7. **`src/core/llm_client.js`** — Stateless LLM API client (`getLLMTopOrder`, `getLLMPortHints`, `getLLMDiagonalRouteHints`, `getLLMOptimizationPatch`, `getActiveModel`). All LLM functions accept `{ signal, timeout }` options — the signal is forwarded to `fetchWithTimeout` so the MCP cancellation chain reaches every fetch. Legacy zone/routing checkpoint helpers still exist in this file, but the active container optimizer uses the visual-hint functions.
+7. **`src/core/llm_client.js`** — Stateless LLM API client (`getLLMLabelPlacementHints`, `getLLMOptimizationPatch`, `getActiveModel`). All LLM functions accept `{ signal, timeout }` options — the signal is forwarded to `fetchWithTimeout` so the MCP cancellation chain reaches every fetch. Legacy zone/routing checkpoint helpers still exist in this file.
 
 8. **`src/mermaid_parser.js`** — Converts Mermaid `C4Context`/`C4Container` syntax into the internal JSON model (`{ title, diagramType, layoutOptions, nodes, edges, rules }`). Supports `%% Rule: X above Y` comments for layout ordering constraints resolved via Bellman-Ford relaxation inside `render.html`.
 
@@ -96,7 +96,7 @@ C4Context diagrams reuse the container pipeline: `normalizeDiagramModel` in `opt
 
 **Label placement**: Connection labels try midpoint, target-anchored, source-anchored, and segment-clearance positions. Fallback placement now checks all architecture elements, including source/target elements, plus previously placed labels so labels do not settle on top of endpoint boxes.
 
-**Container visual hints**: `optimizer.js` runs a single label placement optimization step (`step_1_label_hints.png`) on top of the deterministic baseline (`step_0_initial.png`). It calls `getLLMLabelPlacementHints` to get connection label placement suggestions (`source`, `target`, or `middle`) and accepts them if the layout geometry score does not worsen. LLM responses are saved to `visual_hints.json` when present. Set `NUDGE_NO_LLM=1` or leave `enhance: false` to keep the deterministic baseline and skip network calls.
+**Container & context visual hints**: `optimizer.js` runs a single label placement optimization step (`step_1_label_hints.png`) on top of the deterministic baseline (`step_0_initial.png`). It calls `getLLMLabelPlacementHints` to get connection label placement suggestions (`source`, `target`, or `middle`) and accepts them if the layout geometry score does not worsen. LLM responses are saved to `visual_hints.json` when present. Set `NUDGE_NO_LLM=1` or leave `enhance: false` to keep the deterministic baseline and skip network calls.
 
 **Diagram model format**: YAML, Mermaid, and C4-PlantUML inputs are normalised to the same `diagramModel` JSON schema before rendering. YAML files are loaded directly; Mermaid files are transformed by `parseMermaidC4`; C4-PlantUML files are transformed by `parsePlantUMLC4`. The YAML schema mirrors the internal model directly (see `examples/system_context.yaml`).
 

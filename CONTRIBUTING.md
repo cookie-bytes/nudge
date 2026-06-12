@@ -38,7 +38,7 @@ The codebase has three layers — changes should respect the boundaries between 
 - **`src/render.html`** — HTML shell loaded by Playwright as a `file://` URL. Bundles ELKjs via `<script src="vendor/elk.bundled.js">` and sources the rendering engine.
 - **`src/render_engine.js`** — ELKjs layout engine + SVG renderer. Exposes `window.renderDiagram` and `window.computeContainerPlan`. The custom container renderer applies `_layoutOverrides.internalOrder`, `_layoutOverrides.portHints`, and `_layoutOverrides.routeHints`. The two-pass ELK layout and port namespace quirks are documented in CLAUDE.md.
 - **`src/core/geometry.js`** — Pure geometric algorithms for the post-render critic: overlap detection, segment-intersection, edge-node crossings, label-node crossings, and spacing warnings. No side-effects or network calls.
-- **`src/core/llm_client.js`** — Stateless LLM API client for flat-diagram optimization and container visual hints (`getLLMTopOrder`, `getLLMPortHints`, `getLLMDiagonalRouteHints`). All functions accept `{ signal, timeout }` — keep this consistent if adding new LLM calls so the MCP cancellation chain stays intact.
+- **`src/core/llm_client.js`** — Stateless LLM API client for flat-diagram optimization and container/context visual hints (`getLLMLabelPlacementHints`, `getLLMOptimizationPatch`). All functions accept `{ signal, timeout }` — keep this consistent if adding new LLM calls so the MCP cancellation chain stays intact.
 - **`src/utils.js`** — `fetchWithTimeout` with external signal support. Don't add unrelated utilities here.
 
 ## Pull requests

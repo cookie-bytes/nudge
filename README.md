@@ -8,7 +8,7 @@
 
 Nudge automatically produces clean, publication-ready C4 Model architecture diagrams. Its quality floor comes from deterministic layout rules: a custom Container Layout Engine for both context and container diagrams, orthogonal grid routing (A* pathfinding over a sparse orthogonal visibility graph) with rip-up-and-reroute, channel nudging, and collision-aware Connection Label placement. ELKjs remains the engine for flat diagrams with no person/external elements.
 
-Local LLM reviewers are an optional enhancement layer. They can suggest top-row ordering, port sides, diagonal route intent, or ELKjs option patches, but those suggestions are accepted only when they do not worsen the geometric score.
+Local LLM reviewers are an optional enhancement layer. They can suggest connection label placement overrides for context and container diagrams, or ELKjs option patches for flat diagrams, but those suggestions are accepted only when they do not worsen the geometric score.
 
 Nudge runs as a **CLI tool** for direct use from the terminal, and as a local **MCP server** so LLM clients like Claude Desktop can call it as a tool — generating and optimizing diagrams in a single conversational step.
 
@@ -53,7 +53,7 @@ graph TD
 1. **Ingestion**: Parses C4 Context or C4 Container diagrams from `.mermaid`, `.puml`/`.plantuml`, or `.yaml` specifications. C4Context diagrams are normalised by wrapping their internal architecture elements in a hidden synthetic boundary — persons and external systems stay outside — so context diagrams reuse the full container pipeline.
 2. **Deterministic rendering**: Produces a complete baseline layout without needing cloud services. Context and container diagrams use Nudge's custom deterministic rules; flat diagrams without person/external elements use ELKjs.
 3. **Geometric critique**: Measures DOM bounding boxes to detect Element Overlaps, Connection-Line Element Crossings, Connection-Label Element Crossings, poor aspect ratio, and tight spacing. Container routing uses A* pathfinding over a sparse orthogonal visibility graph, hardest-first routing, and rip-up-and-reroute to optimize line paths and avoid corridors.
-4. **Optional enhancement**: When LLM calls are enabled, Nudge asks a local OpenAI-compatible model for small layout improvements. Container hints are accepted only when the candidate score is no worse than the current accepted state. Flat diagram patches are applied through the existing critic loop.
+4. **Optional enhancement**: When LLM calls are enabled, Nudge asks a local OpenAI-compatible model for small layout improvements. Container and context diagram hints are accepted only when the candidate score is no worse than the current accepted state. Flat diagram patches are applied through the existing critic loop.
 5. **Export**: Writes a best-effort SVG and PNG even if geometric issues remain.
 
 ---

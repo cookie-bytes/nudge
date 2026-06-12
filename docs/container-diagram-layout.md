@@ -137,7 +137,7 @@ After classification, each zone's node array is sorted by the average layer/colu
 This sorting runs deterministically in the browser rendering pass with zero latency cost, producing a clean initial layout before any optional visual hints are evaluated.
 
 **Override support (`_layoutOverrides`):**  
-The active container optimizer writes accepted visual hints into `_layoutOverrides`. `internalOrder` can override the left-to-right order of an internal layer, `portHints` can request source/target sides for specific edges, and `routeHints` can request route intents such as `LEFT_LANE`, `RIGHT_LANE`, or `ORTHOGONAL_NEAR_TARGET`. The renderer also still understands `zoneOverrides` and `swapCommands` for older experiments, but the production optimizer currently uses the visual-hint keys.
+The renderer supports layout overrides in `_layoutOverrides`. `internalOrder` can override the left-to-right order of an internal layer, `portHints` can request source/target sides for specific edges, and `routeHints` can request route intents such as `LEFT_LANE`, `RIGHT_LANE`, or `ORTHOGONAL_NEAR_TARGET`. The active container and context optimizer currently only generates connection label placement hints (`labelHints`).
 
 ### 2b: Total diagram dimensions
 
@@ -217,10 +217,10 @@ Labels containing technology notes (e.g. `Relationship Label [JSON/HTTPS]`) are 
 ## Visual-Hint Pipeline
 
 **File:** `src/core/optimizer.js`  
-**Functions:** `getLLMTopOrder`, `getLLMPortHints`, `getLLMDiagonalRouteHints` (all in `src/core/llm_client.js`)  
-**Runs:** Once for container diagrams, before final SVG/PNG export.
+**Functions:** `getLLMLabelPlacementHints` (in `src/core/llm_client.js`)  
+**Runs:** Once for container and context diagrams, before final SVG/PNG export.
 
-Container diagrams do not use the flat-diagram ELKjs parameter loop. Instead, the optimizer renders a small sequence of visual states and keeps only candidate hints that improve the renderer's geometry score. When `NUDGE_NO_LLM` is set, each stage is still rendered for inspection but no LLM hint calls are made.
+Container and context diagrams do not use the flat-diagram ELKjs parameter loop. Instead, the optimizer renders a small sequence of visual states and keeps only candidate hints that improve the renderer's geometry score. When `NUDGE_NO_LLM` is set, each stage is still rendered for inspection but no LLM hint calls are made.
 
 ### Stage 0 — Initial deterministic render
 
