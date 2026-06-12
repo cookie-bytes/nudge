@@ -232,7 +232,10 @@ async function run() {
   console.log(`Artifacts:     ${args.outputDir}`);
 
   const browserMessages = [];
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  });
   const baselinePage = await createRendererPage(browser, baselineRuntime, msg => browserMessages.push(msg));
   const candidatePage = await createRendererPage(browser, candidateRuntime, msg => browserMessages.push(msg));
 

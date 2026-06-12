@@ -444,7 +444,10 @@ async function runTests() {
   }
 
   console.log(`Found ${testFiles.length} test diagram(s). Initializing Playwright...`);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  });
   const page = await browser.newPage();
   
   const templatePath = new URL('../src/render.html', import.meta.url).href;
