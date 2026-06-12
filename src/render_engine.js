@@ -5,6 +5,7 @@ const elk = new ELK();
     // Main layout and rendering entrypoint called by Playwright
     window.renderDiagram = async function (diagramData) {
       try {
+        await document.fonts.ready;
         const hasBoundary = (diagramData.nodes || []).some(n => n.type === 'boundary');
         let laidOutGraph;
 
