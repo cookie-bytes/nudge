@@ -116,6 +116,58 @@ window.NudgeRenderer.connectionLabelPlacement = {
     return [...allComponents, ...boundaryBorderObstacles];
   },
 
+  // Gap between a label's box and the polyline it belongs to (0 when the line
+  // passes through or touches the box). Measured box-edge to line, not
+  // centre-to-line: a wide label sitting correctly beside a vertical segment has
+  // a large centre distance but no real gap, and penalising that would push
+  // labels back onto their own lines.
+  boxToPolylineDistance(box, points) {
+    if (!points || points.length < 2) return 0;
+    const cx = box.x + box.width / 2;
+    const cy = box.y + box.height / 2;
+    const halfW = box.width / 2;
+    const halfH = box.height / 2;
+    let min = Infinity;
+    for (let i = 0; i < points.length - 1; i++) {
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const lenSq = dx * dx + dy * dy;
+      // Sample the segment; exact box-segment distance is not worth the code
+      // here, and the sampling resolution is far finer than the penalty band.
+      const steps = Math.max(2, Math.min(40, Math.round(Math.sqrt(lenSq) / 8)));
+      for (let s = 0; s <= steps; s++) {
+        const t = lenSq > 0 ? s / steps : 0;
+        const px = p1.x + t * dx;
+        const py = p1.y + t * dy;
+        const gx = Math.max(Math.abs(px - cx) - halfW, 0);
+        const gy = Math.max(Math.abs(py - cy) - halfH, 0);
+        min = Math.min(min, Math.hypot(gx, gy));
+        if (min === 0) return 0;
+      }
+    }
+    return min;
+  },
+
+  // Penalty for parking a label in the dead zone just outside an element. A
+  // non-overlapping label 4px from a box it has nothing to do with reads as
+  // attached to it, so near-misses have to cost more than a slightly longer
+  // move to genuine clearance.
+  elementClearancePenalty(box, obstacleNodes, minGap = 26) {
+    let penalty = 0;
+    for (const comp of obstacleNodes) {
+      if (comp._borderStrip) continue;
+      if (!Number.isFinite(comp.x) || !Number.isFinite(comp.width)) continue;
+      const gapX = Math.max(comp.x - (box.x + box.width), box.x - (comp.x + comp.width), 0);
+      const gapY = Math.max(comp.y - (box.y + box.height), box.y - (comp.y + comp.height), 0);
+      if (gapX === 0 && gapY === 0) continue; // overlap: priced elsewhere
+      const gap = Math.hypot(gapX, gapY);
+      if (gap < minGap) penalty += (minGap - gap);
+    }
+    return penalty;
+  },
+
   createLabelObstacles(allComponents, boundaryBorderObstacles, placedLabels) {
     return [...allComponents, ...boundaryBorderObstacles, ...placedLabels];
   },
@@ -146,8 +198,8 @@ window.NudgeRenderer.connectionLabelPlacement = {
       return labelEdgeHitCount(labelBox) > 0;
     }
 
-    function sharedTargetDatabaseLabelPressure(labelBox) {
-      return window.NudgeRenderer.connectionLabelPlacement.sharedTargetDatabaseLabelPressure(labelBox, targetNode, targetId, placedLabels);
+    function sharedTargetLabelPressure(labelBox) {
+      return window.NudgeRenderer.connectionLabelPlacement.sharedTargetLabelPressure(labelBox, targetNode, targetId, placedLabels);
     }
 
     return {
@@ -155,7 +207,7 @@ window.NudgeRenderer.connectionLabelPlacement = {
       checkLabelEdgeCollision,
       labelBoxAt,
       labelEdgeHitCount,
-      sharedTargetDatabaseLabelPressure
+      sharedTargetLabelPressure
     };
   },
 
@@ -171,7 +223,7 @@ window.NudgeRenderer.connectionLabelPlacement = {
     labelBoxAt,
     checkLabelCollision,
     labelEdgeHitCount,
-    sharedTargetDatabaseLabelPressure,
+    sharedTargetLabelPressure,
     boxesOverlap
   }) {
     return function labelCandidateScore(cx, cy, segLen = 0) {
@@ -190,7 +242,7 @@ window.NudgeRenderer.connectionLabelPlacement = {
         labelBoxAt,
         checkLabelCollision,
         labelEdgeHitCount,
-        sharedTargetDatabaseLabelPressure,
+        sharedTargetLabelPressure,
         boxesOverlap
       });
     };
@@ -400,9 +452,10 @@ window.NudgeRenderer.connectionLabelPlacement = {
     });
 
     {
-      const placement = window.NudgeRenderer.connectionLabelPlacement.spreadSameTargetDatabaseLabel({
+      const placement = window.NudgeRenderer.connectionLabelPlacement.spreadSameTargetLabel({
         midX,
         midY,
+        points,
         textWidth,
         textHeight,
         H_PAD,
@@ -442,9 +495,12 @@ window.NudgeRenderer.connectionLabelPlacement = {
     return { midX, midY };
   },
 
-  // Last-resort relocation when the chosen position still sits on another
-  // connection line: walk the label's own route (with small perpendicular
-  // offsets) for the nearest spot clear of elements, labels, and lines.
+  // Last-resort relocation when the chosen position still sits on an element or
+  // another connection line: walk the label's own route (with small
+  // perpendicular offsets) for the best spot clear of elements, labels, and
+  // lines. Degrades to the least-bad candidate rather than an unchecked
+  // midpoint, so a crowded corridor yields a slightly-off label instead of one
+  // buried in an element.
   rescueLabelFromConnectionLineHits({
     midX,
     midY,
@@ -461,9 +517,39 @@ window.NudgeRenderer.connectionLabelPlacement = {
     labelEdgeHitCount
   }) {
     if (!points || points.length < 2) return { x: midX, y: midY };
-    if (labelEdgeHitCount(labelBoxAt(midX, midY, textWidth, textHeight)) === 0) {
-      return { x: midX, y: midY };
-    }
+
+    // Cost of a position: element burial dominates, then label overlap, then
+    // line hits, with a small pull back towards the original point.
+    const rescueCost = (cx, cy) => {
+      const box = labelBoxAt(cx, cy, textWidth, textHeight);
+      // Count obstacles hit, not a boolean. In a boundary diagram every
+      // candidate clips a boundary border strip, so a yes/no test is constant
+      // across the whole candidate set and the choice degenerates into the
+      // distance tiebreak — which will happily pick a spot inside a real element.
+      const hit = obstacleNodes.filter(n => boxesOverlap(box, n));
+      const buried = hit.filter(n => !n._borderStrip).length;
+      const borderClips = hit.length - buried;
+      const labelOverlaps = placedLabels.filter(pl => boxesOverlap(box, pl)).length;
+      const clearance = window.NudgeRenderer.connectionLabelPlacement
+        .elementClearancePenalty(box, obstacleNodes);
+      const offRoute = Math.max(0, window.NudgeRenderer.connectionLabelPlacement
+        .boxToPolylineDistance(box, points) - 8);
+      return (
+        buried * 100000 +
+        labelOverlaps * 40000 +
+        labelEdgeHitCount(box) * 9000 +
+        borderClips * 1500 +
+        offRoute * 400 +
+        clearance * 300 +
+        Math.hypot(cx - midX, cy - midY)
+      );
+    };
+
+    const currentCost = rescueCost(midX, midY);
+    // Nothing wrong with where we are: leave it alone. Note a clearance-only
+    // problem (label parked a few px off an unrelated box) must still qualify,
+    // so this cannot be a threshold on the combined cost.
+    if (currentCost === 0) return { x: midX, y: midY };
 
     const halfW = textWidth / 2 + H_PAD;
     const halfH = textHeight / 2 + V_PAD;
@@ -492,14 +578,11 @@ window.NudgeRenderer.connectionLabelPlacement = {
 
     let best = null;
     for (const cand of candidates) {
-      const box = labelBoxAt(cand.x, cand.y, textWidth, textHeight);
-      if (labelEdgeHitCount(box) > 0) continue;
-      if (checkLabelCollision(cand.x, cand.y, textWidth, textHeight, obstacleNodes)) continue;
-      if (placedLabels.some(pl => boxesOverlap(box, pl))) continue;
-      const dist = Math.hypot(cand.x - midX, cand.y - midY);
-      if (!best || dist < best.dist) best = { x: cand.x, y: cand.y, dist };
+      const cost = rescueCost(cand.x, cand.y);
+      if (!best || cost < best.cost) best = { x: cand.x, y: cand.y, cost };
     }
-    return best ? { x: best.x, y: best.y } : { x: midX, y: midY };
+    // Only move if we actually improve on where we started.
+    return best && best.cost < currentCost ? { x: best.x, y: best.y } : { x: midX, y: midY };
   },
 
   boxesOverlap(boxA, boxB) {
@@ -582,8 +665,7 @@ window.NudgeRenderer.connectionLabelPlacement = {
     return false;
   },
 
-  sharedTargetDatabaseLabelPressure(labelBox, targetNode, targetId, placedLabels) {
-    if (!targetNode || targetNode.type !== 'database') return 0;
+  sharedTargetLabelPressure(labelBox, targetNode, targetId, placedLabels) {
     let pressure = 0;
     for (const placed of placedLabels) {
       if (placed.targetId !== targetId) continue;
@@ -614,20 +696,24 @@ window.NudgeRenderer.connectionLabelPlacement = {
     labelBoxAt,
     checkLabelCollision,
     labelEdgeHitCount,
-    sharedTargetDatabaseLabelPressure,
+    sharedTargetLabelPressure,
     boxesOverlap
   }) {
     const labelBox = labelBoxAt(cx, cy, textWidth, textHeight);
     const nodeCollision = checkLabelCollision(cx, cy, textWidth, textHeight, obstacles) ? 1 : 0;
     const edgeHits = labelEdgeHitCount(labelBox);
     const labelHits = placedLabels.filter(pl => boxesOverlap(labelBox, pl)).length;
-    const sharedTargetPressure = sharedTargetDatabaseLabelPressure(labelBox);
+    const sharedTargetPressure = sharedTargetLabelPressure(labelBox);
     const centerClearance = allComponents.length > 0
       ? Math.min(...allComponents.map(n => pointToBoxDist(cx, cy, n)))
       : 200;
     const sourceDistanceBias = preferSourceSideLabel
       ? Math.min(180, Math.hypot(cx - pStart.x, cy - pStart.y)) * 5
       : 0;
+    // centerClearance measures from the label's centre, so a wide label can sit
+    // a few px off an element and still look clear. Price the box's own gap too.
+    const edgeClearancePenalty = window.NudgeRenderer.connectionLabelPlacement
+      .elementClearancePenalty(labelBox, allComponents);
     return {
       nodeCollision,
       edgeHits,
@@ -637,7 +723,8 @@ window.NudgeRenderer.connectionLabelPlacement = {
         labelHits * 50000 +
         edgeHits * 9000 -
         sharedTargetPressure * 260 -
-        Math.min(centerClearance, 180) * 12 -
+        Math.min(centerClearance, 180) * 12 +
+        edgeClearancePenalty * 300 -
         segLen * 0.3 +
         sourceDistanceBias
     };
@@ -887,9 +974,10 @@ window.NudgeRenderer.connectionLabelPlacement = {
     return midY;
   },
 
-  spreadSameTargetDatabaseLabel({
+  spreadSameTargetLabel({
     midX,
     midY,
+    points,
     textWidth,
     textHeight,
     H_PAD,
@@ -902,8 +990,6 @@ window.NudgeRenderer.connectionLabelPlacement = {
     checkLabelCollision,
     labelEdgeHitCount
   }) {
-    if (!targetNode || targetNode.type !== 'database') return { x: midX, y: midY };
-
     const labelH = textHeight + 2 * V_PAD;
     const labelW = textWidth + 2 * H_PAD;
     const sameTargetLabels = placedLabels.filter(pl => pl.targetId === targetId);
@@ -921,10 +1007,19 @@ window.NudgeRenderer.connectionLabelPlacement = {
       const nodeCollision = checkLabelCollision(cx, cy, textWidth, textHeight, obstacleNodes) ? 1 : 0;
       const labelOverlapCount = placedLabels.filter(pl => boxesOverlap(box, pl)).length;
       const sameTargetCloseCount = sameTargetLabels.filter(pl => boxesOverlap(expanded(box, 28), expanded(pl, 28))).length;
+      const clearance = window.NudgeRenderer.connectionLabelPlacement
+        .elementClearancePenalty(box, obstacleNodes);
+      // Spreading apart must not detach the label from its own line: once the
+      // box is clear of its route by more than a few px a reader can no longer
+      // tell which relationship it describes.
+      const offRoute = Math.max(0, window.NudgeRenderer.connectionLabelPlacement
+        .boxToPolylineDistance(box, points) - 8);
       return (
         nodeCollision * 100000 +
         labelOverlapCount * 50000 +
         sameTargetCloseCount * 12000 +
+        offRoute * 400 +
+        clearance * 0 +
         labelEdgeHitCount(box) * 2500 +
         Math.hypot(cx - midX, cy - midY) * 3
       );

@@ -58,7 +58,7 @@ window.NudgeRenderer.connectionLabelRendering = {
       checkLabelEdgeCollision,
       labelBoxAt,
       labelEdgeHitCount,
-      sharedTargetDatabaseLabelPressure
+      sharedTargetLabelPressure
     } = window.NudgeRenderer.connectionLabelPlacement.createCollisionAccessors({
       H_PAD,
       V_PAD,
@@ -85,7 +85,7 @@ window.NudgeRenderer.connectionLabelRendering = {
       labelBoxAt,
       checkLabelCollision,
       labelEdgeHitCount,
-      sharedTargetDatabaseLabelPressure,
+      sharedTargetLabelPressure,
       boxesOverlap
     });
 

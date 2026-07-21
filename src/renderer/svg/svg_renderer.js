@@ -66,11 +66,14 @@ window.NudgeRenderer.svgRenderer = {
       .filter(n => n.type === 'boundary')
       .flatMap(n => {
         const clearance = 12;
+        // _borderStrip marks these as soft obstacles: a label clipping a thin
+        // boundary border is cosmetic, whereas one clipping a real element is a
+        // defect. Scorers that treat both alike lose the ability to choose.
         return [
-          { x: n.x - clearance, y: n.y - clearance, width: n.width + clearance * 2, height: clearance * 2 },
-          { x: n.x - clearance, y: n.y + n.height - clearance, width: n.width + clearance * 2, height: clearance * 2 },
-          { x: n.x - clearance, y: n.y - clearance, width: clearance * 2, height: n.height + clearance * 2 },
-          { x: n.x + n.width - clearance, y: n.y - clearance, width: clearance * 2, height: n.height + clearance * 2 }
+          { x: n.x - clearance, y: n.y - clearance, width: n.width + clearance * 2, height: clearance * 2, _borderStrip: true },
+          { x: n.x - clearance, y: n.y + n.height - clearance, width: n.width + clearance * 2, height: clearance * 2, _borderStrip: true },
+          { x: n.x - clearance, y: n.y - clearance, width: clearance * 2, height: n.height + clearance * 2, _borderStrip: true },
+          { x: n.x + n.width - clearance, y: n.y - clearance, width: clearance * 2, height: n.height + clearance * 2, _borderStrip: true }
         ];
       });
   },
