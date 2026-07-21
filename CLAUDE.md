@@ -9,6 +9,7 @@ npm install                               # Install dependencies
 npx playwright install chromium           # Required one-time browser setup
 npm start                                 # Run CLI optimizer on examples/search_service_container.mermaid
 node src/cli/index.js <path/to/file>      # Run CLI on a custom .mermaid, .mmd, or .yaml file
+node src/cli/index.js <file> --out <dir>  # Write outputs to <dir> (also honours NUDGE_OUTPUT_DIR; defaults to ./.nudge)
 node src/mcp/index.js                     # Start the MCP stdio server
 npm test                                  # Run the full test suite (unit + integration + visual)
 npm run test:unit                         # Run fast, isolated parser/geometry unit tests

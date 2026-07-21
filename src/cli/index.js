@@ -13,14 +13,35 @@ const hasEnhance = enhanceIndex !== -1;
 if (hasEnhance) {
   args.splice(enhanceIndex, 1);
 }
+
+// Output directory precedence: --out flag > NUDGE_OUTPUT_DIR (shared with the
+// MCP server) > ./.nudge in the current working directory.
+let outArg;
+const outIndex = args.findIndex(a => a === '--out' || a.startsWith('--out='));
+if (outIndex !== -1) {
+  const token = args[outIndex];
+  if (token.startsWith('--out=')) {
+    outArg = token.slice('--out='.length);
+    args.splice(outIndex, 1);
+  } else {
+    outArg = args[outIndex + 1];
+    args.splice(outIndex, 2);
+  }
+  if (!outArg) {
+    console.error('--out requires a directory path.');
+    process.exit(1);
+  }
+}
+
 const inputArg = args[0];
 const INPUT_PATH = inputArg ? path.resolve(inputArg) : path.resolve('examples/system_context.yaml');
-const OUTPUT_DIR = path.resolve('.nudge');
+const OUTPUT_DIR = path.resolve(outArg || process.env.NUDGE_OUTPUT_DIR || '.nudge');
 
 const enhance = hasEnhance && !process.env.NUDGE_NO_LLM;
 
 console.log('=== Nudge: Deterministic C4 Layout Engine ===');
 console.log(`Input: ${INPUT_PATH}`);
+console.log(`Output: ${OUTPUT_DIR}`);
 console.log(`LLM Enhancement: ${enhance ? 'Enabled' : 'Disabled (deterministic-only mode)'}`);
 
 let diagramModel;

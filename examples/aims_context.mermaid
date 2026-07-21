@@ -1,0 +1,33 @@
+C4Context
+title AIMS (Auctions Information Management System)
+
+Person(branchStaff, "Branch Staff", "Manheim branch operatives managing the full vehicle lifecycle — creation, sale, transport, invoicing, and pass-out")
+
+System(aims, "AIMS – Auctions Information Management System", "Manages the branch vehicle lifecycle from creation to sale: transport, documentation, invoicing, accounts. .NET Core / React. Replaced MBOS.")
+
+System(svv, "SVV – Single Vehicle View", "Core shared vehicle data service. Consumes vehicle attribute changes published by AIMS via RabbitMQ.")
+System(iam, "IAM – Identity & Access Management", "Syncs customer data with AIMS and enables access after KYC checks are completed.")
+System(mcm, "MCM – Multi Channel Management", "Pushes validated buyer/vendor accounts into AIMS. Online sold feed triggers invoicing in AIMS.")
+System(dealerAuction, "Dealer Auction", "External timed auction marketplace (Autotrader JV). AIMS sends API requests to list vehicles; receives sale-outcome webhooks back.")
+System_Ext(mandata, "Mandata", "Third-party transport management system. Receives transport requests initiated from AIMS.")
+System(yardApp, "Yard App", "Mobile handheld app for on-site vehicle movements. Sends gating, lotting, and stock-check events that end in AIMS.")
+System(ips, "IPS – Inspection Print Service", "Aggregates inspection data from AIMS as part of generating ~10k inspection PDFs daily.")
+System(masFulfilment, "MAS Fulfilment Service", "Receives invoice extracts from AIMS to coordinate online payment journeys via the website.")
+System_Ext(salesforce, "Salesforce", "CRM for sales-led account creation. Accounts are manually rekeyed into AIMS (no automated integration).")
+
+Rel(branchStaff, aims, "Manages vehicles, sales, invoicing, transport, and pass-out")
+
+Rel(aims, svv, "Publishes vehicle attribute changes", "RabbitMQ")
+Rel(iam, aims, "Syncs customer data after KYC checks")
+Rel(mcm, aims, "Pushes validated accounts; sold feed triggers invoicing")
+Rel(aims, dealerAuction, "Lists eligible vehicles via API")
+Rel(dealerAuction, aims, "Returns sale outcomes via webhooks")
+Rel(aims, mandata, "Initiates transport requests")
+Rel(yardApp, aims, "Sends yard events (gating, lotting, stock checks)")
+Rel(aims, ips, "Provides inspection data for PDF generation")
+Rel(aims, masFulfilment, "Sends invoice extracts for online payment")
+Rel(salesforce, aims, "Accounts manually rekeyed (no automated sync)")
+
+Note bottom-right: Integration between systems is predominantly routed via MuleSoft ESB (including the EMS pub/sub layer). The AIMS → SVV relationship via RabbitMQ is a notable exception — it is a direct pub/sub connection.
+
+UpdateLayoutConfig($c4ShapeInRow="4", $c4BoundaryInRow="1")
