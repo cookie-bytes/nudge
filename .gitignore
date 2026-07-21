@@ -2,8 +2,16 @@
 node_modules/
 jspm_packages/
 
-# Vendored runtime assets (populated by postinstall)
-src/vendor/
+# Vendored runtime assets (populated by postinstall).
+# `src/vendor/*` and not `src/vendor/`: git does not descend into an ignored
+# *directory*, so a negation for a file inside one never takes effect.
+src/vendor/*
+# ...except the baked Outfit glyph table. It is generated, but committing it is
+# deliberate: `npm ci --omit=dev` has neither fontkit nor the font package, so
+# without a committed table that install path cannot produce a working renderer.
+# Generation is byte-deterministic and test/unit/font_metrics_sync.test.js fails
+# if the committed table ever drifts from the generator.
+!src/vendor/outfit_metrics.js
 
 # Debug logs
 npm-debug.log*

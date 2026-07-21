@@ -19,10 +19,45 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import * as fontkit from 'fontkit';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const OUT = path.join(ROOT, 'src', 'vendor', 'outfit_metrics.js');
+const DEFAULT_OUT = path.join(ROOT, 'src', 'vendor', 'outfit_metrics.js');
+
+// `--output <path>` writes elsewhere, which is how the drift test regenerates
+// into a temp dir and compares without touching the committed table.
+function parseOutput(argv) {
+  const i = argv.indexOf('--output');
+  if (i === -1) return DEFAULT_OUT;
+  const value = argv[i + 1];
+  if (!value) {
+    console.error('--output requires a path.');
+    process.exit(1);
+  }
+  return path.resolve(value);
+}
+const OUT = parseOutput(process.argv.slice(2));
+
+// `fontkit` and `@fontsource/outfit` are devDependencies, so they are absent
+// under `npm ci --omit=dev`. The generated table is committed and its output is
+// byte-deterministic, so an install without the dev tooling is fine: stand down
+// and use the committed table rather than failing the install.
+//
+// Imported dynamically for exactly this reason — a static import would throw at
+// module load, before any of this could run.
+let fontkit;
+try {
+  fontkit = await import('fontkit');
+} catch {
+  if (fs.existsSync(DEFAULT_OUT)) {
+    console.log('Outfit metrics: fontkit not installed (--omit=dev?); using the committed table.');
+    process.exit(0);
+  }
+  console.error(
+    `Cannot generate ${path.relative(ROOT, DEFAULT_OUT)}: fontkit is not installed and no committed ` +
+    `table was found. Run a full \`npm install\` (without --omit=dev).`
+  );
+  process.exit(1);
+}
 
 // `measureTextWidth` asks canvas for `normal` or `bold`, which resolve to
 // weights 400 and 700. Those are the only two faces any measurement uses.
@@ -71,12 +106,23 @@ function buildWeight(weight) {
   return { unitsPerEm: font.unitsPerEm, advances, kern, fallback };
 }
 
+// Same reasoning as the fontkit check above: the font package is a
+// devDependency, so its absence is not an error when the table already exists.
+if (!WEIGHTS.every(w => fs.existsSync(fontPath(w)))) {
+  if (fs.existsSync(DEFAULT_OUT)) {
+    console.log('Outfit metrics: @fontsource/outfit not installed; using the committed table.');
+    process.exit(0);
+  }
+  console.error(
+    `Cannot generate ${path.relative(ROOT, DEFAULT_OUT)}: @fontsource/outfit is not installed and no ` +
+    `committed table was found. Run a full \`npm install\` (without --omit=dev).`
+  );
+  process.exit(1);
+}
+
 console.log('Generating Outfit metrics table...');
 const weights = {};
 for (const weight of WEIGHTS) {
-  if (!fs.existsSync(fontPath(weight))) {
-    throw new Error(`Missing Outfit font file for weight ${weight}: ${fontPath(weight)}`);
-  }
   weights[weight] = buildWeight(weight);
 }
 
