@@ -55,6 +55,70 @@ test('analyzeLayout detects connection-line element (edge-node) crossings', () =
   assert.match(crossings[0].details, /cuts directly through node 'Node C'/);
 });
 
+test('analyzeLayout scores the rendered connection-label box, including on its own endpoints', () => {
+  // The label carries explicit x/y from the renderer and lands inside nodeA,
+  // which is the relationship's own source. Endpoints are not exempt.
+  const layoutData = {
+    width: 800,
+    height: 600,
+    nodes: [
+      { id: 'nodeA', label: 'Node A', x: 50, y: 100, width: 120, height: 80 },
+      { id: 'nodeB', label: 'Node B', x: 400, y: 100, width: 120, height: 80 }
+    ],
+    edges: [
+      {
+        id: 'edge1',
+        labels: [{ text: 'buried label', width: 60, height: 20, x: 110, y: 140 }],
+        sources: ['nodeA'],
+        targets: ['nodeB'],
+        sections: [
+          {
+            startPoint: { x: 170, y: 140 },
+            endPoint: { x: 400, y: 140 },
+            bendPoints: []
+          }
+        ]
+      }
+    ]
+  };
+
+  const report = analyzeLayout(layoutData);
+
+  const crossings = report.collisions.filter(c => c.type === 'edge_label_node_crossing');
+  assert.equal(crossings.length, 1);
+  assert.equal(crossings[0].node, 'nodeA');
+});
+
+test('analyzeLayout does not flag a connection label placed clear of every element', () => {
+  const layoutData = {
+    width: 800,
+    height: 600,
+    nodes: [
+      { id: 'nodeA', label: 'Node A', x: 50, y: 100, width: 120, height: 80 },
+      { id: 'nodeB', label: 'Node B', x: 400, y: 100, width: 120, height: 80 }
+    ],
+    edges: [
+      {
+        id: 'edge1',
+        labels: [{ text: 'clear label', width: 60, height: 20, x: 285, y: 140 }],
+        sources: ['nodeA'],
+        targets: ['nodeB'],
+        sections: [
+          {
+            startPoint: { x: 170, y: 140 },
+            endPoint: { x: 400, y: 140 },
+            bendPoints: []
+          }
+        ]
+      }
+    ]
+  };
+
+  const report = analyzeLayout(layoutData);
+
+  assert.equal(report.collisions.filter(c => c.type === 'edge_label_node_crossing').length, 0);
+});
+
 test('analyzeLayout detects connection-line crossings (edge-edge crossings)', () => {
   const layoutData = {
     width: 800,
