@@ -90,11 +90,19 @@ const { success, history, svgContent, pngPath } = await optimizeDiagram({
 console.log('\n=================================');
 console.log('       OPTIMIZATION SUMMARY       ');
 console.log('=================================');
+// All six defect classes, in the severity order declared in
+// docs/IMPROVEMENT_PLAN.md. A hardcoded projection used to silently drop every
+// class it did not name, which is how four of the six stayed invisible.
 console.table(history.map(h => ({
   Iter: h.iteration,
   Collisions: h.collisions,
-  Overlaps: h.overlaps,
-  Crossings: h.crossings,
+  'Elem Overlap': h.overlaps,
+  'Line×Elem': h.crossings,
+  'Label×Elem': h.labelElementCrossings,
+  'Line Overlap': h.lineOverlaps,
+  'Line×Line': h.lineCrossings,
+  'Label×Line': h.labelLineIntersections,
+  'Label×Label': h.labelLabelOverlaps,
   'Aspect Ratio': h.aspectRatio,
   'Node Spacing': h.options['elk.spacing.nodeNode'] || 'unset',
   'Layer Spacing': h.options['elk.layered.spacing.nodeNodeBetweenLayers'] || 'unset',

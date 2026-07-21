@@ -114,6 +114,7 @@ window.NudgeRenderer.svgRenderer = {
     flatNodeById,
     allEdgesPoints,
     placedLabels,
+    unsatisfiableLabels,
     allComponents,
     boundaryBorderObstacles,
     pointToBoxDist,
@@ -149,7 +150,7 @@ window.NudgeRenderer.svgRenderer = {
 
         // Draw labels on the segment with the most clearance from nearby nodes
         if (edge.labels && edge.labels.length > 0) {
-          window.NudgeRenderer.connectionLabelRendering.renderConnectionLabel({
+          const outcome = window.NudgeRenderer.connectionLabelRendering.renderConnectionLabel({
             edge,
             labelsLayer,
             flatNodeById,
@@ -171,6 +172,9 @@ window.NudgeRenderer.svgRenderer = {
             LINE_HEIGHT,
             labelHints
           });
+          // A declared UNSATISFIABLE placement is collected and surfaced as a
+          // warning rather than silently drawn (INC-16).
+          if (outcome) unsatisfiableLabels.push(outcome);
         }
       }
     }
@@ -183,6 +187,7 @@ window.NudgeRenderer.svgRenderer = {
         flatNodeById,
         allEdgesPoints,
         placedLabels,
+        unsatisfiableLabels,
         allComponents,
         boundaryBorderObstacles,
         pointToBoxDist,
@@ -251,6 +256,7 @@ window.NudgeRenderer.svgRenderer = {
       flattenEdges
     });
     const placedLabels = [];
+    const unsatisfiableLabels = [];
 
     const shapeStrategies = window.NudgeRenderer.architectureElementShapes.createShapeStrategies({
       BOUNDARY_H_PAD
@@ -278,6 +284,7 @@ window.NudgeRenderer.svgRenderer = {
       flatNodeById,
       allEdgesPoints,
       placedLabels,
+      unsatisfiableLabels,
       allComponents,
       boundaryBorderObstacles,
       pointToBoxDist,
@@ -295,6 +302,8 @@ window.NudgeRenderer.svgRenderer = {
         originY: legendOriginY
       });
     }
+
+    return { unsatisfiableLabels };
   }
 };
 

@@ -6,9 +6,22 @@
     "nudge": "./src/cli/index.js",
     "nudge-mcp": "./src/mcp/index.js"
   },
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  },
   "type": "module",
+  "files": [
+    "src/",
+    "examples/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "UBIQUITOUS_LANGUAGE.md"
+  ],
   "scripts": {
-    "postinstall": "node -e \"const fs=require('fs');fs.mkdirSync('src/vendor',{recursive:true});fs.copyFileSync(require.resolve('elkjs/lib/elk.bundled.js'),'src/vendor/elk.bundled.js');\"",
+    "postinstall": "node -e \"const fs=require('fs');fs.mkdirSync('src/vendor',{recursive:true});fs.copyFileSync(require.resolve('elkjs/lib/elk.bundled.js'),'src/vendor/elk.bundled.js');\" && node -e \"const fs=require('fs'),s='scripts/generate_font_metrics.js';if(fs.existsSync(s))require('child_process').execFileSync(process.execPath,[s],{stdio:'inherit'});else if(!fs.existsSync('src/vendor/outfit_metrics.js'))throw new Error('outfit_metrics.js missing from package');\"",
     "start": "node src/cli/index.js examples/search_service_container.mermaid",
     "probe:apply-port-hints": "node scripts/port_hint_apply_probe.js",
     "probe:port-hints": "node scripts/port_hint_probe.js",
@@ -16,6 +29,7 @@
     "probe:diagonal-routes": "node scripts/diagonal_route_probe.js",
     "probe:apply-top-order": "node scripts/top_order_apply_probe.js",
     "probe:top-order": "node scripts/top_order_probe.js",
+    "baseline:quality": "node scripts/capture_quality_baseline.js",
     "test:refactor": "node test/refactor_test_rig.js",
     "test:unit": "node --test test/unit/**/*.test.js",
     "test:integration": "node --test test/integration/**/*.test.js",
@@ -43,12 +57,16 @@
   },
   "homepage": "https://github.com/cookie-bytes/nudge#readme",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "elkjs": "0.9.3",
     "js-yaml": "^4.1.0",
     "playwright": "^1.44.1"
+  },
+  "devDependencies": {
+    "@fontsource/outfit": "^5.3.0",
+    "fontkit": "^2.0.4"
   }
 }

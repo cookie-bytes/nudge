@@ -87,6 +87,9 @@ test('analyzeLayout scores the rendered connection-label box, including on its o
   const crossings = report.collisions.filter(c => c.type === 'edge_label_node_crossing');
   assert.equal(crossings.length, 1);
   assert.equal(crossings[0].node, 'nodeA');
+  // The class was emitted but counted nowhere, so nothing downstream could gate
+  // on it (docs/IMPROVEMENT_PLAN.md INC-3).
+  assert.equal(report.labelElementCrossingCount, 1);
 });
 
 test('analyzeLayout does not flag a connection label placed clear of every element', () => {
@@ -117,6 +120,72 @@ test('analyzeLayout does not flag a connection label placed clear of every eleme
   const report = analyzeLayout(layoutData);
 
   assert.equal(report.collisions.filter(c => c.type === 'edge_label_node_crossing').length, 0);
+  assert.equal(report.labelElementCrossingCount, 0);
+});
+
+test('analyzeLayout counts two connection labels overlapping each other', () => {
+  const layoutData = {
+    width: 800,
+    height: 600,
+    nodes: [
+      { id: 'nodeA', label: 'Node A', x: 50, y: 100, width: 120, height: 80 },
+      { id: 'nodeB', label: 'Node B', x: 500, y: 100, width: 120, height: 80 }
+    ],
+    edges: [
+      {
+        id: 'edge1',
+        labels: [{ text: 'first', width: 60, height: 20, x: 300, y: 130 }],
+        sources: ['nodeA'],
+        targets: ['nodeB'],
+        sections: [{ startPoint: { x: 170, y: 130 }, endPoint: { x: 500, y: 130 }, bendPoints: [] }]
+      },
+      {
+        id: 'edge2',
+        labels: [{ text: 'second', width: 60, height: 20, x: 320, y: 140 }],
+        sources: ['nodeB'],
+        targets: ['nodeA'],
+        sections: [{ startPoint: { x: 500, y: 160 }, endPoint: { x: 170, y: 160 }, bendPoints: [] }]
+      }
+    ]
+  };
+
+  const report = analyzeLayout(layoutData);
+
+  assert.equal(report.labelLabelOverlapCount, 1);
+  const overlaps = report.collisions.filter(c => c.type === 'edge_label_label_overlap');
+  assert.equal(overlaps.length, 1);
+  assert.deepEqual(overlaps[0].edges, ['edge1', 'edge2']);
+});
+
+test('analyzeLayout does not flag connection labels that clear each other', () => {
+  const layoutData = {
+    width: 800,
+    height: 600,
+    nodes: [
+      { id: 'nodeA', label: 'Node A', x: 50, y: 100, width: 120, height: 80 },
+      { id: 'nodeB', label: 'Node B', x: 500, y: 100, width: 120, height: 80 }
+    ],
+    edges: [
+      {
+        id: 'edge1',
+        labels: [{ text: 'first', width: 60, height: 20, x: 250, y: 60 }],
+        sources: ['nodeA'],
+        targets: ['nodeB'],
+        sections: [{ startPoint: { x: 170, y: 60 }, endPoint: { x: 500, y: 60 }, bendPoints: [] }]
+      },
+      {
+        id: 'edge2',
+        labels: [{ text: 'second', width: 60, height: 20, x: 250, y: 300 }],
+        sources: ['nodeB'],
+        targets: ['nodeA'],
+        sections: [{ startPoint: { x: 500, y: 300 }, endPoint: { x: 170, y: 300 }, bendPoints: [] }]
+      }
+    ]
+  };
+
+  const report = analyzeLayout(layoutData);
+
+  assert.equal(report.labelLabelOverlapCount, 0);
 });
 
 test('analyzeLayout detects connection-line crossings (edge-edge crossings)', () => {

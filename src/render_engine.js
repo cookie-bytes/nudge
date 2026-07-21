@@ -2,10 +2,42 @@ const elk = new ELK();
     let ranks = {};
     const DIAGRAM_H_PAD = 80;
 
+    // Google Fonts serves Outfit with `unicode-range`, so the faces load lazily on
+    // first use and `document.fonts.ready` resolves before any of them are fetched.
+    //
+    // Layout no longer depends on this: `renderer/shared/text.js` measures against
+    // baked glyph metrics, so geometry is identical whether or not the font ever
+    // arrives (INC-9). What still depends on it is what the PNG screenshot *looks*
+    // like — text rasterised in the fallback face renders visibly differently from
+    // Outfit. So this pass is now about pixel fidelity, not determinism.
+    const FONT_SPECS = [];
+    for (const size of [9, 10, 11, 12, 13, 14, 16]) {
+      for (const weight of ['normal', 'bold', '300', '400', '500', '600', '700']) {
+        FONT_SPECS.push(`${weight} ${size}px Outfit`);
+      }
+    }
+    // `load()` only fetches the subsets matching its test string. Latin plus digits
+    // and common punctuation covers every corpus label; non-Latin labels can still
+    // re-trigger the lazy fetch on first measurement.
+    const FONT_SAMPLE =
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:;!?\'"()[]{}<>/\\|-_+=@#$%&*';
+    let fontsLoaded = null;
+    function loadRendererFonts() {
+      if (fontsLoaded) return fontsLoaded;
+      // `allSettled`, never `all`: with fonts.gstatic.com unreachable every `load()`
+      // rejects, and a rejection here would abort the render and emit no diagram.
+      fontsLoaded = Promise.allSettled(
+        FONT_SPECS.map(spec => document.fonts.load(spec, FONT_SAMPLE))
+      );
+      return fontsLoaded;
+    }
+    window.loadRendererFonts = loadRendererFonts;
+
     // Main layout and rendering entrypoint called by Playwright
     window.renderDiagram = async function (diagramData) {
       try {
         await document.fonts.ready;
+        await loadRendererFonts();
         const hasBoundary = (diagramData.nodes || []).some(n => n.type === 'boundary');
         let laidOutGraph;
 
@@ -322,7 +354,7 @@ const elk = new ELK();
         const legendOriginY = legendModel ? finalHeight - LEGEND_MARGIN_BOTTOM - legendModel.height : 0;
 
         // Render the graph using SVG (with 50px vertical offset for title)
-        window.NudgeRenderer.svgRenderer.drawGraph({
+        const drawResult = window.NudgeRenderer.svgRenderer.drawGraph({
           graph: laidOutGraph,
           diagramData,
           notes: positionedNotes,
@@ -349,7 +381,21 @@ const elk = new ELK();
           nodes: flattenNodes(laidOutGraph, DIAGRAM_H_PAD, 50),
           edges: flattenEdges(laidOutGraph, DIAGRAM_H_PAD, 50),
           notes: positionedNotes,
-          warnings: noteWarnings
+          warnings: [
+            ...noteWarnings,
+            // Declared UNSATISFIABLE label placements (INC-16). A saturated
+            // corridor now produces a named, counted outcome instead of a
+            // buried label and a success report.
+            ...(drawResult?.unsatisfiableLabels ?? []).map(u =>
+              `Connection Label "${u.text}" could not be placed clear of the layout (${u.reason}); it was re-wrapped and clamped into the canvas.`
+            )
+          ],
+          unsatisfiableLabels: drawResult?.unsatisfiableLabels ?? [],
+          // Surfaced so a test can assert the grid router handled every
+          // relationship — the measurable retirement criterion for the legacy
+          // router (docs/IMPROVEMENT_PLAN.md INC-20). Absent for flat/ELK
+          // diagrams, which never enter the container routing pass.
+          routerStats: laidOutGraph.routerStats ?? null
         };
       } catch (err) {
         console.error("Rendering failed:", err);
@@ -882,12 +928,24 @@ const elk = new ELK();
           routedSections[idx] = section;
           routedEdgeSegments.push(...pointsToSegments(sectionToPoints(section), idx));
         });
+        // Record which relationships the grid router could not route, so
+        // "retire the legacy router once every fixture routes fully on the
+        // grid" is a number a test can assert rather than a condition nothing
+        // measures (docs/IMPROVEMENT_PLAN.md INC-20).
+        const legacyFallbacks = [];
         allEdges.forEach((e, idx) => {
           if (routedSections[idx]) return;
+          legacyFallbacks.push(e.id ?? `edge_${idx}`);
           const section = reserveRouteLanes(routeEdge(e, idx), e);
           routedSections[idx] = section;
           routedEdgeSegments.push(...pointsToSegments(sectionToPoints(section), idx));
         });
+        out.routerStats = {
+          mode: 'grid',
+          totalEdges: allEdges.length,
+          legacyFallbacks: legacyFallbacks.length,
+          legacyFallbackEdgeIds: legacyFallbacks
+        };
       } else {
         for (let idx = 0; idx < allEdges.length; idx++) {
           const e = allEdges[idx];
@@ -897,6 +955,12 @@ const elk = new ELK();
         }
 
         improveRoutedSections(routedSections);
+        out.routerStats = {
+          mode: 'legacy',
+          totalEdges: allEdges.length,
+          legacyFallbacks: allEdges.length,
+          legacyFallbackEdgeIds: allEdges.map((e, idx) => e.id ?? `edge_${idx}`)
+        };
       }
 
       out.edges = window.NudgeRenderer.containerLayout.buildOutputEdges({
@@ -908,7 +972,9 @@ const elk = new ELK();
     }
 
     // Returns a structured layout plan for LM verification checkpoints (no SVG rendered)
-    window.computeContainerPlan = function(diagramData) {
+    window.computeContainerPlan = async function(diagramData) {
+      await document.fonts.ready;
+      await loadRendererFonts();
       return window.NudgeRenderer.containerPlanSummary.compute(
         diagramData,
         window.NudgeRenderer.containerPlan.buildContainerZonePlan

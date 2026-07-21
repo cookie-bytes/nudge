@@ -275,6 +275,9 @@ export function analyzeLayout(layoutData) {
     collisions: [],
     overlapCount: 0,
     intersectionCount: 0,
+    labelElementCrossingCount: 0,
+    labelLabelOverlapCount: 0,
+    labelOffCanvasCount: 0,
     noteOverlapCount: 0,
     noteEdgeCrossingCount: 0,
     edgeQuality: analyzeEdgeQuality(edges || []),
@@ -359,6 +362,7 @@ export function analyzeLayout(layoutData) {
     // obstacle, so a label buried in its own source is a real defect.
     for (const comp of components) {
       if (boxesOverlap(labelBox, comp)) {
+        report.labelElementCrossingCount++;
         report.collisions.push({
           type: 'edge_label_node_crossing',
           edge: `${sourceId} -> ${targetId}`,
@@ -367,6 +371,54 @@ export function analyzeLayout(layoutData) {
           details: `Relationship label '${label.text}' on edge '${sourceId} -> ${targetId}' overlaps with node '${comp.label}' (${comp.id}).`
         });
       }
+    }
+  }
+
+  // 2b-ii. Labels that fall outside the canvas. A clipped or invisible label is
+  // information-destroying in a way nothing measured, so the UNSATISFIABLE
+  // fallback's trade — an off-canvas label becomes a visible overlapping one —
+  // was previously only visible as a cost, never as a benefit (INC-16).
+  for (const edge of edges) {
+    if (!edge.sections || edge.sections.length === 0) continue;
+    if (!edge.labels || edge.labels.length === 0) continue;
+    const labelBox = estimateLabelBox(edge);
+    if (!labelBox) continue;
+    if (
+      labelBox.x < -0.5 || labelBox.y < -0.5 ||
+      labelBox.x + labelBox.width > width + 0.5 ||
+      labelBox.y + labelBox.height > height + 0.5
+    ) {
+      report.labelOffCanvasCount++;
+      report.collisions.push({
+        type: 'edge_label_off_canvas',
+        edge: edge.id,
+        label: edge.labels[0].text,
+        details: `Relationship label '${edge.labels[0].text}' falls outside the ${width}×${height} canvas.`
+      });
+    }
+  }
+
+  // 2c. Check for edge labels overlapping each other. Two labels sharing pixels
+  // are as unreadable as one buried in a box, and nothing measured this before.
+  const labelBoxes = [];
+  for (const edge of edges) {
+    if (!edge.sections || edge.sections.length === 0) continue;
+    if (!edge.labels || edge.labels.length === 0) continue;
+    const box = estimateLabelBox(edge);
+    if (box) labelBoxes.push({ edge, box, text: edge.labels[0].text });
+  }
+  for (let i = 0; i < labelBoxes.length; i++) {
+    for (let j = i + 1; j < labelBoxes.length; j++) {
+      const a = labelBoxes[i];
+      const b = labelBoxes[j];
+      if (!boxesOverlap(a.box, b.box)) continue;
+      report.labelLabelOverlapCount++;
+      report.collisions.push({
+        type: 'edge_label_label_overlap',
+        edges: [a.edge.id, b.edge.id],
+        labels: [a.text, b.text],
+        details: `Relationship labels '${a.text}' and '${b.text}' overlap each other.`
+      });
     }
   }
 

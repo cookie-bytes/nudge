@@ -7,9 +7,19 @@ import { analyzeLayout } from '../src/core/geometry.js';
 import { getActiveModel, getHeaders } from '../src/core/llm_client.js';
 import { fetchWithTimeout } from '../src/utils.js';
 import { optimizeDiagram, normalizeDiagramModel } from '../src/core/optimizer.js';
+import { qualityVector, loadBaseline, compareToBaseline, RATCHET_METRICS } from './quality_baseline.js';
 
 const LM_STUDIO_API = process.env.NUDGE_LLM_API || 'http://127.0.0.1:1234';
-const TEST_DIR = path.join(path.resolve('test'), 'fixtures', 'diagrams', 'core');
+const DIAGRAMS_DIR = path.join(path.resolve('test'), 'fixtures', 'diagrams');
+// Every fixture folder, discovered rather than listed. The suite used to render
+// `core/` only, so the known Connection-Line Element Crossings living in
+// `refactor/` were never exercised by it — a whole defect class was invisible to
+// the gate that claims to cover it. Discovering the folders means dropping
+// diagrams into `external/` is enough to have them measured (INC-14).
+const TEST_DIRS = fs.readdirSync(DIAGRAMS_DIR, { withFileTypes: true })
+  .filter(e => e.isDirectory())
+  .map(e => path.join(DIAGRAMS_DIR, e.name))
+  .sort();
 const OUTPUT_DIR = path.resolve('test_outputs');
 
 // Verify all boundary children are geometrically inside their parent boundary
@@ -64,14 +74,29 @@ function checkConnectionLineOrthogonality(result) {
   return violations;
 }
 
-// Math-based grading fallback if LLM is offline
+// Math-based grading fallback if LLM is offline.
+//
+// The grade is advisory: pass/fail is decided by the counters and the ratchet
+// (INC-5/INC-6). But it still has to *rank* consistently with everything else,
+// so its deductions follow the declared severity ordering in
+// src/core/severity.js rather than a private one. Previously it could see only
+// two of the six defect classes, which is how a diagram with five
+// Connection-Line Crossings graded A.
 function gradeMathematically(report) {
   let c4AlignmentScore = 10;
   let aspectRatioScore = 10;
   let clarityScore = 10;
 
-  // Deduct for collisions (overlaps are critical, crossings are minor layout defects)
-  clarityScore -= (report.overlapCount * 5 + report.intersectionCount * 3);
+  const edge = report.edgeQuality || {};
+  clarityScore -= (
+    report.overlapCount * 5 +
+    report.intersectionCount * 3 +
+    (report.labelElementCrossingCount || 0) * 3 +
+    (report.labelLabelOverlapCount || 0) * 2 +
+    (edge.edgeOverlapCount || 0) * 0.5 +
+    (edge.edgeCrossingCount || 0) * 0.5 +
+    (edge.labelEdgeIntersectionCount || 0) * 0.25
+  );
   if (clarityScore < 0) clarityScore = 0;
 
   const ratio = parseFloat(report.aspectRatio);
@@ -81,7 +106,10 @@ function gradeMathematically(report) {
     aspectRatioScore = 7;
   }
 
-  c4AlignmentScore = report.overlapCount > 0 ? 6 : 10;
+  // Classes 1–3 destroy information, and are the ones the absolute gate covers.
+  c4AlignmentScore =
+    (report.overlapCount > 0 || report.intersectionCount > 0 ||
+     (report.labelElementCrossingCount || 0) > 0) ? 6 : 10;
 
   const average = (c4AlignmentScore + aspectRatioScore + clarityScore) / 3;
   let finalGrade = 'F';
@@ -95,7 +123,11 @@ function gradeMathematically(report) {
     aspectRatioScore,
     clarityScore,
     finalGrade,
-    gradeExplanation: `Fallback math grader: ${report.overlapCount} overlaps, ${report.intersectionCount} crossings, aspect ratio ${report.aspectRatio}.`
+    gradeExplanation: `Fallback math grader: ${report.overlapCount} element overlaps, ` +
+      `${report.intersectionCount} line-element crossings, ` +
+      `${report.labelElementCrossingCount || 0} label-element crossings, ` +
+      `${edge.edgeOverlapCount || 0} line overlaps, ${edge.edgeCrossingCount || 0} line crossings, ` +
+      `aspect ratio ${report.aspectRatio}.`
   };
 }
 
@@ -437,9 +469,16 @@ async function runTests() {
     fs.mkdirSync(OUTPUT_DIR, { recursive: true });
   }
 
-  const testFiles = fs.readdirSync(TEST_DIR).filter(file => file.endsWith('.mermaid') || file.endsWith('.puml'));
+  // `{ file, dir }` so fixtures of the same name in different folders stay distinct.
+  const testFiles = TEST_DIRS.flatMap(dir =>
+    fs.existsSync(dir)
+      ? fs.readdirSync(dir)
+          .filter(f => f.endsWith('.mermaid') || f.endsWith('.puml'))
+          .map(f => ({ file: `${path.basename(dir)}/${f}`, fullPath: path.join(dir, f) }))
+      : []
+  ).sort((a, b) => a.file.localeCompare(b.file));
   if (testFiles.length === 0) {
-    console.error("No test diagram files found in test/fixtures/diagrams/core folder.");
+    console.error("No test diagram files found under test/fixtures/diagrams/.");
     process.exit(1);
   }
 
@@ -460,12 +499,19 @@ async function runTests() {
 
   const summary = [];
   let allTestsPassed = true;
+  const baseline = loadBaseline();
+  if (!baseline) {
+    console.error('No quality baseline found. Run: node scripts/capture_quality_baseline.js');
+    process.exit(1);
+  }
+  console.log(`Quality baseline: ${baseline.git?.commit?.slice(0, 7) ?? 'unknown'} (${Object.keys(baseline.fixtures).length} fixtures)`);
 
-  for (const file of testFiles) {
-    const baseName = file.endsWith('.mermaid') ? path.basename(file, '.mermaid') : path.basename(file, '.puml') + '_puml';
+  for (const { file, fullPath } of testFiles) {
+    const stem = path.basename(file);
+    const baseName = (stem.endsWith('.mermaid') ? path.basename(stem, '.mermaid') : path.basename(stem, '.puml') + '_puml');
     console.log(`\nRendering: ${file}...`);
-    
-    const content = fs.readFileSync(path.join(TEST_DIR, file), 'utf8');
+
+    const content = fs.readFileSync(fullPath, 'utf8');
     // Normalise exactly as the CLI/MCP entry points do — without this, C4Context
     // diagrams skip the synthetic boundary and get measured on the flat ELK path,
     // which is not the layout either entry point produces.
@@ -523,13 +569,48 @@ async function runTests() {
     const gradeResult = useVisualLLM
       ? await gradeWithLLM(model, result, report)
       : gradeMathematically(report);
-    const isPass = totalCollisions === 0 &&
+
+    // The grade clause is gone. `totalCollisions === 0` is a precondition of
+    // reaching it and both grade sub-scores are pinned at 10 whenever it is
+    // satisfied, so `grade ∈ {A,B}` was tautologically true and could never
+    // fail a run. The grade stays in the report as a human-readable signal;
+    // pass/fail is decided by the defect counters alone.
+    const ungatedDefects =
+      (report.labelElementCrossingCount || 0) +
+      (report.labelLabelOverlapCount || 0) +
+      report.edgeQuality.edgeCrossingCount +
+      report.edgeQuality.edgeOverlapCount +
+      report.edgeQuality.labelEdgeIntersectionCount;
+
+    // The ratchet. A fixture fails when any defect count rises above its
+    // checked-in baseline — including the classes that have no absolute gate.
+    // That is what stops a change fixing one diagram and quietly breaking
+    // another. An unbaselined fixture must be captured before it can be judged.
+    const vector = qualityVector(model, result, report);
+    const { regressions, improvements, isNew } = compareToBaseline(file, vector, baseline);
+
+    if (regressions.length > 0) {
+      console.error(`  [FAIL] Quality regressions vs baseline (${regressions.length}):`);
+      for (const r of regressions) console.error(`    - ${r.metric}: ${r.was} → ${r.now}`);
+    }
+    if (improvements.length > 0) {
+      console.log(`  [IMPROVED] ${improvements.map(i => `${i.metric} ${i.was}→${i.now}`).join(', ')}`);
+    }
+    if (isNew) {
+      console.error(`  [FAIL] No quality baseline for ${file} — run: node scripts/capture_quality_baseline.js`);
+    }
+
+    const isPass = regressions.length === 0 && !isNew &&
       boundaryViolations.length === 0 &&
-      orthogonalViolations.length === 0 &&
-      (gradeResult.finalGrade === 'A' || gradeResult.finalGrade === 'B');
+      orthogonalViolations.length === 0;
 
     summary.push({
       file,
+      ungatedDefects,
+      regressions: regressions.length,
+      improvements: improvements.length,
+      labelElementCrossings: report.labelElementCrossingCount || 0,
+      labelLabelOverlaps: report.labelLabelOverlapCount || 0,
       c4Align: gradeResult.c4AlignmentScore,
       aspect: gradeResult.aspectRatioScore,
       clarity: gradeResult.clarityScore,
@@ -567,6 +648,10 @@ async function runTests() {
     Collisions: s.collisions,
     'Bnd Viol': s.boundaryViolations,
     'Ortho Viol': s.orthogonalViolations,
+    'Regr': s.regressions,
+    'Impr': s.improvements,
+    'Lbl×Elem': s.labelElementCrossings,
+    'Lbl×Lbl': s.labelLabelOverlaps,
     'Edge X': s.edgeCrossings,
     'Edge OL': s.edgeOverlaps,
     'OL px': s.edgeOverlapPx,
@@ -582,19 +667,43 @@ async function runTests() {
   mdReport += `| File | C4 Align Score | Aspect Score | Clarity Score | Grade | Collisions | Bnd Viol | Ortho Viol | Edge X | Edge OL | OL px | Lbl/Edge | Bends | Route px | Status | Explanation |\n`;
   mdReport += `| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |\n`;
   for (const s of summary) {
-    mdReport += `| [${s.file}](file://${path.join(TEST_DIR, s.file)}) | ${s.c4Align} | ${s.aspect} | ${s.clarity} | **${s.grade}** | ${s.collisions} | ${s.boundaryViolations} | ${s.orthogonalViolations} | ${s.edgeCrossings} | ${s.edgeOverlaps} | ${s.edgeOverlapPx} | ${s.labelEdgeHits} | ${s.bends} | ${s.routeLength} | ${s.status === 'PASSED' ? '✅ PASSED' : '❌ FAILED'} | ${s.explanation} |\n`;
+    mdReport += `| [${s.file}](file://${path.join(DIAGRAMS_DIR, s.file)}) | ${s.c4Align} | ${s.aspect} | ${s.clarity} | **${s.grade}** | ${s.collisions} | ${s.boundaryViolations} | ${s.orthogonalViolations} | ${s.edgeCrossings} | ${s.edgeOverlaps} | ${s.edgeOverlapPx} | ${s.labelEdgeHits} | ${s.bends} | ${s.routeLength} | ${s.status === 'PASSED' ? '✅ PASSED' : '❌ FAILED'} | ${s.explanation} |\n`;
   }
-  mdReport += `\nEdge-quality diagnostics are observational only. They do not currently affect pass/fail status.\n`;
+  mdReport += `\nEdge-quality diagnostics are observational only. They do not currently affect pass/fail status (INC-8 flips them to gating).\n`;
   mdReport += `\n*Visual snapshot assets saved in [test_outputs/](file://${OUTPUT_DIR}) directory.*\n`;
 
   fs.writeFileSync(path.join(OUTPUT_DIR, 'test_results.md'), mdReport);
   console.log(`\nMarkdown test results summary saved to: ${path.join(OUTPUT_DIR, 'test_results.md')}`);
 
+  // The suite used to celebrate over a corpus carrying dozens of real defects,
+  // because four of the six classes had no gate and the grade could not fail.
+  // The gate is still narrow (INC-8 widens it), but the banner no longer lies.
+  const ungatedTotal = summary.reduce((sum, s) => sum + s.ungatedDefects, 0);
+  const dirtyFixtures = summary.filter(s => s.ungatedDefects > 0);
+
+  if (ungatedTotal > 0) {
+    console.log(`\n📋 Ungated defects: ${ungatedTotal} across ${dirtyFixtures.length}/${summary.length} fixture(s).`);
+    for (const s of dirtyFixtures) {
+      console.log(`   ${s.file}: ${s.ungatedDefects} (lbl×elem ${s.labelElementCrossings}, lbl×lbl ${s.labelLabelOverlaps}, line× ${s.edgeCrossings}, lineOL ${s.edgeOverlaps}, lbl/line ${s.labelEdgeHits})`);
+    }
+    console.log(`   These are held flat by the ratchet, not by an absolute gate — see docs/IMPROVEMENT_PLAN.md INC-8.`);
+  }
+
+  const improvedFixtures = summary.filter(s => s.improvements > 0);
+  if (improvedFixtures.length > 0) {
+    console.log(`\n📉 ${improvedFixtures.length} fixture(s) improved on the baseline — re-baseline so the ratchet tightens:`);
+    console.log(`   node scripts/capture_quality_baseline.js`);
+  }
+
   if (allTestsPassed) {
-    console.log("\n🎉 All tests passed successfully with 0 collisions and acceptable visual grading!");
+    console.log(
+      ungatedTotal === 0
+        ? "\n🎉 No regressions against the quality baseline, and the corpus carries no defects at all."
+        : `\n✅ No regressions against the quality baseline. ${ungatedTotal} known defect(s) remain across the corpus.`
+    );
     process.exit(0);
   } else {
-    console.log("\n⚠️ Some test diagrams failed layout checks (collisions detected or poor design grade). Check the snapshots.");
+    console.log("\n⚠️ Layout quality regressed against the baseline. Check the snapshots and the [FAIL] lines above.");
     process.exit(1);
   }
 }

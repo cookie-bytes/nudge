@@ -8,14 +8,51 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # `engines` claims >=20, so prove it on every supported major rather than
+      # only on the one the maintainer happens to run.
+      matrix:
+        node-version: ['20', '22', '24']
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: ${{ matrix.node-version }}
           cache: 'npm'
+
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+
+      # Chromium is ~300 MB and unchanged between runs; cache it on the
+      # Playwright version so CI is not re-downloading it on every push.
+      - name: Resolve Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.playwright.outputs.version }}
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+
+      # System deps are not part of the cached browser directory.
+      - name: Install Chromium system dependencies
+        run: npx playwright install-deps chromium
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+
       - run: npm test
+
+      # The layout parity rig was never run in CI, so nothing enforced it.
+      # It compares against the renderer at HEAD, so it needs full history.
+      - name: Fetch full history for the parity rig
+        run: git fetch --unshallow || true
+
+      - run: npm run test:refactor

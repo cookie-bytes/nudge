@@ -7,6 +7,9 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <script src="vendor/elk.bundled.js"></script>
+  <!-- Baked Outfit glyph metrics. Must load before renderer/shared/text.js,
+       which measures against them instead of a canvas (INC-9). -->
+  <script src="vendor/outfit_metrics.js"></script>
   <style>
     body {
       margin: 0;

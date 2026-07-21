@@ -18,11 +18,21 @@ npm run test:visual                       # Run rendering tests in Playwright wi
 NUDGE_VISUAL_TEST=true npm run test:visual # Run rendering tests with optional LLM visual grading
 npm run test:refactor                     # Run layout regression parity test against git baseline
 NUDGE_ROUTER=legacy node src/cli/index.js <file> # Fall back to the legacy candidate router (grid A* router is the default)
+npm run baseline:quality                  # Re-capture the per-fixture quality ratchet baseline (all six defect classes)
+node scripts/determinism_check.js <file>  # Render one diagram twice on a fresh page and report whether they agree
 node scripts/capture_route_baseline.js    # Snapshot per-fixture route quality metrics to test/fixtures/baselines/
 node scripts/route_ab_compare.js          # A/B legacy vs grid router across all fixtures (PNGs + report in test_outputs/router_ab/)
 ```
 
 `npm test` runs fast unit tests, integration tests (CLI & MCP server), renders every test diagram in Playwright, verifies boundary containment, and writes snapshots plus `test_outputs/test_results.md`. `NUDGE_VISUAL_TEST=true npm run test:visual` enables LLM visual grading; if the grader is unavailable it falls back to the math scorer. No test is skipped.
+
+**The quality ratchet**: the visual suite renders every fixture under `test/fixtures/diagrams/` (both `core/` and `refactor/`) and compares the full six-class defect vector against `test/fixtures/baselines/quality_baseline.json`. A fixture fails when any count *rises* — not when it is non-zero. The corpus legitimately carries known defects, so an absolute gate would be permanently red; a ratchet instead makes "fixes one diagram, breaks another" impossible to merge silently. If a change *improves* a fixture, the suite still passes but tells you to run `npm run baseline:quality` so the ratchet tightens and the quality delta shows up in the diff. A fixture with no baseline entry fails until it is captured.
+
+## One severity ordering
+
+`src/core/severity.js` declares the single ordering over the defect classes and the one cost function (`scoreLayout`) derived from it, plus `isClean` (the absolute gate) and `countDefects`. Hardest failure first: Element Overlap → Connection-Line Element Crossing → Connection-Label Element Crossing → Label-Label Overlap → Connection-Line Overlap → Connection-Line Crossing → Label-Line Intersection. The cut that matters is between the third and fourth: classes 1–3 destroy information and are absolutely gated; 4–6 degrade readability and are held flat by the ratchet.
+
+**Do not add a new cost model.** Nudge previously had nine independently tuned ones over the same geometry, two of which ranked the same pair of classes in opposite directions — which is why a local fix used to conserve total defect count rather than reduce it. If a scorer needs a term the ordering lacks, add it to `severity.js` so every consumer moves together. The grid router's `WEIGHTS` is the main remaining exception and is deliberate (it prices port-slot reuse and boundary-border crossings, which the geometry critic cannot see).
 
 ## Ubiquitous language
 
@@ -94,6 +104,8 @@ C4Context diagrams reuse the container pipeline: `normalizeDiagramModel` in `opt
 **Grid connection-line routing (default)**: Container connection lines are routed by `src/renderer/routing/grid_connection_line_router.js` — A* with (vertex, heading) state over a sparse orthogonal visibility graph (`visibility_graph.js`: grid lines at inflated element faces, element centres, port drop coordinates, and channel midlines). One `WEIGHTS` profile prices length, bends, crossings, overlaps, port-slot reuse, and boundary-border crossings for internal lines; element crossings are impossible by construction. Lines route hardest-first, then a rip-up-and-reroute round, then two post passes: channel nudging (separates lines sharing a corridor; port endpoints fixed, fixed segments act as anchors) and kink straightening (collapses sub-24px Z-jogs from discrete port slots by sliding dock points along element faces). Every post-pass move must not raise the line's conflict cost or it is undone. Baseline metrics live in `test/fixtures/baselines/route_quality_baseline.json`; compare routers with `node scripts/route_ab_compare.js`.
 
 **Legacy candidate routing (fallback)**: `routeEdge(e, idx)` in `connection_line_router.js`/`route_candidate_rules.js` builds hand-written route candidates scored by `chooseBestRoute`, with `reserveRouteLanes` lane offsets and `improveRoutedSections` rerouting. It still handles, per edge, anything the grid router cannot route (e.g. relationships whose endpoints are not placed leaf elements, as in multi-boundary diagrams), and the whole pass can be restored with `NUDGE_ROUTER=legacy`. Do not delete it until every fixture routes fully on the grid.
+
+**Text measurement is pure JS, not canvas**: `src/renderer/shared/text.js` measures against a baked Outfit glyph table (`src/vendor/outfit_metrics.js`, generated by `scripts/generate_font_metrics.js` at `postinstall` from the `@fontsource/outfit` + `fontkit` devDependencies). Summing glyph advances plus kern deltas and scaling by `fontSize / unitsPerEm` matches Chromium's `measureText` to under 0.2 px. This removed the last DOM reference outside the SVG drawing layer, so measurement, routing, planning and label placement are all unit-testable under `node --test` in milliseconds — see `test/unit/text_metrics.test.js`. Do not reintroduce a canvas call here: it reinstates both the browser dependency and the lazily-loaded-webfont race that made the first render of a page disagree with every later one.
 
 **Label placement**: Connection labels try midpoint, target-anchored, source-anchored, and segment-clearance positions. Fallback placement now checks all architecture elements, including source/target elements, plus previously placed labels so labels do not settle on top of endpoint boxes.
 

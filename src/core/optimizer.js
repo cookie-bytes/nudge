@@ -2,6 +2,7 @@ import path from 'path';
 import fs from 'fs';
 import { chromium } from 'playwright';
 import { analyzeLayout } from './geometry.js';
+import { scoreLayout, isClean } from './severity.js';
 import {
   getLLMOptimizationPatch,
   getLLMLabelPlacementHints
@@ -108,6 +109,30 @@ export function detectInScopeSystem(diagramModel) {
     else c.supporting = true;
   }
   return winner;
+}
+
+/**
+ * The full defect vector for one rendered layout — all six classes the critic
+ * detects, plus the route-shape metrics. Every history entry carries the same
+ * shape so the CLI table, the MCP JSON summary and the quality baselines all
+ * report the same numbers rather than each projecting their own subset.
+ */
+export function defectVector(report) {
+  const edge = report.edgeQuality || {};
+  return {
+    collisions: report.collisions.length,
+    overlaps: report.overlapCount,
+    crossings: report.intersectionCount,
+    labelElementCrossings: report.labelElementCrossingCount || 0,
+    labelOffCanvas: report.labelOffCanvasCount || 0,
+    labelLabelOverlaps: report.labelLabelOverlapCount || 0,
+    lineCrossings: edge.edgeCrossingCount || 0,
+    lineOverlaps: edge.edgeOverlapCount || 0,
+    labelLineIntersections: edge.labelEdgeIntersectionCount || 0,
+    bends: edge.totalBends || 0,
+    routeLength: edge.totalRouteLength || 0,
+    aspectRatio: report.aspectRatio,
+  };
 }
 
 /**
@@ -241,26 +266,10 @@ export async function optimizeDiagram({
       let overrides = { ...(diagramModel._layoutOverrides || {}) };
       const visualHints = {};
 
+      // One shared cost function (src/core/severity.js), not a private copy.
       const scoreContainerStep = (result) => {
         const report = analyzeLayout(result);
-        const edge = report.edgeQuality || {};
-        return {
-          report,
-          score:
-            report.overlapCount * 100000 +
-            report.intersectionCount * 100000 +
-            // Note occlusion is weighted just below a hard node overlap so the
-            // note auto-placement loop is driven to clear it, without letting a
-            // stubborn note dominate a genuine element collision.
-            (report.noteOverlapCount || 0) * 40000 +
-            (report.noteEdgeCrossingCount || 0) * 8000 +
-            (edge.edgeCrossingCount || 0) * 500 +
-            (edge.edgeOverlapCount || 0) * 500 +
-            (edge.edgeOverlapPx || 0) * 2 +
-            (edge.labelEdgeIntersectionCount || 0) * 250 +
-            (edge.totalBends || 0) * 4 +
-            (edge.totalRouteLength || 0) * 0.02
-        };
+        return { report, score: scoreLayout(report) };
       };
 
       const renderContainerStep = async (stepName, overridesForStep = overrides) => {
@@ -428,16 +437,24 @@ export async function optimizeDiagram({
       const history = [{
         iteration: 1,
         options: { ...diagramModel.layoutOptions },
-        collisions: report.collisions.length,
-        overlaps: report.overlapCount,
-        crossings: report.intersectionCount,
-        aspectRatio: report.aspectRatio,
+        ...defectVector(report),
         screenshot: finalStep.screenshotPath,
       }];
 
       for (const w of warnings) onLog(`[Notes] ${w}`);
 
-      const success = report.overlapCount === 0 && report.intersectionCount === 0;
+      // The container/context gate used to check 2 of 6 defect classes, so the
+      // primary product had a weaker gate than the little-used flat/ELK path.
+      // Connection-Label Element Crossing now gates: it is 0 across the whole
+      // corpus, so the class is clean and the gate can hold it there. The three
+      // remaining classes are held by the ratchet in test/quality_baseline.js
+      // rather than an absolute gate — the corpus legitimately carries them,
+      // and a gate nothing can satisfy is a gate that gets switched off.
+      const labelElementCrossings = report.labelElementCrossingCount || 0;
+      if (labelElementCrossings > 0) {
+        onLog(`[Critique] ${labelElementCrossings} Connection-Label Element Crossing(s) — labels buried in elements.`);
+      }
+      const success = isClean(report);
       return { success, history, svgContent: svg, pngPath: finalPngPath, notes, warnings };
     }
 
@@ -496,16 +513,10 @@ export async function optimizeDiagram({
         }
 
         const report = analyzeLayout(result);
-        const edge = report.edgeQuality || {};
-        const score =
-          report.overlapCount * 100000 +
-          report.intersectionCount * 100000 +
-          (edge.edgeCrossingCount || 0) * 500 +
-          (edge.edgeOverlapCount || 0) * 500 +
-          (edge.edgeOverlapPx || 0) * 2 +
-          (edge.labelEdgeIntersectionCount || 0) * 250 +
-          (edge.totalBends || 0) * 4 +
-          (edge.totalRouteLength || 0) * 0.02;
+        // Same shared cost function as the container path. This copy previously
+        // omitted both label classes entirely, so the configuration search was
+        // blind to the defects the container scorer cared most about.
+        const score = scoreLayout(report);
 
         onLog(`[Optimizer] Config ${i + 1} score: ${Math.round(score * 10) / 10} (overlaps: ${report.overlapCount}, crossings: ${report.intersectionCount}, tight spacing: ${report.collisions.filter(c => c.type === 'tight_spacing').length})`);
 
@@ -541,10 +552,7 @@ export async function optimizeDiagram({
         history.push({
           iteration: 1,
           options: { ...bestOptions },
-          collisions: bestReport.collisions.length,
-          overlaps: bestReport.overlapCount,
-          crossings: bestReport.intersectionCount,
-          aspectRatio: bestReport.aspectRatio,
+          ...defectVector(bestReport),
           screenshot: screenshotPath,
         });
 
@@ -595,10 +603,7 @@ export async function optimizeDiagram({
         history.push({
           iteration,
           options: { ...currentOptions },
-          collisions: report.collisions.length,
-          overlaps: report.overlapCount,
-          crossings: report.intersectionCount,
-          aspectRatio: report.aspectRatio,
+          ...defectVector(report),
           screenshot: screenshotPath,
         });
 

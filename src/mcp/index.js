@@ -114,7 +114,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       enhance,
     });
 
-    const finalCollisions = history.at(-1)?.collisions ?? 0;
+    const finalEntry = history.at(-1) || {};
+    const finalCollisions = finalEntry.collisions ?? 0;
+    // The full defect vector, not just the collision total — four of the six
+    // classes were previously invisible to any MCP client.
+    const quality = {
+      elementOverlaps: finalEntry.overlaps ?? 0,
+      lineElementCrossings: finalEntry.crossings ?? 0,
+      labelElementCrossings: finalEntry.labelElementCrossings ?? 0,
+      lineOverlaps: finalEntry.lineOverlaps ?? 0,
+      lineCrossings: finalEntry.lineCrossings ?? 0,
+      labelLineIntersections: finalEntry.labelLineIntersections ?? 0,
+      labelLabelOverlaps: finalEntry.labelLabelOverlaps ?? 0,
+    };
     const summary = success
       ? `Optimized in ${history.length} iteration(s) — zero collisions.`
       : `Best-effort result after ${history.length} iteration(s) — ${finalCollisions} collision(s) remain. SVG is still usable.`;
@@ -139,7 +151,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       content: [
         {
           type: 'text',
-          text: JSON.stringify({ success, summary, iterations: history.length, finalCollisions, svgPath, pngPath: pngOutputPath, notes, warnings }, null, 2),
+          text: JSON.stringify({ success, summary, iterations: history.length, finalCollisions, quality, svgPath, pngPath: pngOutputPath, notes, warnings }, null, 2),
         },
       ],
     };
