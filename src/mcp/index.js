@@ -104,7 +104,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
   const tmpDir = path.join(os.tmpdir(), `nudge-${randomUUID()}`);
 
   try {
-    const { success, history, svgContent, pngPath } = await optimizeDiagram({
+    const { success, history, svgContent, pngPath, notes = [], warnings = [] } = await optimizeDiagram({
       diagramModel,
       outputDir: tmpDir,
       onLog: (msg) => server.sendLoggingMessage({ level: 'info', data: msg }),
@@ -139,7 +139,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       content: [
         {
           type: 'text',
-          text: JSON.stringify({ success, summary, iterations: history.length, finalCollisions, svgPath, pngPath: pngOutputPath }, null, 2),
+          text: JSON.stringify({ success, summary, iterations: history.length, finalCollisions, svgPath, pngPath: pngOutputPath, notes, warnings }, null, 2),
         },
       ],
     };

@@ -26,24 +26,34 @@ window.NudgeRenderer.containerPlan = {
     const hasExternalIn = new Set();
     for (const e of extEdges) { if (childIds.has(e.to)) hasExternalIn.add(e.to); }
     const inDeg = new Map(sortChildren.map(n => [n.id, 0]));
+    const outDeg = new Map(sortChildren.map(n => [n.id, 0]));
     const adj   = new Map(sortChildren.map(n => [n.id, []]));
     for (const e of sortEdges) {
       inDeg.set(e.to, (inDeg.get(e.to) || 0) + 1);
+      outDeg.set(e.from, (outDeg.get(e.from) || 0) + 1);
       adj.get(e.from)?.push(e.to);
     }
+
+    // Break a relationship cycle by seeding the next layer with the most
+    // source-like remaining element(s) — maximum out-degree minus *current*
+    // in-degree. Used both when Kahn cannot seed layer 0 at all and when it
+    // stalls part-way through (e.g. a mutual request/response pair such as
+    // aims <-> dealerAuction leaves every remaining node with a surviving
+    // in-edge). Seeding one source-like node — rather than dumping every
+    // remaining node into a single layer — keeps a hub system on its own layer
+    // with its downstream systems in the layer below, so it reads centrally
+    // instead of being pushed to the left end of an over-wide row.
+    const seedSourceLike = (pool) => {
+      const score = n => (outDeg.get(n.id) || 0) - (inDeg.get(n.id) || 0);
+      const best = Math.max(...pool.map(score));
+      return pool.filter(n => score(n) === best);
+    };
+
     const layers = [];
     const done   = new Set();
     let zeroIndeg = sortChildren.filter(n => inDeg.get(n.id) === 0);
     if (zeroIndeg.length === 0 && sortChildren.length > 0) {
-      // Every element sits on a relationship cycle (e.g. mutual
-      // request/response pairs), so Kahn cannot seed the first layer.
-      // Break the cycle by seeding with the most source-like element(s):
-      // maximum out-degree minus in-degree.
-      const outDeg = new Map(sortChildren.map(n => [n.id, 0]));
-      for (const e of sortEdges) outDeg.set(e.from, (outDeg.get(e.from) || 0) + 1);
-      const sourceScore = n => (outDeg.get(n.id) || 0) - (inDeg.get(n.id) || 0);
-      const best = Math.max(...sortChildren.map(sourceScore));
-      zeroIndeg = sortChildren.filter(n => sourceScore(n) === best);
+      zeroIndeg = seedSourceLike(sortChildren);
     }
     layers.push(zeroIndeg);
     for (const n of zeroIndeg) {
@@ -51,8 +61,13 @@ window.NudgeRenderer.containerPlan = {
       for (const nxt of (adj.get(n.id) || [])) inDeg.set(nxt, inDeg.get(nxt) - 1);
     }
     while (done.size < sortChildren.length) {
-      const layer = sortChildren.filter(n => !done.has(n.id) && inDeg.get(n.id) === 0);
-      if (layer.length === 0) { layers.push(sortChildren.filter(n => !done.has(n.id))); break; }
+      let layer = sortChildren.filter(n => !done.has(n.id) && inDeg.get(n.id) === 0);
+      if (layer.length === 0) {
+        // Kahn stalled on a cycle: seed the layer with the most source-like
+        // remaining node(s) and keep going, rather than collapsing everything
+        // that is left into one row.
+        layer = seedSourceLike(sortChildren.filter(n => !done.has(n.id)));
+      }
       layers.push(layer);
       for (const n of layer) {
         done.add(n.id);

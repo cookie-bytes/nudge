@@ -275,10 +275,59 @@ const elk = new ELK();
 
         window.NudgeRenderer.routeGeometry.orthogonalizeGraphConnectionLines(laidOutGraph);
 
+        // Post-layout note positioning. Notes are annotations, not layout
+        // participants: they are placed here, after the elements have been laid
+        // out, using the same absolute coordinate space as the returned nodes
+        // (DIAGRAM_H_PAD, 50). Positioned boxes are handed to the draw step and
+        // returned so the geometry critic and exporter can see them.
+        const noteWarnings = [];
+        const flatNodesForNotes = flattenNodes(laidOutGraph, DIAGRAM_H_PAD, 50);
+        const positionedNotes = positionNotes(
+          diagramData.notes || [],
+          flatNodesForNotes,
+          (diagramData._layoutOverrides && diagramData._layoutOverrides.notePlacements) || {},
+          noteWarnings
+        );
+
+        // Canvas must grow to fit any note extending past the node bounds on the
+        // right/bottom (top/left overflow is handled by clamping in positionNotes).
+        const NOTE_CANVAS_MARGIN = 16;
+        let notesRight = 0, notesBottom = 0;
+        for (const n of positionedNotes) {
+          notesRight = Math.max(notesRight, n.x + n.width + NOTE_CANVAS_MARGIN);
+          notesBottom = Math.max(notesBottom, n.y + n.height + NOTE_CANVAS_MARGIN);
+        }
+
+        const displayType = diagramData && diagramData.diagramType === "C4Container" ? "C4 Container Diagram" : "C4 Context Diagram";
+        const titleText = `${displayType} : ${(diagramData && diagramData.title) || "Untitled"}`;
+        const titleWidth = measureTextWidth(titleText, 16, true) + 60;
+        const DIAGRAM_B_PAD = 40;
+
+        // Legend (bottom-left): a horizontal key of the element kinds actually
+        // present. Built before canvas sizing so its height/width can be
+        // reserved, then positioned against the final canvas bottom.
+        const legendModel = window.NudgeRenderer.legend.build(flatNodesForNotes, measureTextWidth);
+        const LEGEND_MARGIN_TOP = 12, LEGEND_MARGIN_BOTTOM = 12;
+        const legendReserve = legendModel ? LEGEND_MARGIN_TOP + legendModel.height + LEGEND_MARGIN_BOTTOM : 0;
+
+        const finalWidth = Math.max(
+          laidOutGraph.width + DIAGRAM_H_PAD * 2,
+          titleWidth,
+          notesRight,
+          legendModel ? DIAGRAM_H_PAD * 2 + legendModel.width : 0
+        );
+        const finalHeight = Math.max(laidOutGraph.height + 50 + DIAGRAM_B_PAD, notesBottom) + legendReserve;
+
+        const legendOriginX = DIAGRAM_H_PAD;
+        const legendOriginY = legendModel ? finalHeight - LEGEND_MARGIN_BOTTOM - legendModel.height : 0;
+
         // Render the graph using SVG (with 50px vertical offset for title)
         window.NudgeRenderer.svgRenderer.drawGraph({
           graph: laidOutGraph,
           diagramData,
+          notes: positionedNotes,
+          canvasWidth: finalWidth,
+          canvasHeight: finalHeight,
           DIAGRAM_H_PAD,
           BOUNDARY_H_PAD,
           measureTextWidth,
@@ -287,21 +336,20 @@ const elk = new ELK();
           pointToBoxDist,
           wrapText,
           MAX_LABEL_WIDTH,
-          LINE_HEIGHT
+          LINE_HEIGHT,
+          legendModel,
+          legendOriginX,
+          legendOriginY
         });
 
-        const displayType = diagramData && diagramData.diagramType === "C4Container" ? "C4 Container Diagram" : "C4 Context Diagram";
-        const titleText = `${displayType} : ${(diagramData && diagramData.title) || "Untitled"}`;
-        const titleWidth = measureTextWidth(titleText, 16, true) + 60;
-        const finalWidth = Math.max(laidOutGraph.width + DIAGRAM_H_PAD * 2, titleWidth);
-
-        const DIAGRAM_B_PAD = 40;
         return {
           success: true,
           width: finalWidth,
-          height: laidOutGraph.height + 50 + DIAGRAM_B_PAD,
+          height: finalHeight,
           nodes: flattenNodes(laidOutGraph, DIAGRAM_H_PAD, 50),
-          edges: flattenEdges(laidOutGraph, DIAGRAM_H_PAD, 50)
+          edges: flattenEdges(laidOutGraph, DIAGRAM_H_PAD, 50),
+          notes: positionedNotes,
+          warnings: noteWarnings
         };
       } catch (err) {
         console.error("Rendering failed:", err);
@@ -811,7 +859,15 @@ const elk = new ELK();
         const routableBoxes = [...children, ...extNodes].map(n => {
           const pos = getAbs(n.id);
           const sz = getSz(n.id);
-          return { id: n.id, x: pos.x, y: pos.y, width: sz.w, height: sz.h };
+          // A person's drawn silhouette (torso) is inset W*0.1 on each side of
+          // its bounding box (see architectureElementShapes.person). Route to
+          // that narrower silhouette so left/right dock points land on the body
+          // instead of in the blank margin beside it.
+          if (n.type === 'person') {
+            const inset = sz.w * 0.1;
+            return { id: n.id, type: n.type, x: pos.x + inset, y: pos.y, width: sz.w - 2 * inset, height: sz.h };
+          }
+          return { id: n.id, type: n.type, x: pos.x, y: pos.y, width: sz.w, height: sz.h };
         });
         const gridSections = window.NudgeRenderer.gridConnectionLineRouter.routeAllEdges({
           allEdges,
@@ -858,6 +914,152 @@ const elk = new ELK();
         window.NudgeRenderer.containerPlan.buildContainerZonePlan
       );
     };
+
+    // ─── Annotation note positioning ───────────────────────────────────────────
+    const NOTE_GAP = 24;         // clear gap between a note and its anchor
+    const NOTE_PAD = 8;          // inner text padding
+    const NOTE_FOLD = 12;        // dog-ear corner size
+    const NOTE_FONT = 12;        // note text font size
+    const NOTE_LINE_H = 16;      // note line height
+    const NOTE_MAX_WIDTH = 220;  // hard width cap (also used for far-apart `over`)
+    const NOTE_MIN_WIDTH = 100;
+    const NOTE_MIN_HEIGHT = 46;
+    const NOTE_CANVAS_MIN_X = 8;  // keep clear of the left edge
+    const NOTE_CANVAS_MIN_Y = 46; // keep clear of the title band (title text ~y35)
+
+    // Wrap a note's text (honouring <br/>) and derive the box dimensions.
+    function measureNoteBox(text) {
+      const segments = String(text || '').split(/<br\s*\/?>/i);
+      const textCap = NOTE_MAX_WIDTH - 2 * NOTE_PAD - NOTE_FOLD;
+      const lines = [];
+      for (const seg of segments) {
+        const trimmed = seg.trim();
+        if (!trimmed) { lines.push(''); continue; }
+        const wrapped = wrapText(trimmed, textCap, NOTE_FONT);
+        if (wrapped.length === 0) lines.push('');
+        else lines.push(...wrapped);
+      }
+      if (lines.length === 0) lines.push('');
+      const contentW = Math.max(
+        NOTE_MIN_WIDTH - 2 * NOTE_PAD - NOTE_FOLD,
+        ...lines.map(l => measureTextWidth(l, NOTE_FONT))
+      );
+      const width = Math.min(NOTE_MAX_WIDTH, Math.ceil(contentW) + 2 * NOTE_PAD + NOTE_FOLD);
+      const height = Math.max(NOTE_MIN_HEIGHT, lines.length * NOTE_LINE_H + 2 * NOTE_PAD);
+      return { width, height, lines };
+    }
+
+    // Place each parsed note relative to its anchor element(s). The effective
+    // placement is the auto-placement override when present, else the author's
+    // parsed hint. `over` means ABOVE the anchor (non-occluding), a deliberate
+    // divergence from Mermaid's covering `over`. Unresolved anchors are skipped
+    // with a warning (fail-safe). Never mutates layout.
+    function positionNotes(notes, flatNodes, notePlacements, warnings) {
+      const byId = new Map(flatNodes.map(n => [n.id, n]));
+
+      // Content bounding box of the laid-out nodes — the reference frame for
+      // margin-pinned floating notes (those with no anchor).
+      const contentMinX = flatNodes.length ? Math.min(...flatNodes.map(n => n.x)) : NOTE_CANVAS_MIN_X;
+      const contentMinY = flatNodes.length ? Math.min(...flatNodes.map(n => n.y)) : NOTE_CANVAS_MIN_Y;
+      const contentMaxX = flatNodes.length ? Math.max(...flatNodes.map(n => n.x + n.width)) : NOTE_CANVAS_MIN_X;
+      const contentMaxY = flatNodes.length ? Math.max(...flatNodes.map(n => n.y + n.height)) : NOTE_CANVAS_MIN_Y;
+
+      const out = [];
+      for (const note of notes || []) {
+        const refs = note.refs || [];
+
+        // Floating note (no anchor): pin to a canvas corner in the margin.
+        // Bottom corners drop into the empty band below the content; top
+        // corners sit above it (clamped below the title band). Always outside
+        // the node bbox, so a floating note never occludes an element.
+        if (refs.length === 0) {
+          const { width, height, lines } = measureNoteBox(note.text);
+          const corner = note.position || 'bottom-right';
+          const isBottom = corner.startsWith('bottom');
+          const isRight = corner.endsWith('right');
+          let x = isRight ? contentMaxX - width : contentMinX;
+          let y = isBottom ? contentMaxY + NOTE_GAP : contentMinY - NOTE_GAP - height;
+          x = Math.max(x, NOTE_CANVAS_MIN_X);
+          y = Math.max(y, NOTE_CANVAS_MIN_Y);
+          out.push({
+            id: note.id,
+            x: Math.round(x),
+            y: Math.round(y),
+            width,
+            height,
+            type: 'note',
+            text: note.text,
+            refs: [],
+            position: corner,
+            lines
+          });
+          continue;
+        }
+
+        const refNodes = refs.map(r => byId.get(r)).filter(Boolean);
+        if (refNodes.length === 0 || refNodes.length !== refs.length) {
+          warnings.push(`Note ${note.id} skipped: could not resolve anchor(s) ${JSON.stringify(refs)}.`);
+          continue;
+        }
+
+        // Union bbox of the anchor element(s); for a single ref this is the node.
+        const minX = Math.min(...refNodes.map(n => n.x));
+        const minY = Math.min(...refNodes.map(n => n.y));
+        const maxX = Math.max(...refNodes.map(n => n.x + n.width));
+        const maxY = Math.max(...refNodes.map(n => n.y + n.height));
+        const anchor = {
+          x: minX, y: minY, width: maxX - minX, height: maxY - minY,
+          cx: (minX + maxX) / 2, cy: (minY + maxY) / 2
+        };
+
+        const { width, height, lines } = measureNoteBox(note.text);
+        const placement = notePlacements[note.id] || note.position || 'over';
+
+        let x, y;
+        switch (placement) {
+          case 'left':
+            x = anchor.x - NOTE_GAP - width;
+            y = anchor.cy - height / 2;
+            break;
+          case 'right':
+            x = anchor.x + anchor.width + NOTE_GAP;
+            y = anchor.cy - height / 2;
+            break;
+          case 'below':
+            x = anchor.cx - width / 2;
+            y = anchor.y + anchor.height + NOTE_GAP;
+            break;
+          case 'over':
+          default:
+            // Above the anchor, horizontally centred — never on top of it.
+            x = anchor.cx - width / 2;
+            y = anchor.y - NOTE_GAP - height;
+            break;
+        }
+
+        // Clamp into the drawable canvas: never above the title band or left of
+        // the margin (those areas clip). A hint that would push a note off the
+        // top/left instead lands it against the anchor — the critic then sees an
+        // overlap and the auto-placement loop relocates it to a clear side. The
+        // right/bottom edges need no clamp; the canvas grows to fit them.
+        x = Math.max(x, NOTE_CANVAS_MIN_X);
+        y = Math.max(y, NOTE_CANVAS_MIN_Y);
+
+        out.push({
+          id: note.id,
+          x: Math.round(x),
+          y: Math.round(y),
+          width,
+          height,
+          type: 'note',
+          text: note.text,
+          refs,
+          position: placement,
+          lines
+        });
+      }
+      return out;
+    }
 
     const {
       measureTextWidth,

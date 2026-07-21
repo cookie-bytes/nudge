@@ -15,7 +15,8 @@ export function parseMermaidC4(mermaidString) {
     },
     nodes: [],
     edges: [],
-    rules: [] // Enforced ordering constraints
+    rules: [], // Enforced ordering constraints
+    notes: [] // Annotation notes (nudge extension — never layout participants)
   };
 
   const activeBoundaries = [];
@@ -23,6 +24,16 @@ export function parseMermaidC4(mermaidString) {
 
   const titleRegex = /^\s*title\s+(.+)$/i;
   const ruleRegex = /^\s*%%\s*Rule:\s*(\w+)\s+(above|below)\s+(\w+)/i;
+  const scopeRegex = /^\s*%%\s*Scope:\s*(\w+)/i;
+  // Annotation note (nudge extension, mirrors Mermaid's sequence-diagram note
+  // syntax): `Note right of X: text` / `Note left of X: text` /
+  // `Note over X: text` / spanning `Note over X,Y: text`. A note line is
+  // line-prefixed (not `Name(...)` form) so it never reaches the macro branch.
+  const noteRegex = /^Note\s+(right of|left of|over)\s+(.+?)\s*:\s*(.+)$/i;
+  // Floating (unanchored) note: pinned to a canvas corner rather than an
+  // element. `Note bottom-right: text` (hyphen or space form). No anchor id;
+  // rendered in the margin. See docs/c4-floating-note-implementation-plan.md.
+  const floatingNoteRegex = /^Note\s+(top|bottom)[-\s](left|right)\s*:\s*(.+)$/i;
 
   const nodeTypes = new Set([
     'person', 'person_ext',
@@ -40,8 +51,8 @@ export function parseMermaidC4(mermaidString) {
       continue;
     }
 
-    // Ignore normal comments, but let "%% Rule: ..." pass through
-    if (!line || (line.startsWith('%%') && !line.match(/Rule:/i))) {
+    // Ignore normal comments, but let "%% Rule: ..." and "%% Scope: ..." pass through
+    if (!line || (line.startsWith('%%') && !line.match(/Rule:|Scope:/i))) {
       continue;
     }
 
@@ -53,6 +64,48 @@ export function parseMermaidC4(mermaidString) {
         source: normalizeTypeName(source),
         relation: relation.toLowerCase(),
         target: normalizeTypeName(target)
+      });
+      continue;
+    }
+
+    // 0b. Match Scope override — explicitly names the in-scope (focal) system,
+    // taking precedence over the title-match heuristic in normalizeDiagramModel.
+    const scopeMatch = line.match(scopeRegex);
+    if (scopeMatch) {
+      result.scopeId = scopeMatch[1];
+      continue;
+    }
+
+    // 0c. Match annotation note. Notes are annotations, not Architecture
+    // Elements: they are pushed into result.notes and never into result.nodes,
+    // and are positioned after layout rather than participating in it.
+    const noteMatch = line.match(noteRegex);
+    if (noteMatch) {
+      const [, rawPosition, rawRefs, text] = noteMatch;
+      const position = rawPosition.toLowerCase().replace(/\s+of$/, '').trim(); // 'right of'->'right', 'over'->'over'
+      const refs = rawRefs.split(',').map(r => r.trim()).filter(Boolean).slice(0, 2);
+      if (refs.length > 0) {
+        result.notes.push({
+          id: `note_${result.notes.length}`,
+          text: text.trim(),
+          position,
+          refs
+        });
+      }
+      continue;
+    }
+
+    // 0d. Match floating (unanchored) corner note. Same note object shape, but
+    // `refs` is empty — the signal that it is pinned to a canvas corner rather
+    // than an element, and so is placed in the margin, not near an anchor.
+    const floatingMatch = line.match(floatingNoteRegex);
+    if (floatingMatch) {
+      const [, vertical, horizontal, text] = floatingMatch;
+      result.notes.push({
+        id: `note_${result.notes.length}`,
+        text: text.trim(),
+        position: `${vertical.toLowerCase()}-${horizontal.toLowerCase()}`,
+        refs: []
       });
       continue;
     }

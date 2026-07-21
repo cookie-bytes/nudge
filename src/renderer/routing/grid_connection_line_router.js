@@ -216,12 +216,23 @@ globalThis.NudgeRenderer.gridConnectionLineRouter = (() => {
     function terminalStates(elementId, kind) {
       const facePorts = graph.ports.get(elementId);
       if (!facePorts) return [];
+      const element = obstacleById.get(elementId);
+      // A person's silhouette is symmetric about its centre, so a single line
+      // reads best leaving from the body centreline. Bias its dock points
+      // toward the centre slot of each face; the portOccupied penalty still
+      // fans out multiple lines onto neighbouring slots.
+      const centreBias = element && element.type === 'person';
+      const cx = element ? element.x + element.width / 2 : 0;
+      const cy = element ? element.y + element.height / 2 : 0;
       const states = [];
       for (const [face, ports] of Object.entries(facePorts)) {
         for (const port of ports) {
           const vertexId = graph.vertexAt(port.laneJoin.x, port.laneJoin.y);
           if (!vertexId) continue;
           const portKey = `${elementId}:${face}:${port.slot}`;
+          const centreOffset = centreBias
+            ? (face === 'top' || face === 'bottom' ? Math.abs(port.x - cx) : Math.abs(port.y - cy))
+            : 0;
           states.push({
             vertexId,
             portKey,
@@ -231,7 +242,8 @@ globalThis.NudgeRenderer.gridConnectionLineRouter = (() => {
             heading: kind === 'source' ? port.heading : OPPOSITE[port.heading],
             terminalCost:
               manhattan(port, port.laneJoin) * weights.length +
-              (portUse.get(portKey) || 0) * weights.portOccupied
+              (portUse.get(portKey) || 0) * weights.portOccupied +
+              centreOffset * weights.length * 4
           });
         }
       }
@@ -634,6 +646,9 @@ globalThis.NudgeRenderer.gridConnectionLineRouter = (() => {
     // line's conflict cost. The jog is applied only to the target (end) approach,
     // since the arrowhead sits there by default and the step must land away from it.
     const MIN_APPROACH = 30;
+    // A lengthened approach must not slide its corridor run to within this of a
+    // near-parallel neighbour: two lines closer than this read as one stroke.
+    const MIN_PARALLEL_GAP = 12;
 
     function lengthenTerminalApproaches(sections) {
       const pointsByEdge = sections.map(section =>
@@ -656,15 +671,61 @@ globalThis.NudgeRenderer.gridConnectionLineRouter = (() => {
         return false;
       }
 
-      // Replace pts in place with newPts, but only if no element is crossed and
-      // the line's conflict cost does not rise; otherwise restore and report false.
+      // Smallest gap from edge `idx`'s orthogonal segments to any overlapping
+      // like-axis segment of another (non-bundled) edge. Lengthening a terminal
+      // approach can slide the adjoining corridor run sideways; near-parallel
+      // proximity is neither a crossing nor a collinear overlap, so the conflict
+      // cost alone would let a slide fuse two lines into one thick stroke. This
+      // measures that proximity so commitIfClear can veto the crowding slide.
+      const orthSegments = (pts) => {
+        const segs = [];
+        for (let i = 0; i < pts.length - 1; i++) {
+          const a = pts[i], b = pts[i + 1];
+          const horizontal = Math.abs(a.y - b.y) <= 0.5 && Math.abs(a.x - b.x) > 0.5;
+          const vertical = Math.abs(a.x - b.x) <= 0.5 && Math.abs(a.y - b.y) > 0.5;
+          if (!horizontal && !vertical) continue;
+          segs.push({
+            horizontal,
+            lane: horizontal ? a.y : a.x,
+            lo: horizontal ? Math.min(a.x, b.x) : Math.min(a.y, b.y),
+            hi: horizontal ? Math.max(a.x, b.x) : Math.max(a.y, b.y)
+          });
+        }
+        return segs;
+      };
+      function nearestParallelGap(idx) {
+        const own = pointsByEdge[idx];
+        if (!own) return Infinity;
+        const ownSegs = orthSegments(own);
+        let best = Infinity;
+        pointsByEdge.forEach((pts, other) => {
+          if (!pts || other === idx || canBundleEdges(allEdges[idx], allEdges[other])) return;
+          for (const s of orthSegments(pts)) {
+            for (const o of ownSegs) {
+              if (s.horizontal !== o.horizontal) continue;
+              if (Math.min(s.hi, o.hi) - Math.max(s.lo, o.lo) <= 10) continue;
+              const gap = Math.abs(s.lane - o.lane);
+              if (gap > 0.5 && gap < best) best = gap;
+            }
+          }
+        });
+        return best;
+      }
+
+      // Replace pts in place with newPts, but only if no element is crossed, the
+      // line's conflict cost does not rise, and the move does not pull this line
+      // within MIN_PARALLEL_GAP of a near-parallel neighbour it was clear of;
+      // otherwise restore and report false.
       function commitIfClear(pts, idx, newPts, segmentsClear) {
         if (!segmentsClear()) return false;
         const saved = pts.map(p => ({ x: p.x, y: p.y }));
         const before = edgeConflictCostIn(pointsByEdge, idx);
+        const gapBefore = nearestParallelGap(idx);
         pts.length = 0;
         pts.push(...newPts);
-        if (edgeConflictCostIn(pointsByEdge, idx) > before) {
+        const gapAfter = nearestParallelGap(idx);
+        if (edgeConflictCostIn(pointsByEdge, idx) > before ||
+            (gapAfter < MIN_PARALLEL_GAP && gapAfter < gapBefore - 0.5)) {
           pts.length = 0;
           pts.push(...saved);
           return false;

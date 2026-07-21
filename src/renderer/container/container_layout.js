@@ -316,14 +316,14 @@ window.NudgeRenderer.containerLayout = {
 
     for (const n of extNodes) {
       const p = absPos[n.id]; if (!p) continue;
-      out.children.push({ id: n.id, x: p.x, y: p.y, width: n.width || 200, height: n.height || 80, type: n.type, typeLabel: n.typeLabel, label: n.label, tech: n.tech || '', description: n.description || '', edges: [] });
+      out.children.push({ id: n.id, x: p.x, y: p.y, width: n.width || 200, height: n.height || 80, type: n.type, typeLabel: n.typeLabel, label: n.label, tech: n.tech || '', description: n.description || '', inScope: n.inScope, supporting: n.supporting, edges: [] });
     }
     out.children.push({
       id: boundaryNode.id, x: bndX, y: bndY, width: bndW, height: bndH,
       type: 'boundary', label: boundaryNode.label, description: boundaryNode.description || '',
       _synthetic: !!boundaryNode._synthetic,
       edges: [],
-      children: children.map(n => ({ id: n.id, x: childPos[n.id].x, y: childPos[n.id].y, width: n.width || 200, height: n.height || 80, type: n.type, typeLabel: n.typeLabel, label: n.label, tech: n.tech || '', description: n.description || '', edges: [] }))
+      children: children.map(n => ({ id: n.id, x: childPos[n.id].x, y: childPos[n.id].y, width: n.width || 200, height: n.height || 80, type: n.type, typeLabel: n.typeLabel, label: n.label, tech: n.tech || '', description: n.description || '', inScope: n.inScope, supporting: n.supporting, edges: [] }))
     });
 
     return out;

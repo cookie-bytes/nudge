@@ -95,6 +95,7 @@ Each candidate is scored against Element Overlaps, Connection-Line Element Cross
 - 📏 **Standardized Sizing & Grid**: All nodes are standardized to a width of `200px`. Heights: `200px` for Person, `140px` for Container/Database/External, `80px` for MessageBus — ensuring consistent alignment and a clean grid.
 - 🧭 **Dedicated Bus & Database Rows**: Message buses and databases are separated from ordinary service layers, with message buses always anchored in the bottom-right and databases visually paired beneath their owner service.
 - 💬 **3-Line Descriptions**: Node descriptions support a 3-line clamp, providing space for detailed technical notes without clipping.
+- 📝 **Auto-Placed Annotation Notes**: Free-text notes anchor to an element with a directional hint (`right`/`left`/`over`); the geometry critic measures them for occlusion and relocates them to a clear side without worsening the layout. See [Annotation Notes](#annotation-notes).
 - 🏷️ **Collision-Aware Label Placement**: Edge labels check four strategies sequentially — straight-middle, target-anchored, source-anchored, and edge-density-aware segment scoring. Each strategy checks for collision against node boxes, already-placed labels, and connection lines, preventing co-terminal labels from stacking and reducing label-edge intersections.
 - 🔌 **Orthogonal Grid Routing**: Connection lines use A* search over a sparse orthogonal visibility graph, keeping track of heading to penalize bends. Multiple slots on faces act as shared port resources. The system runs hardest-first, performs rip-up-and-reroute optimization, and finishes with a channel nudging phase that spreads parallel segments. Legacy candidate routing remains as a fallback for unplaced leaf/cross-hierarchy elements.
 - 🌐 **Connectivity-Based Zone Sorting**: External nodes are auto-sorted to align with the internal layer or column they connect to, reducing edge crossings without LLM intervention.
@@ -219,6 +220,44 @@ edges:
 ```
 
 See [`examples/`](examples/) for full working examples including container diagrams with boundary blocks.
+
+#### Annotation Notes
+
+Diagrams can carry free-text **annotation notes** — folded-corner boxes anchored to an element and rendered near it. Notes are for commentary (ownership, status, caveats); they are not Architecture Elements and never participate in relationships.
+
+**Mermaid** (adopts the sequence-diagram convention):
+
+```
+Note right of shop: Handles the full<br/>checkout journey
+Note left of payments: Legacy provider,<br/>being retired
+Note over inventory: Owned by Team Phoenix
+Note over user,shop: Primary purchase journey
+```
+
+**PlantUML** (note the space before the colon; `top of` maps to `over`):
+
+```
+note right of shop : Handles the full<br/>checkout journey
+note left of payments : Legacy provider,<br/>being retired
+note top of inventory : Owned by Team Phoenix
+```
+
+- **Anchoring** — a note attaches to one element via a directional hint (`right`, `left`, or `over`). The two-anchor span form (`Note over X,Y`) is `over` only and centres over both anchors.
+- **`over` places the note *above* the anchor, never covering it** — a deliberate divergence from Mermaid, where `over` visually covers the element. Covering the anchor would defeat the purpose of an annotation.
+- **Auto-placement** — the author's hinted side is honoured first; if it occludes a neighbour or a connection line, Nudge tries the other sides in preference order and moves the note only if that improves the overall geometry. A note with no clean placement is left at its hint and reported via a `warnings` entry.
+- **Unknown anchor id** — the note is skipped with a `warnings` entry (fail-safe), never a hard error.
+- Multi-line text uses `<br/>`.
+
+**Floating (unanchored) notes** — a diagram-wide caption pinned to a canvas corner rather than an element. Use a corner (`top-left`, `top-right`, `bottom-left`, `bottom-right`) in place of `... of <element>`, with no anchor id:
+
+```
+Note bottom-right: Integration predominantly via MuleSoft ESB (EMS pub/sub).
+note top-left : Data classification — Internal          # PlantUML parity
+```
+
+Floating notes sit in the margin outside the node area, so they never occlude an element and are exempt from the auto-placement search. Both hyphen (`bottom-right`) and space (`bottom right`) forms are accepted. See [docs/c4-floating-note-implementation-plan.md](docs/c4-floating-note-implementation-plan.md) for design notes.
+
+Working fixtures: [`examples/system_context_with_notes.mermaid`](examples/system_context_with_notes.mermaid) and [`examples/system_context_with_notes.puml`](examples/system_context_with_notes.puml).
 
 **Outputs** are written to `.nudge/`:
 - `iteration_N.png` — screenshot at each flat-diagram critic-loop pass

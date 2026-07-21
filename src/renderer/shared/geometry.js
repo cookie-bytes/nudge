@@ -53,7 +53,9 @@ window.NudgeRenderer.sharedGeometry = (() => {
         width: graphNode.width,
         height: graphNode.height,
         type: graphNode.type,
-        label: graphNode.label
+        label: graphNode.label,
+        inScope: graphNode.inScope,
+        supporting: graphNode.supporting
       });
     }
 

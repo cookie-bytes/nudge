@@ -18,7 +18,8 @@ export function parsePlantUMLC4(pumlString) {
     },
     nodes: [],
     edges: [],
-    rules: [] // Enforced ordering constraints
+    rules: [], // Enforced ordering constraints
+    notes: [] // Annotation notes (nudge extension — never layout participants)
   };
 
   const activeBoundaries = [];
@@ -27,6 +28,14 @@ export function parsePlantUMLC4(pumlString) {
   const titleRegex = /^\s*title\s+(.+)$/i;
   // Match rule in comments, e.g., ' Rule: X above Y
   const ruleRegex = /^\s*'\s*Rule:\s*(\w+)\s+(above|below)\s+(\w+)/i;
+  // Annotation note (parity with the Mermaid extension), using PlantUML's
+  // native single-line note shape: `note right of X : text` /
+  // `note left of X : text` / `note top of X : text`. `top of` maps to `over`.
+  const noteRegex = /^note\s+(right of|left of|top of)\s+(.+?)\s*:\s*(.+)$/i;
+  // Floating (unanchored) note: pinned to a canvas corner rather than an
+  // element. `note bottom-right : text` (hyphen or space form). Parity with the
+  // Mermaid extension. See docs/c4-floating-note-implementation-plan.md.
+  const floatingNoteRegex = /^note\s+(top|bottom)[-\s](left|right)\s*:\s*(.+)$/i;
 
   const nodeTypes = new Set([
     'person', 'person_ext',
@@ -67,6 +76,40 @@ export function parsePlantUMLC4(pumlString) {
         source: normalizeTypeName(source),
         relation: relation.toLowerCase(),
         target: normalizeTypeName(target)
+      });
+      continue;
+    }
+
+    // 0b. Match annotation note. Notes are annotations, not Architecture
+    // Elements: pushed into result.notes, never result.nodes, and positioned
+    // after layout. `top of` is normalised to `over` (parity with Mermaid).
+    const noteMatch = line.match(noteRegex);
+    if (noteMatch) {
+      const [, rawPosition, rawRefs, text] = noteMatch;
+      const lowered = rawPosition.toLowerCase();
+      const position = lowered === 'top of' ? 'over' : lowered.replace(/\s+of$/, '').trim();
+      const refs = rawRefs.split(',').map(r => r.trim()).filter(Boolean).slice(0, 2);
+      if (refs.length > 0) {
+        result.notes.push({
+          id: `note_${result.notes.length}`,
+          text: text.trim(),
+          position,
+          refs
+        });
+      }
+      continue;
+    }
+
+    // 0c. Match floating (unanchored) corner note. Empty `refs` signals it is
+    // pinned to a canvas corner rather than an element (margin placement).
+    const floatingMatch = line.match(floatingNoteRegex);
+    if (floatingMatch) {
+      const [, vertical, horizontal, text] = floatingMatch;
+      result.notes.push({
+        id: `note_${result.notes.length}`,
+        text: text.trim(),
+        position: `${vertical.toLowerCase()}-${horizontal.toLowerCase()}`,
+        refs: []
       });
       continue;
     }

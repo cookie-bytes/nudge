@@ -277,11 +277,13 @@ function analyzeEdgeQuality(edges) {
 
 // Perform complete geometric layout critique
 export function analyzeLayout(layoutData) {
-  const { nodes, edges, width, height } = layoutData;
+  const { nodes, edges, width, height, notes = [] } = layoutData;
   const report = {
     collisions: [],
     overlapCount: 0,
     intersectionCount: 0,
+    noteOverlapCount: 0,
+    noteEdgeCrossingCount: 0,
     edgeQuality: analyzeEdgeQuality(edges || []),
     aspectRatio: (width / height).toFixed(2),
     width,
@@ -534,6 +536,65 @@ export function analyzeLayout(layoutData) {
           elements: [nA.id, nB.id],
           distance: Math.round(edgeDistance),
           details: `Nodes '${nA.label}' and '${nB.label}' are extremely close (${Math.round(edgeDistance)}px separation), which may overlap text or look cramped.`
+        });
+      }
+    }
+  }
+
+  // 4. Notes as obstacles. Notes are annotations, not layout participants, but
+  // the critic treats their boxes as real obstacles so occlusion is measured
+  // and drives auto-placement (see docs/c4-notes-implementation-plan.md). No
+  // edge references a note id, so notes are never selected as an edge endpoint
+  // — the exclusion is automatic and needs no guard.
+
+  // 4a. Note ↔ element overlap and note ↔ note overlap.
+  for (const note of notes) {
+    for (const comp of components) {
+      if (boxesOverlap(note, comp)) {
+        report.noteOverlapCount++;
+        report.collisions.push({
+          type: 'note_overlap',
+          elements: [note.id, comp.id],
+          details: `Note '${note.id}' overlaps node '${comp.label}' (${comp.id}).`
+        });
+      }
+    }
+  }
+  for (let i = 0; i < notes.length; i++) {
+    for (let j = i + 1; j < notes.length; j++) {
+      if (boxesOverlap(notes[i], notes[j])) {
+        report.noteOverlapCount++;
+        report.collisions.push({
+          type: 'note_overlap',
+          elements: [notes[i].id, notes[j].id],
+          details: `Notes '${notes[i].id}' and '${notes[j].id}' overlap.`
+        });
+      }
+    }
+  }
+
+  // 4b. Connection line crossing a note box.
+  for (const edge of edges) {
+    if (!edge.sections || edge.sections.length === 0) continue;
+    const section = edge.sections[0];
+    const points = [{ x: section.startPoint.x, y: section.startPoint.y }];
+    if (section.bendPoints) points.push(...section.bendPoints);
+    points.push({ x: section.endPoint.x, y: section.endPoint.y });
+
+    for (const note of notes) {
+      let crosses = false;
+      for (let i = 0; i < points.length - 1 && !crosses; i++) {
+        if (lineIntersectsBox(points[i].x, points[i].y, points[i + 1].x, points[i + 1].y, note)) {
+          crosses = true;
+        }
+      }
+      if (crosses) {
+        report.noteEdgeCrossingCount++;
+        report.collisions.push({
+          type: 'note_edge_crossing',
+          edge: `${edge.sources?.[0]} -> ${edge.targets?.[0]}`,
+          note: note.id,
+          details: `Connection line '${edge.sources?.[0]} -> ${edge.targets?.[0]}' crosses note '${note.id}'.`
         });
       }
     }

@@ -1,0 +1,13 @@
+C4Context
+    title Orders Platform Context
+
+    Person(customer, "Customer", "Places orders through the storefront.")
+
+    System(orders, "Orders Platform", "The system in scope. Captures orders and coordinates fulfilment.")
+    System(inventory, "Inventory Service", "Internal supporting system tracking stock levels.")
+
+    System_Ext(stripe, "Stripe", "External payment gateway.")
+
+    Rel(customer, orders, "Places orders via")
+    Rel(orders, inventory, "Checks stock in")
+    Rel(orders, stripe, "Takes payment via")

@@ -7,6 +7,109 @@ import {
   getLLMLabelPlacementHints
 } from './llm_client.js';
 
+// Generic words that carry no identifying signal in a C4 diagram title or a
+// system label. They are stripped before scoring so that words like "Service"
+// and "System" (which appear in almost every label) do not cause false or
+// tied matches.
+const SCOPE_STOPWORDS = new Set([
+  'c4', 'context', 'diagram', 'system', 'systems', 'service', 'services',
+  'the', 'a', 'an', 'of', 'and', 'for', 'to', 'in', 'on', 'with',
+  'platform', 'app', 'application', 'core', 'main', 'simplified'
+]);
+
+// Split a string into significant lowercase tokens: camelCase boundaries are
+// broken (bankingSystem → banking, system), punctuation becomes whitespace,
+// single characters and stopwords are dropped.
+function scopeTokens(str) {
+  return new Set(
+    String(str || '')
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .split(/\s+/)
+      .filter(t => t.length >= 2 && !SCOPE_STOPWORDS.has(t))
+  );
+}
+
+/**
+ * Infer the single "system in scope" from a diagram title by scoring each
+ * candidate's label + id token overlap against the normalized title. Returns
+ * the winning candidate, or null when nothing clears the bar or two candidates
+ * tie (fail-safe: no highlight rather than a wrong guess).
+ *
+ * @param {string} title
+ * @param {Array<{id:string,label:string}>} candidates - internal `container` systems only
+ */
+export function matchInScopeByTitle(title, candidates) {
+  const titleTokens = scopeTokens(title);
+  if (titleTokens.size === 0) return null;
+
+  let best = null;
+  let bestScore = 0;
+  let tied = false;
+  for (const candidate of candidates || []) {
+    const cTokens = scopeTokens(candidate.label);
+    for (const t of scopeTokens(candidate.id)) cTokens.add(t);
+
+    let score = 0;
+    for (const t of titleTokens) if (cTokens.has(t)) score++;
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = candidate;
+      tied = false;
+    } else if (score === bestScore && score > 0) {
+      tied = true;
+    }
+  }
+
+  return bestScore > 0 && !tied ? best : null;
+}
+
+/**
+ * Identify the in-scope system in a C4Context diagram and mark it with
+ * `inScope: true`; every other internal `container` system is marked
+ * `supporting: true`. Recurses into boundaries so it works whether the model
+ * uses a real boundary, the synthetic-context boundary, or a flat layout. An
+ * explicit `%% Scope: <id>` override (`diagramModel.scopeId`) wins over the
+ * title heuristic. When no confident match is found, nothing is flagged and
+ * every internal system keeps its default colour (fail-safe).
+ *
+ * This flag is a shared contract also consumed by the central-prominence
+ * colouring; detection lives here so it is implemented exactly once.
+ *
+ * @returns {object|null} the in-scope node, or null when none matched
+ */
+export function detectInScopeSystem(diagramModel) {
+  const candidates = [];
+  const collect = (nodes) => {
+    for (const n of nodes || []) {
+      if (n.type === 'container') candidates.push(n);
+      if (n.children) collect(n.children);
+    }
+  };
+  collect(diagramModel.nodes);
+  if (candidates.length === 0) return null;
+
+  // Clear any stale flags from a prior normalization pass.
+  for (const c of candidates) { delete c.inScope; delete c.supporting; }
+
+  let winner = null;
+  if (diagramModel.scopeId) {
+    winner = candidates.find(c => c.id === diagramModel.scopeId) || null;
+  }
+  if (!winner) {
+    winner = matchInScopeByTitle(diagramModel.title, candidates);
+  }
+  if (!winner) return null;
+
+  for (const c of candidates) {
+    if (c === winner) c.inScope = true;
+    else c.supporting = true;
+  }
+  return winner;
+}
+
 /**
  * Normalise a parsed diagram model before rendering, shared by every entry
  * point (CLI, MCP). Infers the diagram type when the input format does not
@@ -16,16 +119,37 @@ import {
  * boundary, where the container plan places them in its external zones.
  */
 export function normalizeDiagramModel(diagramModel) {
+  // NOTE: this function mutates and returns the *same* object on every path,
+  // only ever reassigning `.nodes`. The top-level `notes` (annotations) and
+  // `warnings` collections survive by identity and are intentionally passed
+  // through untouched — do not spread this model into a fresh object here, or a
+  // future refactor would silently drop them before rendering.
   const hasBoundary = (diagramModel.nodes || []).some(n => n.type === 'boundary');
   if (!diagramModel.diagramType) {
     diagramModel.diagramType = hasBoundary ? 'C4Container' : 'C4Context';
   }
+
+  // In-scope detection is a shared foundation (colouring + centering). Run it
+  // for every C4Context diagram — before the synthetic-boundary wrap below so
+  // the flag rides along on the child node, and regardless of whether the
+  // diagram already has a real boundary or takes the flat path.
+  if (String(diagramModel.diagramType).startsWith('C4Context')) {
+    detectInScopeSystem(diagramModel);
+  }
+
   if (hasBoundary || diagramModel._contextBoundaryAdded) return diagramModel;
   if (!String(diagramModel.diagramType).startsWith('C4Context')) return diagramModel;
 
+  // Central prominence (not isolation): all internal systems stay inside the
+  // synthetic boundary; only people and true externals sit outside, where the
+  // container plan's zone classifier arranges them around the interior cluster.
+  // The focal system is made prominent by colour (via the `inScope` flag set in
+  // detectInScopeSystem above), not by being geometrically alone in the centre.
+  // See docs/c4-central-prominence-implementation-plan.md.
   const outsideTypes = new Set(['person', 'person_ext', 'external']);
   const insideNodes = (diagramModel.nodes || []).filter(n => !outsideTypes.has(n.type));
   const outsideNodes = (diagramModel.nodes || []).filter(n => outsideTypes.has(n.type));
+
   if (insideNodes.length === 0 || outsideNodes.length === 0) return diagramModel;
 
   diagramModel.nodes = [...outsideNodes, {
@@ -71,6 +195,20 @@ export async function optimizeDiagram({
 
   normalizeDiagramModel(diagramModel);
 
+  // Diagnostics recorded during normalization. Surface them to the caller's
+  // log and thread them into the returned result.
+  const notes = diagramModel._notes || [];
+  for (const note of notes) onLog(`[Optimizer] ${note}`);
+
+  // Annotation-note diagnostics use a dedicated `warnings` channel (distinct
+  // from the centering `notes` above, which now means annotations elsewhere):
+  // unresolved anchors (from the render pass) and notes that could not be
+  // placed without overlap (from the auto-placement loop below).
+  const warnings = [];
+  const addWarnings = (list) => {
+    for (const w of list || []) if (!warnings.includes(w)) warnings.push(w);
+  };
+
   // Container connection lines default to the grid router (A* over the
   // orthogonal visibility graph, docs/nudge_next_generation_design.md §3).
   // NUDGE_ROUTER=legacy restores the old candidate router.
@@ -111,6 +249,11 @@ export async function optimizeDiagram({
           score:
             report.overlapCount * 100000 +
             report.intersectionCount * 100000 +
+            // Note occlusion is weighted just below a hard node overlap so the
+            // note auto-placement loop is driven to clear it, without letting a
+            // stubborn note dominate a genuine element collision.
+            (report.noteOverlapCount || 0) * 40000 +
+            (report.noteEdgeCrossingCount || 0) * 8000 +
             (edge.edgeCrossingCount || 0) * 500 +
             (edge.edgeOverlapCount || 0) * 500 +
             (edge.edgeOverlapPx || 0) * 2 +
@@ -197,7 +340,75 @@ export async function optimizeDiagram({
         if (!labelHintsStep) return { success: false, history: [], svgContent: null, pngPath: null };
       }
 
+      // ── Note auto-placement ────────────────────────────────────────────
+      // Annotation notes are positioned post-layout (render_engine.js) from
+      // the author's directional hint. When that hinted side occludes a
+      // neighbour or a connection line, try alternative sides in preference
+      // order — the author's hint is honoured first, so we only move a note if
+      // its hinted side actually collides. Each candidate re-renders and is
+      // accepted only if it does not worsen the overall geometry score (the
+      // same accept-if-not-worse contract the label loop uses). A note with no
+      // clean placement is left at its hint and reported via `warnings`.
+      const annotationNotes = diagramModel.notes || [];
+      if (annotationNotes.length > 0) {
+        const overlappingNoteIds = (result) => {
+          const found = new Set();
+          for (const c of analyzeLayout(result).collisions) {
+            if (c.type !== 'note_overlap' && c.type !== 'note_edge_crossing') continue;
+            if (c.note) found.add(c.note);
+            for (const el of c.elements || []) if (String(el).startsWith('note_')) found.add(el);
+          }
+          return found;
+        };
+
+        for (const note of annotationNotes) {
+          // Floating notes are pinned to a canvas corner in the margin; the
+          // anchor-relative side search does not apply to them.
+          if (!(note.refs && note.refs.length)) continue;
+          if (!overlappingNoteIds(acceptedStep.result).has(note.id)) continue;
+          onLog(`[Notes] Note ${note.id} occluded at hinted placement '${note.position}' — searching for a clear side...`);
+
+          // Snapshot so an unplaceable note can be restored to the author's
+          // hint: the accept-if-not-worse rule accepts equal-score lateral
+          // moves, so without this the note could drift to an arbitrary side.
+          const overridesBeforeSearch = overrides;
+          const stepBeforeSearch = acceptedStep;
+
+          let resolved = false;
+          for (const side of [note.position, 'right', 'left', 'over', 'below']) {
+            // Skip the side already in effect (re-rendering it is a no-op).
+            const effectiveSide = (overrides.notePlacements || {})[note.id] || note.position;
+            if (side === effectiveSide) continue;
+
+            const candidateOverrides = {
+              ...overrides,
+              notePlacements: { ...(overrides.notePlacements || {}), [note.id]: side }
+            };
+            const accepted = await renderAndMaybeAccept(
+              `step_note_${note.id}_${side}`,
+              candidateOverrides,
+              acceptedStep,
+              `note ${note.id} -> ${side}`
+            );
+            acceptedStep = accepted.step || acceptedStep;
+            if (accepted.accepted && !overlappingNoteIds(acceptedStep.result).has(note.id)) {
+              resolved = true;
+              break;
+            }
+          }
+
+          if (!resolved) {
+            // No side cleared the note: leave it at the author's hint and warn.
+            overrides = overridesBeforeSearch;
+            acceptedStep = stepBeforeSearch;
+            warnings.push(`Note ${note.id} could not be placed without overlap; left at author's hint ('${note.position}').`);
+          }
+        }
+      }
+
       const finalStep = acceptedStep;
+      // Unresolved-anchor warnings are produced by the render pass itself.
+      addWarnings(finalStep.result.warnings);
 
       diagramModel._layoutOverrides = overrides;
       if (Object.keys(visualHints).length > 0) {
@@ -224,8 +435,10 @@ export async function optimizeDiagram({
         screenshot: finalStep.screenshotPath,
       }];
 
+      for (const w of warnings) onLog(`[Notes] ${w}`);
+
       const success = report.overlapCount === 0 && report.intersectionCount === 0;
-      return { success, history, svgContent: svg, pngPath: finalPngPath };
+      return { success, history, svgContent: svg, pngPath: finalPngPath, notes, warnings };
     }
 
     let currentOptions = { ...diagramModel.layoutOptions };
@@ -306,6 +519,7 @@ export async function optimizeDiagram({
 
       if (bestRenderResult) {
         onLog(`[Optimizer] Selected best config with score ${bestScore}.`);
+        addWarnings(bestRenderResult.warnings);
         diagramModel.layoutOptions = { ...bestOptions };
 
         await page.setViewportSize({
@@ -359,6 +573,7 @@ export async function optimizeDiagram({
           break;
         }
         lastRenderResult = result;
+        addWarnings(result.warnings);
 
         onLog(`[Render] Viewport bounds computed: ${result.width}x${result.height}`);
 
@@ -450,7 +665,9 @@ export async function optimizeDiagram({
       }
     }
 
-    return { success, history, svgContent, pngPath };
+    for (const w of warnings) onLog(`[Notes] ${w}`);
+
+    return { success, history, svgContent, pngPath, notes, warnings };
   } finally {
     await browser.close();
   }

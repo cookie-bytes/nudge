@@ -1,0 +1,23 @@
+C4Context
+  title Shop Platform Context with Notes
+
+  Person(user, "Customer", "Buys products online")
+  System(shop, "Shop Platform", "The core system in scope")
+  System(inventory, "Inventory System", "Tracks stock levels")
+  System_Ext(payments, "Payment Gateway", "Processes card payments")
+  System_Ext(email, "Email Service", "Sends transactional email")
+
+  Rel(user, shop, "Places orders via", "HTTPS")
+  Rel(shop, payments, "Charges cards via", "HTTPS")
+  Rel(shop, email, "Sends receipts via", "SMTP")
+  Rel(shop, inventory, "Checks stock via", "gRPC")
+
+  %% Scope: shop
+
+  %% right/left/over single-anchor notes plus a two-anchor span. `over` places
+  %% the note ABOVE the anchor (non-occluding) — a deliberate nudge divergence
+  %% from Mermaid, where `over` visually covers the element.
+  Note right of shop: Handles the full<br/>checkout journey
+  Note left of payments: Legacy provider,<br/>being retired
+  Note over inventory: Owned by Team Phoenix
+  Note over user,shop: Primary purchase journey

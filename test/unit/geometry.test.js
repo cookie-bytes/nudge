@@ -112,3 +112,78 @@ test('analyzeLayout calculates aspect ratio and tight spacing', () => {
   assert.equal(tightCollisions.length, 1);
   assert.match(tightCollisions[0].details, /cramped/);
 });
+
+// --- Notes as obstacles -----------------------------------------------------
+
+test('analyzeLayout counts a note overlapping a node as note_overlap, not node_overlap', () => {
+  const layoutData = {
+    width: 800,
+    height: 600,
+    nodes: [
+      { id: 'sys', label: 'System', type: 'container', x: 100, y: 100, width: 120, height: 80 }
+    ],
+    edges: [],
+    notes: [
+      { id: 'note_0', type: 'note', x: 150, y: 120, width: 100, height: 50 } // straddles sys
+    ]
+  };
+
+  const report = analyzeLayout(layoutData);
+
+  assert.equal(report.noteOverlapCount, 1);
+  assert.equal(report.overlapCount, 0, 'a note overlap must not inflate the node overlap count');
+  const noteOverlap = report.collisions.find(c => c.type === 'note_overlap');
+  assert.ok(noteOverlap);
+  assert.deepEqual(noteOverlap.elements, ['note_0', 'sys']);
+});
+
+test('analyzeLayout detects a note-note overlap', () => {
+  const report = analyzeLayout({
+    width: 800, height: 600, nodes: [], edges: [],
+    notes: [
+      { id: 'note_0', type: 'note', x: 100, y: 100, width: 100, height: 50 },
+      { id: 'note_1', type: 'note', x: 140, y: 120, width: 100, height: 50 }
+    ]
+  });
+  assert.equal(report.noteOverlapCount, 1);
+  assert.ok(report.collisions.some(c => c.type === 'note_overlap'));
+});
+
+test('analyzeLayout flags a connection line crossing a note as note_edge_crossing', () => {
+  const layoutData = {
+    width: 800,
+    height: 600,
+    nodes: [
+      { id: 'a', label: 'A', type: 'container', x: 50, y: 100, width: 50, height: 50 },
+      { id: 'b', label: 'B', type: 'container', x: 400, y: 100, width: 50, height: 50 }
+    ],
+    edges: [
+      {
+        id: 'edge_0', labels: [], sources: ['a'], targets: ['b'],
+        sections: [{ startPoint: { x: 100, y: 125 }, endPoint: { x: 400, y: 125 }, bendPoints: [] }]
+      }
+    ],
+    notes: [
+      { id: 'note_0', type: 'note', x: 200, y: 100, width: 60, height: 50 } // sits on the a→b line
+    ]
+  };
+
+  const report = analyzeLayout(layoutData);
+
+  assert.equal(report.noteEdgeCrossingCount, 1);
+  const crossing = report.collisions.find(c => c.type === 'note_edge_crossing');
+  assert.ok(crossing);
+  assert.equal(crossing.note, 'note_0');
+  // A note is never an edge endpoint, so it is never excluded like source/target
+  // and never mistaken for one — the crossing is reported.
+});
+
+test('analyzeLayout leaves note counts at zero when there are no notes', () => {
+  const report = analyzeLayout({
+    width: 400, height: 200,
+    nodes: [{ id: 'a', label: 'A', type: 'container', x: 0, y: 0, width: 50, height: 50 }],
+    edges: []
+  });
+  assert.equal(report.noteOverlapCount, 0);
+  assert.equal(report.noteEdgeCrossingCount, 0);
+});

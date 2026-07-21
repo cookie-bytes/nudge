@@ -1,6 +1,6 @@
 window.NudgeRenderer.svgRenderer = {
   clearLayers() {
-    const layers = ["title-layer", "boundaries-layer", "edges-layer", "nodes-layer", "edge-labels-layer"];
+    const layers = ["title-layer", "boundaries-layer", "edges-layer", "nodes-layer", "notes-layer", "edge-labels-layer", "legend-layer"];
     layers.forEach(l => {
       const el = document.getElementById(l);
       if (el) el.innerHTML = "";
@@ -22,15 +22,22 @@ window.NudgeRenderer.svgRenderer = {
     return titleText;
   },
 
-  configureViewport({ svg, graph, titleText, DIAGRAM_H_PAD, measureTextWidth }) {
+  configureViewport({ svg, graph, titleText, DIAGRAM_H_PAD, measureTextWidth, canvasWidth, canvasHeight }) {
     const titleWidth = measureTextWidth(titleText, 16, true) + 60;
-    const finalWidth = Math.max(graph.width + DIAGRAM_H_PAD * 2, titleWidth);
-
-    // Adjust viewport size dynamically (shifted vertically by +50px for title)
     const DIAGRAM_B_PAD = 40;
-    svg.setAttribute("viewBox", `0 0 ${finalWidth} ${graph.height + 50 + DIAGRAM_B_PAD}`);
+    // Prefer the explicit canvas size computed by the render engine (which
+    // already accounts for annotation-note overhang); fall back to the
+    // node-bounds computation when it is not supplied.
+    const finalWidth = canvasWidth != null
+      ? canvasWidth
+      : Math.max(graph.width + DIAGRAM_H_PAD * 2, titleWidth);
+    const finalHeight = canvasHeight != null
+      ? canvasHeight
+      : graph.height + 50 + DIAGRAM_B_PAD;
+
+    svg.setAttribute("viewBox", `0 0 ${finalWidth} ${finalHeight}`);
     svg.style.width = `${finalWidth}px`;
-    svg.style.height = `${graph.height + 50 + DIAGRAM_B_PAD}px`;
+    svg.style.height = `${finalHeight}px`;
     return finalWidth;
   },
 
@@ -184,9 +191,21 @@ window.NudgeRenderer.svgRenderer = {
     }
   },
 
+  renderNotes({ notes, shapeStrategies }) {
+    const notesLayer = document.getElementById("notes-layer");
+    if (!notesLayer) return;
+    const layers = { notes: notesLayer };
+    for (const note of notes || []) {
+      shapeStrategies.note(note, note.x, note.y, layers);
+    }
+  },
+
   drawGraph({
     graph,
     diagramData,
+    notes = [],
+    canvasWidth,
+    canvasHeight,
     DIAGRAM_H_PAD,
     BOUNDARY_H_PAD,
     measureTextWidth,
@@ -195,7 +214,10 @@ window.NudgeRenderer.svgRenderer = {
     pointToBoxDist,
     wrapText,
     MAX_LABEL_WIDTH,
-    LINE_HEIGHT
+    LINE_HEIGHT,
+    legendModel = null,
+    legendOriginX = 0,
+    legendOriginY = 0
   }) {
     const svg = document.getElementById("svg-root");
     // Clear layers
@@ -209,7 +231,9 @@ window.NudgeRenderer.svgRenderer = {
       graph,
       titleText,
       DIAGRAM_H_PAD,
-      measureTextWidth
+      measureTextWidth,
+      canvasWidth,
+      canvasHeight
     });
 
     const {
@@ -237,6 +261,10 @@ window.NudgeRenderer.svgRenderer = {
       absoluteParentY: 50
     });
 
+    // 1b. Draw annotation notes above the nodes (their boxes already carry
+    // absolute coordinates from the post-layout positioning pass).
+    window.NudgeRenderer.svgRenderer.renderNotes({ notes, shapeStrategies });
+
     const labelHints = diagramData._layoutOverrides?.labelHints;
 
     // 2. Draw connector lines (edges) recursively (with vertical offset of 50px)
@@ -255,6 +283,15 @@ window.NudgeRenderer.svgRenderer = {
       LINE_HEIGHT,
       labelHints
     });
+
+    // 3. Draw the legend (bottom-left) on top of everything else.
+    if (legendModel) {
+      window.NudgeRenderer.legend.render({
+        model: legendModel,
+        originX: legendOriginX,
+        originY: legendOriginY
+      });
+    }
   }
 };
 

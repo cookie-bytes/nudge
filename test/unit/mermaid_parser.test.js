@@ -90,3 +90,87 @@ test('parseMermaidC4 parses custom layout ordering rules', () => {
   assert.equal(model.rules[0].relation, 'above');
   assert.equal(model.rules[0].target, 'userB');
 });
+
+test('parseMermaidC4 parses the %% Scope override', () => {
+  const model = parseMermaidC4(`
+    C4Context
+      %% Scope: svv
+      System(mcm, "MCM")
+      System(svv, "SVV")
+  `);
+
+  assert.equal(model.scopeId, 'svv');
+});
+
+test('parseMermaidC4 leaves scopeId undefined without a Scope comment', () => {
+  const model = parseMermaidC4(`
+    C4Context
+      System(mcm, "MCM")
+  `);
+
+  assert.equal(model.scopeId, undefined);
+});
+
+test('parseMermaidC4 parses annotation notes without adding them as nodes', () => {
+  const model = parseMermaidC4(`
+    C4Context
+      System(a, "A")
+      System(b, "B")
+      Note right of a: This handles auth
+      Note left of b: Legacy, being retired
+      Note over a: Owned by Team Phoenix
+      Note over a,b: Shared concern<br/>second line
+  `);
+
+  // Notes live in their own collection, never in nodes.
+  assert.equal(model.nodes.length, 2);
+  assert.equal(model.notes.length, 4);
+
+  assert.deepEqual(model.notes[0], { id: 'note_0', text: 'This handles auth', position: 'right', refs: ['a'] });
+  assert.deepEqual(model.notes[1], { id: 'note_1', text: 'Legacy, being retired', position: 'left', refs: ['b'] });
+  assert.deepEqual(model.notes[2], { id: 'note_2', text: 'Owned by Team Phoenix', position: 'over', refs: ['a'] });
+
+  // Two-anchor spanning `over X,Y`; <br/> is preserved for the wrapper.
+  assert.deepEqual(model.notes[3], {
+    id: 'note_3',
+    text: 'Shared concern<br/>second line',
+    position: 'over',
+    refs: ['a', 'b']
+  });
+});
+
+test('parseMermaidC4 parses floating (unanchored) corner notes with empty refs', () => {
+  const model = parseMermaidC4(`
+    C4Context
+      System(a, "A")
+      Note bottom-right: General caveat<br/>about integration
+      Note top left: Data classification
+  `);
+
+  // Floating notes live in the notes collection, never in nodes.
+  assert.equal(model.nodes.length, 1);
+  assert.equal(model.notes.length, 2);
+
+  // Hyphen form; empty refs signals a floating (margin-pinned) note.
+  assert.deepEqual(model.notes[0], {
+    id: 'note_0',
+    text: 'General caveat<br/>about integration',
+    position: 'bottom-right',
+    refs: []
+  });
+  // Space form is normalised to the hyphen form.
+  assert.deepEqual(model.notes[1], {
+    id: 'note_1',
+    text: 'Data classification',
+    position: 'top-left',
+    refs: []
+  });
+});
+
+test('parseMermaidC4 initialises notes to an empty array when there are none', () => {
+  const model = parseMermaidC4(`
+    C4Context
+      System(a, "A")
+  `);
+  assert.deepEqual(model.notes, []);
+});
