@@ -192,13 +192,6 @@ function estimateLabelBox(edge) {
   };
 }
 
-// Minimum distance from a point to the nearest edge of a bounding box (0 if inside)
-function pointToBoxDist(px, py, box) {
-  const dx = Math.max(box.x - px, 0, px - (box.x + box.width));
-  const dy = Math.max(box.y - py, 0, py - (box.y + box.height));
-  return Math.sqrt(dx * dx + dy * dy);
-}
-
 // Check if two boxes overlap
 function boxesOverlap(boxA, boxB) {
   return (
@@ -355,161 +348,16 @@ export function analyzeLayout(layoutData) {
 
     const sourceId = edge.sources[0];
     const targetId = edge.targets[0];
-    const section = edge.sections[0];
     const label = edge.labels[0];
 
-    const points = [{ x: section.startPoint.x, y: section.startPoint.y }];
-    if (section.bendPoints) {
-      points.push(...section.bendPoints);
-    }
-    points.push({ x: section.endPoint.x, y: section.endPoint.y });
+    // Score the box the renderer actually drew. Re-deriving a placement here
+    // meant the critic judged a position nothing was ever rendered at.
+    const labelBox = estimateLabelBox(edge);
+    if (!labelBox) continue;
 
-    const nearbyComps = components.filter(n => n.id !== sourceId && n.id !== targetId);
-
-    // Calculate total length and segment lengths
-    let totalLen = 0;
-    const segLens = [];
-    for (let i = 0; i < points.length - 1; i++) {
-      const dx = points[i+1].x - points[i].x;
-      const dy = points[i+1].y - points[i].y;
-      const len = Math.sqrt(dx * dx + dy * dy);
-      totalLen += len;
-      segLens.push(len);
-    }
-
-    function getPointAtFraction(fraction) {
-      if (totalLen === 0) return { x: points[0].x, y: points[0].y, segment: { p1: points[0], p2: points[0] } };
-      const targetDist = totalLen * fraction;
-      let accumulated = 0;
-      for (let i = 0; i < points.length - 1; i++) {
-        const len = segLens[i];
-        if (accumulated + len >= targetDist - 1e-5) {
-          const remaining = targetDist - accumulated;
-          const p1 = points[i];
-          const p2 = points[i+1];
-          const t = len > 0 ? remaining / len : 0;
-          return {
-            x: p1.x + t * (p2.x - p1.x),
-            y: p1.y + t * (p2.y - p1.y),
-            segment: { p1, p2 }
-          };
-        }
-        accumulated += len;
-      }
-      const lastIdx = points.length - 1;
-      return {
-        x: points[lastIdx].x,
-        y: points[lastIdx].y,
-        segment: { p1: points[lastIdx - 1], p2: points[lastIdx] }
-      };
-    }
-
-    function checkLabelCollision(cx, cy, w, h, nodesList) {
-      const H_PAD = 10;
-      const V_PAD = 3;
-      const labelBox = {
-        x: cx - w / 2 - H_PAD,
-        y: cy - h / 2 - V_PAD,
-        width: w + 2 * H_PAD,
-        height: h + 2 * V_PAD
-      };
-      for (const comp of nodesList) {
-        const compBox = {
-          x: comp.x,
-          y: comp.y,
-          width: comp.width,
-          height: comp.height
-        };
-        if (boxesOverlap(labelBox, compBox)) {
-          return true;
-        }
-      }
-      return false;
-    }
-
-    const anchorDist = 45;
-    let midX, midY;
-    let placed = false;
-
-    // Rule 1: Try Target Anchor (anchorDist from target)
-    if (totalLen >= 2 * anchorDist) {
-      const targetFraction = (totalLen - anchorDist) / totalLen;
-      const candA = getPointAtFraction(targetFraction);
-      if (!checkLabelCollision(candA.x, candA.y, label.width, label.height, components)) {
-        midX = candA.x;
-        midY = candA.y;
-        placed = true;
-      }
-    }
-
-    // Rule 2: Try Source Anchor (anchorDist from source)
-    if (!placed && totalLen >= 2 * anchorDist) {
-      const sourceFraction = anchorDist / totalLen;
-      const candB = getPointAtFraction(sourceFraction);
-      if (!checkLabelCollision(candB.x, candB.y, label.width, label.height, components)) {
-        midX = candB.x;
-        midY = candB.y;
-        placed = true;
-      }
-    }
-
-    // Rule 3: Fallback to Middle Gutter Clearance
-    if (!placed) {
-      let bestSeg = null;
-      let bestScore = -Infinity;
-      for (let i = 0; i < points.length - 1; i++) {
-        const p1 = points[i];
-        const p2 = points[i + 1];
-        const dx = p2.x - p1.x;
-        const dy = p2.y - p1.y;
-        const len = Math.sqrt(dx * dx + dy * dy);
-        const mx = (p1.x + p2.x) / 2;
-        const my = (p1.y + p2.y) / 2;
-        const clearance = nearbyComps.length > 0
-          ? Math.min(...nearbyComps.map(n => pointToBoxDist(mx, my, n)))
-          : Infinity;
-        const score = clearance * 10 + len;
-        if (score > bestScore) { bestScore = score; bestSeg = { p1, p2 }; }
-      }
-
-      if (bestSeg) {
-        midX = (bestSeg.p1.x + bestSeg.p2.x) / 2;
-        const isHorizontal = Math.abs(bestSeg.p1.y - bestSeg.p2.y) < 2;
-        if (isHorizontal) {
-          midY = bestSeg.p1.y;
-        } else {
-          const LABEL_TARGET_BIAS = 0.85;
-          const edgeStart = points[0];
-          const edgeEnd   = points[points.length - 1];
-          const biasedY = edgeStart.y + LABEL_TARGET_BIAS * (edgeEnd.y - edgeStart.y);
-          const segMinY = Math.min(bestSeg.p1.y, bestSeg.p2.y);
-          const segMaxY = Math.max(bestSeg.p1.y, bestSeg.p2.y);
-          const halfH = (label.height + 4) / 2;
-          const clampLo = segMinY + 10 + halfH;
-          const clampHi = segMaxY - 10 - halfH;
-          midY = clampLo <= clampHi
-            ? Math.max(clampLo, Math.min(clampHi, biasedY))
-            : (segMinY + segMaxY) / 2;
-        }
-      } else {
-        midX = (points[0].x + points[points.length - 1].x) / 2;
-        midY = (points[0].y + points[points.length - 1].y) / 2;
-      }
-    }
-
-
-    const H_PAD = 10;
-    const V_PAD = 3;
-    const labelBox = {
-      x: midX - label.width / 2 - H_PAD,
-      y: midY - label.height / 2 - V_PAD,
-      width: label.width + 2 * H_PAD,
-      height: label.height + 2 * V_PAD
-    };
-
+    // Endpoints are not exempt: the renderer treats every element as an
+    // obstacle, so a label buried in its own source is a real defect.
     for (const comp of components) {
-      if (comp.id === sourceId || comp.id === targetId) continue;
-
       if (boxesOverlap(labelBox, comp)) {
         report.collisions.push({
           type: 'edge_label_node_crossing',
