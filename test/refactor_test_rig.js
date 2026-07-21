@@ -112,6 +112,19 @@ function materializeRuntime({ lane, outputDir, baselineRef, candidateDir }) {
     copyFileOrThrow(nodeModuleVendorPath, path.join(runtimeDir, 'vendor', 'elk.bundled.js'));
   }
 
+  // The baked Outfit glyph table. Both lanes get the *current* table: it is a
+  // property of the font, not of the renderer under test, and holding it fixed
+  // is what keeps the comparison about layout changes. Without it every render
+  // throws — and because both lanes throw identically, their hashes still match
+  // and the rig reports PASS over a corpus that rendered nothing at all.
+  const metricsPath = path.join(candidateDir, 'src', 'vendor', 'outfit_metrics.js');
+  if (!fs.existsSync(metricsPath)) {
+    throw new Error(
+      `Missing ${metricsPath}. Run: node scripts/generate_font_metrics.js`
+    );
+  }
+  copyFileOrThrow(metricsPath, path.join(runtimeDir, 'vendor', 'outfit_metrics.js'));
+
   return runtimeDir;
 }
 
@@ -183,6 +196,13 @@ async function renderFixture(page, fixturePath) {
   const content = fs.readFileSync(fixturePath, 'utf8');
   const diagramModel = fixturePath.endsWith('.puml') ? parsePlantUMLC4(content) : parseMermaidC4(content);
   const result = await page.evaluate(async (data) => window.renderDiagram(data), diagramModel);
+  // A parity rig compares two lanes, so a failure present in *both* is invisible
+  // to it: the hashes still match and every fixture reports PASS over a corpus
+  // that rendered nothing. Assert each render actually succeeded, so a broken
+  // runtime is a loud failure rather than a silent green run.
+  if (!result?.success) {
+    throw new Error(`${path.relative(WORKSPACE_ROOT, fixturePath)} failed to render: ${result?.error ?? 'unknown error'}`);
+  }
   const svgMarkup = await page.locator('#svg-root').innerHTML();
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${result.width} ${result.height}">${svgMarkup}</svg>\n`;
   return {
