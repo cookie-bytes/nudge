@@ -26,6 +26,11 @@ output.log
 # Generated test artefacts
 test_outputs/
 
+# Throwaway debug harnesses. A dozen of these were committed once and went stale
+# within days, quietly reimplementing geometry that belongs in core/. Anything
+# worth keeping graduates to scripts/ with a name that says what it does.
+scratch_*
+
 
 # Claude Code local settings
 .claude/
