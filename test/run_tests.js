@@ -6,7 +6,7 @@ import { parsePlantUMLC4 } from '../src/plantuml_parser.js';
 import { analyzeLayout } from '../src/core/geometry.js';
 import { getActiveModel, getHeaders } from '../src/core/llm_client.js';
 import { fetchWithTimeout } from '../src/utils.js';
-import { optimizeDiagram } from '../src/core/optimizer.js';
+import { optimizeDiagram, normalizeDiagramModel } from '../src/core/optimizer.js';
 
 const LM_STUDIO_API = process.env.NUDGE_LLM_API || 'http://127.0.0.1:1234';
 const TEST_DIR = path.join(path.resolve('test'), 'fixtures', 'diagrams', 'core');
@@ -466,7 +466,12 @@ async function runTests() {
     console.log(`\nRendering: ${file}...`);
     
     const content = fs.readFileSync(path.join(TEST_DIR, file), 'utf8');
-    const model = file.endsWith('.puml') ? parsePlantUMLC4(content) : parseMermaidC4(content);
+    // Normalise exactly as the CLI/MCP entry points do — without this, C4Context
+    // diagrams skip the synthetic boundary and get measured on the flat ELK path,
+    // which is not the layout either entry point produces.
+    const model = normalizeDiagramModel(
+      file.endsWith('.puml') ? parsePlantUMLC4(content) : parseMermaidC4(content)
+    );
 
     // Call window.renderDiagram in the browser context
     const result = await page.evaluate(async (data) => {
