@@ -209,8 +209,21 @@ After the absolute layout positions are computed, the edges and their descriptio
    This prioritizes candidates that avoid nodes, already-placed labels, and other connection lines, while still preferring segments that are far from surrounding nodes and have sufficient length. Once the segment is chosen, the label coordinates are clamped to the safe inner bounds of the segment.
 5. **Default Fallback**: If all else fails, the label defaults to the absolute middle of the start/end points.
 
-### 3c: Text Wrapping
-Labels containing technology notes (e.g. `Relationship Label [JSON/HTTPS]`) are split. The main description label is wrapped automatically into multiple lines based on `MAX_LABEL_WIDTH` (160px), and the technology label is positioned underneath with a smaller, semi-transparent font style.
+### 3c: Text Wrapping & Adaptive Re-Wrap
+Labels containing technology notes (e.g. `Relationship Label [JSON/HTTPS]`) are split. The main description label is wrapped automatically into multiple lines based on `MAX_LABEL_WIDTH` (120px), and the technology label is positioned underneath with a smaller, semi-transparent font style.
+
+Placement is a constrained search over label *geometry*, not just position: when no candidate keeps the label on the canvas at full width, the search retries with the label re-wrapped narrower and taller (120 → 92 → 72 → 56px). If no width yields an in-canvas position, the outcome is declared **UNSATISFIABLE** — the label is clamped back inside the canvas, marked in the SVG (`class="edge-label-bg-crowded"`, `data-nudge-unsatisfiable="<reason>"`), and reported through `warnings` on every entry point. UNSATISFIABLE means specifically "no in-canvas position exists"; burial and label-label overlap remain scored defects held flat by the quality ratchet (see [IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md) INC-16).
+
+---
+
+## Post-Layout Annotations — Notes & Legend
+
+**File:** `src/render_engine.js` (orchestration), `src/renderer/svg/legend.js`
+
+After layout, routing and label placement, two annotation passes run:
+
+- **Notes** (`note` entries attached to architecture elements) are positioned post-layout — they are annotations, not layout participants, so they never influence element placement or routing. Candidate positions around the annotated element are scored through the shared severity model (`noteOverlap`, `noteLineCrossing` in `src/core/severity.js`), accepted overrides can arrive via `_layoutOverrides.notePlacements`, and the canvas grows to fit any note extending past the element bounds. Unplaceable notes are reported through `warnings`.
+- **Legend** — a horizontal legend is rendered bottom-left containing only the element kinds actually present in the diagram (person, system in scope, internal system, external system, database, message bus). Its icons reuse the real shape drawers from `architecture_element_shapes.js`, so they cannot drift from the full-size elements. The canvas reserves vertical space for it after note placement.
 
 ---
 
@@ -254,18 +267,14 @@ The rendered candidate is saved as `step_1_label_hints.png` and accepted only if
 
 ### Candidate scoring and outputs
 
-Every candidate is scored by `scoreContainerStep` in `src/core/optimizer.js`:
-
-```
-overlaps * 100000
-+ edge-node crossings * 100000
-+ edge-edge crossings * 500
-+ edge overlaps * 500
-+ edge overlap pixels * 2
-+ label-edge intersections * 250
-+ bends * 4
-+ route length * 0.02
-```
+Every candidate is scored by `scoreLayout` from `src/core/severity.js` — the single declared
+severity ordering shared by the optimizer, the label placer, and the test suite
+(`scoreContainerStep` in `src/core/optimizer.js` is now a thin wrapper around it). The ordering,
+hardest failure first: Element Overlap → Connection-Line Element Crossing → Connection-Label
+Element Crossing / off-canvas label → Label-Label Overlap → Connection-Line Overlap →
+Connection-Line Crossing → Label-Line Intersection. Shape costs (bends, route length, overlap
+pixels) are tiebreakers only and can never outrank a defect. See the `SEVERITY` and `SHAPE_COST`
+tables in `src/core/severity.js` for the exact weights and the rationale for the ordering.
 
 Only non-worsening candidates become the accepted state. The final accepted state is exported as `optimized.png` and `optimized.svg`. If any LLM hint call returned data, the raw responses are saved to `visual_hints.json`.
 
@@ -312,4 +321,4 @@ All edge coordinates are absolute. The `drawGraph` function uses `flattenNodes` 
 - **No cycle detection warning:** A cycle in the boundary's internal edges is silently broken — all-cycle graphs seed Layer 0 with the most source-like element(s), and any remaining stuck nodes are dumped into a final layer.
 - **Legacy checkpoint helpers remain in `llm_client.js`:** `getLLMZoneVerification` and `getLLMRoutingVerification` are still present for older experiments, but the active container optimizer imports the visual-hint functions instead.
 - **Edge routing is grid-based pathfinding:** The grid router uses A* over a visibility graph, rip-up-and-reroute, and channel nudging to find optimal collision-free paths, falling back to legacy candidate routing when necessary. Crossings are expensive but not impossible, preventing long and visually awkward detours.
-- **Post-render edge-to-edge scoring is observational:** The renderer uses edge-conflict scoring while choosing routes, and the test suite reports edge-edge crossings, overlaps, overlap pixels, label-edge intersections, bends, and route length. These metrics do not currently fail tests, so renderer changes that affect line corridors should still be reviewed visually.
+- **Every defect class is ratcheted; three gate absolutely.** `npm test` asserts the per-fixture defect vectors in `test/fixtures/baselines/quality_baseline.json` — no count may increase, and improvements require a visible re-baseline in the diff. Element Overlap, Connection-Line Element Crossing, and Connection-Label Element Crossing additionally gate `success` absolutely; the remaining classes (line crossings/overlaps, label-line intersections, label-label overlaps) are ratchet-only. See [IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md) INC-6/INC-8.

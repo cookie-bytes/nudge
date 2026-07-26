@@ -1,9 +1,29 @@
 # Implementation plan — Connection Label crowding
 
-Status: **plan, revised twice** — no code changed
+Status: **largely landed — only Stage F Option C remains** (updated 2026-07-26)
 Date: 2026-07-21
 Implements: [IMPROVEMENT_PLAN.md](IMPROVEMENT_PLAN.md) increments INC-2, INC-4, INC-12 (Options G, F, C — see Appendix D)
 Revision: v3. v1 scored 3.5/10, v2 6.5/10 on independent review; §10 records what changed.
+
+> **What landed, and how it diverged from this plan.** The work executed through the
+> IMPROVEMENT_PLAN increments rather than stage-by-stage as written here:
+>
+> - **Stage A** (fixture + baseline path) — landed as `6bf2988` / `922d3d5`.
+> - **Stage B** (idempotent renders) — landed as INC-2, then **superseded by INC-9**: text is
+>   measured against a baked glyph-metrics table (`src/vendor/outfit_metrics.js`), so layout no
+>   longer depends on webfont loading at all. The self-hosting question §3 raises is resolved.
+> - **Stage C** (critic repair) — landed as `ae1e69c` / `c34100d` plus INC-3's counters.
+> - **Stages D + E** (frozen target table + `--compare` gate) — realised differently, as the
+>   **INC-6 quality ratchet**: per-fixture defect vectors in
+>   `test/fixtures/baselines/quality_baseline.json`, asserted by `npm test` (no count may rise).
+> - **Stage F** — **partially landed** via INC-12: the 7a obstacle double-charge fix and the
+>   two-axis nudge (`nudgeLabelClear`) shipped. **Option C — the waterfall→argmin collapse
+>   (7d+7e) — has not**: `chooseInitialLabelPlacement`, `createCandidateScorer` and
+>   `sameTargetScore` still exist. INC-12 defers it to ride with INC-16 follow-up work.
+> - **Stage G** (gating) — landed as INC-8's two-tier gate/ratchet split.
+>
+> The sections below are kept as the detailed spec for the remaining Option C work; treat their
+> line numbers and "does not exist yet" claims as of 2026-07-21.
 
 ---
 

@@ -36,7 +36,7 @@ remaining +2 are the two Connection-Line Crossings the new third-party corpus br
 
 **Still-separate documents (not folded in — different kind of doc):**
 - [connection-label-crowding-plan.md](connection-label-crowding-plan.md) — the ready-to-execute
-  spec for the label increments (INC-2, INC-4, INC-9). Referenced, not duplicated.
+  spec for the label increments (INC-2, INC-4, INC-12). Referenced, not duplicated.
 - [container-diagram-layout.md](container-diagram-layout.md) — architecture *reference* for the
   container/context pipeline. Describes how it works, not how to change it.
 - [nudge_next_generation_design.md](nudge_next_generation_design.md) — the north-star design
