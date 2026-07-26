@@ -9,6 +9,14 @@
 // the grid router cannot route relationships whose endpoints are not placed
 // leaf elements, as in multi-boundary diagrams — so the number must shrink,
 // never grow.
+//
+// Read this number correctly: it is a *layout* defect, not a routing one. Every
+// fallback is a relationship whose endpoint element the engine never laid out at
+// all, because `container_plan.js` plans a single Boundary and silently drops the
+// rest (see element_coverage.test.js — 22 dropped elements across 4 fixtures).
+// This count therefore reaches zero as a consequence of multi-Boundary layout
+// landing (IMPROVEMENT_PLAN INC-22, docs/multi-boundary-layout-plan.md), not by
+// improving the router.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

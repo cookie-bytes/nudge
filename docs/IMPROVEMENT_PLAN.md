@@ -37,6 +37,11 @@ remaining +2 are the two Connection-Line Crossings the new third-party corpus br
 **Still-separate documents (not folded in — different kind of doc):**
 - [connection-label-crowding-plan.md](connection-label-crowding-plan.md) — the ready-to-execute
   spec for the label increments (INC-2, INC-4, INC-12). Referenced, not duplicated.
+- [multi-boundary-layout-plan.md](multi-boundary-layout-plan.md) — the staged spec for
+  multi-Boundary layout. **Read it before INC-15 or INC-20**: it reframes INC-20's 28 legacy-router
+  fallbacks as a *layout* defect, not a routing one. Those relationships point at elements the
+  engine never lays out — 22 elements across 4 fixtures are silently dropped, now ratcheted by
+  `test/integration/element_coverage.test.js`.
 - [container-diagram-layout.md](container-diagram-layout.md) — architecture *reference* for the
   container/context pipeline. Describes how it works, not how to change it.
 - [nudge_next_generation_design.md](nudge_next_generation_design.md) — the north-star design
@@ -388,7 +393,28 @@ pivot that makes everything downstream falsifiable.
 
 ### Phase 5 — fix the causes
 
-- [ ] **INC-15 · Give the router a lateral-clearance term** · *size: large* · Option E · largest blast radius
+> **New prerequisite, found 2026-07-26: INC-22 (multi-Boundary layout) comes before both of these.**
+> The engine lays out exactly one Boundary, so 22 elements across 4 fixtures are never placed or
+> drawn — an entire second Boundary in one fixture, every nested leaf in the other. Both fixtures
+> graded PASSED until `element_coverage.test.js` landed. Those same two fixtures own all 28
+> legacy-router fallbacks and the bulk of the remaining corpus defects, so INC-15's and INC-20's
+> numbers are measured on geometry that is partly meaningless. Spec:
+> [multi-boundary-layout-plan.md](multi-boundary-layout-plan.md).
+
+- [ ] **INC-22 · Multi-Boundary layout** · *size: large* · **do before INC-15 and INC-20**
+  - **Why:** `container_plan.js` takes `nodes.find(n => n.type === 'boundary')` and lays out only
+    that Boundary's direct children. A sibling Boundary or a nested leaf is silently dropped while
+    its relationships are still routed to meaningless coordinates. Silently deleting user content is
+    the most severe outcome in the taxonomy and was the one class with no counter.
+  - **Do:** the six staged increments in
+    [multi-boundary-layout-plan.md](multi-boundary-layout-plan.md) — make the interior layout
+    reentrant under byte parity (Stage A), flatten nested Boundaries and derive their rectangles
+    (B–C), add a Boundary meta-layout for siblings (D), give the router a *set* of boundary rects
+    (E), then delete the legacy router (F).
+  - **Verify:** `element_coverage.test.js` drops to zero known-dropped elements and the file is
+    removed; `router_coverage.test.js` reaches 0 fallbacks and fires its own retirement assertion.
+
+- [ ] **INC-15 · Give the router a lateral-clearance term** · *size: large* · Option E · largest blast radius · **after INC-22**
   - **Why:** the router's `WEIGHTS` price length, bends, crossings, overlaps, port reuse, boundary
     crossings — **nothing about the label the line must carry**. Routing commits, then labels hunt
     for leftover space. In the repro, MCM's right face had 140 px of free corridor and the router
@@ -468,6 +494,14 @@ pivot that makes everything downstream falsifiable.
   — the relationships the grid router hands off are the same ones that end up crossing and
   overlapping, which makes multi-boundary grid routing the highest-value routing work left.
   The test **fails deliberately when the count reaches zero**, naming the files to delete.
+  - 🔴 **Corrected 2026-07-26 — this diagnosis was wrong, and the conclusion with it.** The 28
+    fallbacks are not relationships the grid router routes badly; they are relationships whose
+    endpoint elements the engine **never lays out**. `container_plan.js` plans one Boundary and
+    silently drops the rest, so `obstacleById.get(...)` misses and `routeOne` returns null. The
+    highest-value work left is therefore multi-Boundary **layout** (INC-22), not multi-boundary
+    routing — and this count reaches zero as a *consequence* of that, needing only a one-line router
+    change (a set of boundary rects instead of one). The ratchet itself was sound: it was pointing
+    at a real problem, just not the one its comment named.
 - [x] **INC-21 · Release discipline** · *size: small* — v1.0.0 with no CHANGELOG, no release
   workflow, no npm provenance, no semver policy. State whether changed layout output is a breaking
   change (recommendation: no; every release notes its quality delta vs the INC-6 baselines).
