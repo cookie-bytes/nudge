@@ -151,7 +151,7 @@ The router is the highest-value, lowest-risk pillar and ships first, behind a fl
 3. **A\* router behind `NUDGE_ROUTER=grid`**: drop-in alternative to `routeEdge` (same contract: edge + placed boxes in, sections out).
 4. **Corpus A/B**: render every fixture with both routers, diff against the baseline. Promote only when the grid router dominates. *(Done — crossings −76%, overlaps −25%, bends −25%, length −8%; grid is now the default, `NUDGE_ROUTER=legacy` opts out.)*
 5. **Port the survivors**: `reserveRouteLanes` → channel nudging; `improveRoutedSections`/`evaluateRouteSet` → rip-up-and-reroute outer loop; aesthetic early-returns → cost discounts. *(Done, plus a kink-straightening pass for port-quantization Z-jogs.)*
-6. **Delete** `route_candidate_rules.js` and its bias constants once promoted. *(Blocked until the multi-boundary placement fix lands: the legacy router is still the per-edge fallback for relationships whose endpoints are not placed leaf elements.)*
+6. **Delete** `route_candidate_rules.js` and its bias constants once promoted. *(Unblocked — the grid router now routes 326/326 relationships across the corpus, asserted absolutely by `router_coverage.test.js`. The last fallbacks were self-relationships, which now route as loops, and relationships into unplaced elements, which came from multi-Boundary diagrams that Nudge now refuses by contract rather than half-drawing.)*
 7. **Then** label-aware routing (reserve connection-label boxes during search), the conventions refactor of placement, and only afterwards revisit Pillar 1 unification — much of its motivation may evaporate once routing and conventions are clean.
 
 ---

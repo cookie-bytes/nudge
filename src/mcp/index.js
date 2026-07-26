@@ -156,6 +156,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       ],
     };
   } catch (err) {
+    // An unsupported diagram is a contract refusal with an actionable
+    // explanation, not an internal error — pass the message through verbatim
+    // rather than burying it behind "Optimizer error:".
+    if (err?.code === 'UNSUPPORTED_DIAGRAM') {
+      return {
+        content: [{ type: 'text', text: `Unsupported diagram: ${err.message}` }],
+        isError: true,
+      };
+    }
     return {
       content: [{ type: 'text', text: `Optimizer error: ${err.message}` }],
       isError: true,

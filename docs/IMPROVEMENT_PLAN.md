@@ -13,35 +13,33 @@ the numbers move.
 read in source at the cited line or measured by rendering the corpus through the production
 pipeline. Nothing is inferred from behaviour alone.
 
-**Progress: 19 of 21 increments landed** — Phases 0, 1, 2, 3 and 6 complete; Phase 4 complete
-Phase 5's crux (INC-16) landed. Line numbers cited below refer to
-the original commit and have moved. Remaining: **INC-15** (router lateral clearance) and
-**INC-18** (Playwright optional) — both deliberately deferred as large, high-blast-radius changes.
+**Progress: 20 of 22 increments landed** — Phases 0, 1, 2, 3, 4 and 6 complete; Phase 5's crux
+(INC-16) and its scope decision (INC-23) landed. Line numbers cited below refer to the original
+commit and have moved. Remaining: **INC-15** (router lateral clearance) and **INC-18** (Playwright
+optional) — both deliberately deferred as large, high-blast-radius changes.
 Standing measurements, all ratcheted and printed by `npm test`:
 
 | Measure | Value | Where |
 | --- | --- | --- |
-| Corpus defects | 92 across 15/43 fixtures (incl. 7 third-party) | `test/fixtures/baselines/quality_baseline.json` |
-| Off-canvas labels (40 generated diagrams) | **0** — now an absolute invariant | `layout_invariants.test.js` |
-| Off-canvas labels (fixture corpus) | **0** (was 6) | `quality_baseline.json` |
-| Legacy router fallbacks | 28 / 360 relationships | `router_coverage.test.js` |
-| Cost models remaining | 4 of 9 | §Appendix B |
-| Tests | 103 unit + 18 integration | `npm test` |
+| Corpus defects | **24 across 11/39 fixtures** (incl. 7 third-party) | `test/fixtures/baselines/quality_baseline.json` |
+| Defect classes at zero corpus-wide | **5 of 7** — only Connection-Line Crossing (22) and Label-Line Intersection (2) remain | `quality_baseline.json` |
+| Off-canvas labels (40 generated diagrams) | **0** — an absolute invariant | `layout_invariants.test.js` |
+| Elements dropped from any accepted diagram | **0** — an absolute gate | `element_coverage.test.js` |
+| Legacy router fallbacks | **0 / 326 relationships** — retirement criterion met | `router_coverage.test.js` |
+| Cost models remaining | 4 of 9 (one is now dead code) | §Appendix B |
+| Tests | 105 unit + 25 integration | `npm test` |
 
-Corpus defects rose 70 → 90 as a *declared trade*, not a regression: INC-16 converts 6 invisible
-off-canvas labels into visible ones, at the cost of 10 label overlaps and 10 label-line
-intersections in the two hardest multi-boundary fixtures. See INC-16 for the full delta and why
-`labelOffCanvas` had to become a counted class before the trade could be judged at all. The
-remaining +2 are the two Connection-Line Crossings the new third-party corpus brought with it.
+Defect history, so the numbers are readable rather than just lower: 70 → 90 was a *declared trade*
+(INC-16 converted 6 invisible off-canvas labels into visible ones at the cost of 10 label overlaps
+and 10 label-line intersections, all in the two multi-boundary fixtures), then 92 with the
+third-party corpus. **92 → 24** came from INC-23: those two fixtures were never renderable — the
+engine dropped half of each — so refusing them removed 68 defects that described layouts Nudge does
+not support. What is left is 22 Connection-Line Crossings and 2 Label-Line Intersections, the two
+*least* severe classes in the declared ordering. Every information-destroying class is zero.
 
 **Still-separate documents (not folded in — different kind of doc):**
 - [connection-label-crowding-plan.md](connection-label-crowding-plan.md) — the ready-to-execute
   spec for the label increments (INC-2, INC-4, INC-12). Referenced, not duplicated.
-- [multi-boundary-layout-plan.md](multi-boundary-layout-plan.md) — the staged spec for
-  multi-Boundary layout. **Read it before INC-15 or INC-20**: it reframes INC-20's 28 legacy-router
-  fallbacks as a *layout* defect, not a routing one. Those relationships point at elements the
-  engine never lays out — 22 elements across 4 fixtures are silently dropped, now ratcheted by
-  `test/integration/element_coverage.test.js`.
 - [container-diagram-layout.md](container-diagram-layout.md) — architecture *reference* for the
   container/context pipeline. Describes how it works, not how to change it.
 - [nudge_next_generation_design.md](nudge_next_generation_design.md) — the north-star design
@@ -393,28 +391,44 @@ pivot that makes everything downstream falsifiable.
 
 ### Phase 5 — fix the causes
 
-> **New prerequisite, found 2026-07-26: INC-22 (multi-Boundary layout) comes before both of these.**
-> The engine lays out exactly one Boundary, so 22 elements across 4 fixtures are never placed or
-> drawn — an entire second Boundary in one fixture, every nested leaf in the other. Both fixtures
-> graded PASSED until `element_coverage.test.js` landed. Those same two fixtures own all 28
-> legacy-router fallbacks and the bulk of the remaining corpus defects, so INC-15's and INC-20's
-> numbers are measured on geometry that is partly meaningless. Spec:
-> [multi-boundary-layout-plan.md](multi-boundary-layout-plan.md).
+> **Scope decision, 2026-07-26: Nudge is a single-Boundary tool.** The engine lays out exactly one
+> Boundary, and it used to silently drop everything it could not place — 22 elements across 4
+> fixtures, an entire second Boundary in one and every nested leaf in the other, both grading
+> PASSED. Rather than build multi-Boundary layout (Pillar 1-scale work), the contract is now
+> enforced and those diagrams are **refused** with an actionable message
+> (`src/core/validation.js`, INC-23). This is consistent with C4 itself: a Container diagram zooms
+> into one system, a Component diagram into one container. All seven third-party corpus diagrams
+> declare exactly one Boundary and none nest.
+>
+> Two consequences for this phase: the corpus baseline fell from **92 known defects to 24** (five of
+> seven classes are now zero corpus-wide), and INC-20's retirement criterion is **met** — the grid
+> router routes 326/326 relationships, so the legacy router is dead code.
 
-- [ ] **INC-22 · Multi-Boundary layout** · *size: large* · **do before INC-15 and INC-20**
+- [x] **INC-23 · Enforce the single-Boundary contract** · *size: small* · **replaced multi-Boundary layout**
   - **Why:** `container_plan.js` takes `nodes.find(n => n.type === 'boundary')` and lays out only
-    that Boundary's direct children. A sibling Boundary or a nested leaf is silently dropped while
-    its relationships are still routed to meaningless coordinates. Silently deleting user content is
-    the most severe outcome in the taxonomy and was the one class with no counter.
-  - **Do:** the six staged increments in
-    [multi-boundary-layout-plan.md](multi-boundary-layout-plan.md) — make the interior layout
-    reentrant under byte parity (Stage A), flatten nested Boundaries and derive their rectangles
-    (B–C), add a Boundary meta-layout for siblings (D), give the router a *set* of boundary rects
-    (E), then delete the legacy router (F).
-  - **Verify:** `element_coverage.test.js` drops to zero known-dropped elements and the file is
-    removed; `router_coverage.test.js` reaches 0 fallbacks and fires its own retirement assertion.
+    that Boundary's direct children. A sibling Boundary or a nested leaf was never placed and never
+    drawn, while the relationships pointing at it were still routed to meaningless coordinates —
+    one fixture rendered with 6 of 12 elements missing and four labelled arrows dangling into the
+    corner, and reported success. Silently deleting user content is the most severe outcome in the
+    taxonomy and was the one class with no counter. "Unsupported" and "silently deletes your
+    content" are different products; only the first is defensible.
+  - **Landed:** `assertSupportedDiagram` (`src/core/validation.js`) called from
+    `normalizeDiagramModel`, so the CLI, MCP server and public API all refuse identically. Sibling
+    and nested Boundaries are rejected, naming the offending Boundaries and saying what to do
+    instead (split per system, or declare the others as `System_Ext`). The CLI prints the
+    explanation with no stack trace and exits 1 without writing artefacts; MCP passes the message
+    through rather than burying it behind "Optimizer error:".
+    - The keyword does not matter, only the *shape*: `System_Boundary`,
+      `Container_Boundary` and `Enterprise_Boundary` all parse to one Boundary node, so an
+      Enterprise_Boundary wrapping plain systems (`bigbankplc_landscape.puml`) still renders.
+    - The synthetic context Boundary is added *after* validation, so C4Context diagrams are
+      unaffected — pinned by a test, since that ordering is easy to break.
+  - **Verified:** the two offending diagrams moved to `test/fixtures/rejected/` (outside the quality
+    corpus) with `test/integration/unsupported_diagrams.test.js` asserting the reason, the named
+    Boundaries and the remedy for each. `element_coverage.test.js` is now an **absolute gate** with
+    no exception list: all 39 remaining fixtures render every element they declare.
 
-- [ ] **INC-15 · Give the router a lateral-clearance term** · *size: large* · Option E · largest blast radius · **after INC-22**
+- [ ] **INC-15 · Give the router a lateral-clearance term** · *size: large* · Option E · largest blast radius
   - **Why:** the router's `WEIGHTS` price length, bends, crossings, overlaps, port reuse, boundary
     crossings — **nothing about the label the line must carry**. Routing commits, then labels hunt
     for leftover space. In the repro, MCM's right face had 140 px of free corridor and the router
@@ -495,13 +509,18 @@ pivot that makes everything downstream falsifiable.
   overlapping, which makes multi-boundary grid routing the highest-value routing work left.
   The test **fails deliberately when the count reaches zero**, naming the files to delete.
   - 🔴 **Corrected 2026-07-26 — this diagnosis was wrong, and the conclusion with it.** The 28
-    fallbacks are not relationships the grid router routes badly; they are relationships whose
-    endpoint elements the engine **never lays out**. `container_plan.js` plans one Boundary and
-    silently drops the rest, so `obstacleById.get(...)` misses and `routeOne` returns null. The
-    highest-value work left is therefore multi-Boundary **layout** (INC-22), not multi-boundary
-    routing — and this count reaches zero as a *consequence* of that, needing only a one-line router
-    change (a set of boundary rects instead of one). The ratchet itself was sound: it was pointing
-    at a real problem, just not the one its comment named.
+    fallbacks were not relationships the grid router routed badly; they were relationships whose
+    endpoint elements the engine **never laid out**. `container_plan.js` plans one Boundary and
+    silently dropped the rest, so `obstacleById.get(...)` missed and `routeOne` returned null. The
+    ratchet itself was sound — it was pointing at a real problem, just not the one its comment named.
+  - ✅ **Criterion now met (0 fallbacks, 326/326 relationships).** Reached without any change to the
+    router's cost model: self-relationships stopped falling back once the grid router learned to
+    emit a loop rather than refusing them, and the remaining 28 disappeared when the
+    single-Boundary contract began refusing those diagrams (INC-23). `router_coverage.test.js` is now
+    an absolute invariant rather than a budget. **The legacy router is dead code** — deleting
+    `connection_line_router.js`, `route_candidate_rules.js` and the `NUDGE_ROUTER=legacy` branch
+    removes ~1,800 lines and cost model #2. Left as its own change because it also removes an env
+    flag that the CHANGELOG's semver policy counts as CLI surface.
 - [x] **INC-21 · Release discipline** · *size: small* — v1.0.0 with no CHANGELOG, no release
   workflow, no npm provenance, no semver policy. State whether changed layout output is a breaking
   change (recommendation: no; every release notes its quality delta vs the INC-6 baselines).
@@ -570,6 +589,33 @@ Two measurements shifted from the original table once the font race was fixed (I
 `library_context` and `label_crowding_parallel_rels` no longer carry a Connection-Label Element
 Crossing. Both were artefacts of first-render fallback-font metrics, which is precisely the
 "fixes don't stick because the target moves" failure mode in §1.4.
+
+### Current state after INC-23 — **24 defects across 11/39 fixtures**
+
+⚠️ **Every table above this line is historical.** The tables record what was measured at the commit
+named in each section; they are kept because the completed increments are unreadable without them.
+The live numbers are always `test/fixtures/baselines/quality_baseline.json` and the header table in
+§Status.
+
+The two multi-boundary fixtures left the corpus in INC-23 (they were never renderable — the engine
+dropped half of each — and are now refused by contract and kept in `test/fixtures/rejected/`). That
+removed 68 defects describing layouts Nudge does not support:
+
+| Defect class | Total (39 fixtures) | Gate |
+| --- | ---: | --- |
+| Element Overlap | **0** | absolute |
+| Connection-Line Element Crossing | **0** | absolute |
+| Connection-Label Element Crossing | **0** | absolute |
+| Off-canvas Connection Label | **0** | absolute |
+| Label-Label Overlap | **0** | ratchet |
+| Connection-Line Overlap | **0** | ratchet |
+| Connection-Line Crossing | 22 | ratchet |
+| Label-Line Intersection | 2 | ratchet |
+
+Every information-destroying class is zero, and so are both remaining readability classes bar the
+two least severe in the declared ordering. The corpus is 39 fixtures because the 4 rejected files
+moved out; nothing else changed, and the parity rig confirms every surviving fixture renders
+byte-for-byte as it did before.
 
 **The grade tautology:** inside `gradeMathematically`, `clarityScore` and `c4AlignmentScore` are
 functions of only `overlapCount`/`intersectionCount`, both pinned at 10, leaving

@@ -60,13 +60,14 @@ function pointOnBoxFace(p, node) {
 /**
  * Every invariant for one rendered diagram.
  *
- * Returns `{ violations, offCanvasLabels }`. The split matters: five of the six
- * invariants hold across every generated diagram tried, so they gate
- * absolutely. The sixth — "every label box is in-canvas" — does not, and it is
- * a genuine finding rather than a bad assertion: it also fires once on the
- * hand-authored corpus (`nested_boundary_characterization`, 22 px overshoot).
- * It is therefore ratcheted at its measured count, exactly like the corpus
- * defect counts, so it cannot get worse while INC-15/INC-16 remain open.
+ * Returns `{ violations, offCanvasLabels }`. All six now gate absolutely,
+ * including "every label box is in-canvas" — which did not, historically. It
+ * used to fire on 38 of 40 seeds (271 labels) and once on the hand-authored
+ * corpus, because placement ran out of in-canvas positions and emitted the label
+ * anyway; INC-16 gave it an UNSATISFIABLE outcome to report instead and took both
+ * counts to zero. The split in the return value is kept because the off-canvas
+ * count is reported and budgeted separately below, which is what made that
+ * progression legible rather than a single pass/fail flip.
  */
 function checkInvariants(model, result) {
   const violations = [];

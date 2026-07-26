@@ -230,36 +230,6 @@
       "aspectRatio": "0.49",
       "width": 700,
       "height": 1434
-    },
-    "refactor/multi_boundary_cross_parent_routes.mermaid": {
-      "elementOverlaps": 0,
-      "connectionLineElementCrossings": 6,
-      "boundaryViolations": 0,
-      "orthogonalViolations": 0,
-      "connectionLineCrossings": 5,
-      "connectionLineOverlaps": 5,
-      "connectionLineOverlapPx": 968,
-      "labelLineIntersections": 0,
-      "totalBends": 17,
-      "totalRouteLength": 4169,
-      "aspectRatio": "0.96",
-      "width": 860,
-      "height": 894
-    },
-    "refactor/nested_boundary_characterization.mermaid": {
-      "elementOverlaps": 0,
-      "connectionLineElementCrossings": 0,
-      "boundaryViolations": 0,
-      "orthogonalViolations": 0,
-      "connectionLineCrossings": 0,
-      "connectionLineOverlaps": 12,
-      "connectionLineOverlapPx": 480,
-      "labelLineIntersections": 0,
-      "totalBends": 8,
-      "totalRouteLength": 1331,
-      "aspectRatio": "1.86",
-      "width": 1200,
-      "height": 644
     }
   }
 }

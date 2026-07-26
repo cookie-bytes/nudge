@@ -4,6 +4,29 @@ This document describes the full layout pipeline used for C4Container diagrams (
 
 ---
 
+## The Single-Boundary Contract
+
+**Nudge lays out exactly one boundary per diagram.** This is a product decision, not a gap, and it is checked before layout begins.
+
+It follows C4's own structure: a Container diagram shows the containers inside a *single* system in scope, with other systems outside it as external elements; a Component diagram zooms into a *single* container. The boundary **is** the level of zoom. Showing two systems' internals simultaneously is two diagrams in C4's terms. Every one of the seven third-party diagrams in `test/fixtures/diagrams/external/` declares exactly one boundary, and none nest.
+
+Two shapes are refused by `assertSupportedDiagram` (`src/core/validation.js`), called from `normalizeDiagramModel` so the CLI, MCP server and public API all behave identically:
+
+| Shape | Refused because |
+|---|---|
+| More than one top-level boundary | Only the first would be laid out |
+| A boundary nested inside another boundary | Only the outer one's direct children would be laid out |
+
+The refusal is an `UnsupportedDiagramError` (`code: 'UNSUPPORTED_DIAGRAM'`, plus a `reason` of `multiple_boundaries` or `nested_boundary` and the offending boundary ids). It names the boundaries and states the remedy — split into one diagram per system, or keep one boundary and declare the others as `System_Ext(...)`. The CLI prints it without a stack trace and exits 1 without writing artefacts.
+
+What is **not** restricted is the source keyword. `System_Boundary`, `Container_Boundary` and `Enterprise_Boundary` all parse to a single boundary node, so an `Enterprise_Boundary` wrapping plain `System(...)` elements — the shape `bigbankplc_landscape.puml` uses — renders normally. Only *nesting* and *siblings* have no layout.
+
+**Why this is enforced rather than tolerated.** The engine plans the first boundary's direct children (`container_plan.js`) and previously discarded everything else: a sibling boundary or a nested leaf was never placed and never drawn, while the relationships pointing at it were still routed to coordinates that meant nothing. One corpus diagram rendered with 6 of 12 elements missing — both databases and its event bus — plus four labelled arrows dangling into the top-left corner, and reported success. "Unsupported" and "silently deletes your content" are different products; only the first is defensible.
+
+The rejected diagrams are kept as fixtures in `test/fixtures/rejected/` (outside the quality corpus) and asserted by `test/integration/unsupported_diagrams.test.js`. The corollary is gated absolutely by `test/integration/element_coverage.test.js`: every diagram Nudge accepts renders every element it declares.
+
+---
+
 ## Overview
 
 The pipeline has two distinct engines and runs in this order every time a container diagram is processed:
@@ -317,7 +340,7 @@ All edge coordinates are absolute. The `drawGraph` function uses `flattenNodes` 
 
 ## Known Limitations / Future Work
 
-- **🔴 Single boundary only — and the excess is silently dropped, not degraded.** The engine assumes exactly one `Boundary(...)` node at the top level, and nested boundaries are not supported in container mode. The failure mode is worse than the wording above suggests: a second sibling boundary, or any leaf element nested inside a sub-boundary, is **never placed and never drawn**, while the relationships pointing at it are still routed to meaningless coordinates. Measured: 22 elements across 4 corpus fixtures — one loses an entire boundary including both databases and its event bus; the other renders two empty sub-boundary boxes. Ratcheted by `test/integration/element_coverage.test.js`; fix specified in [multi-boundary-layout-plan.md](multi-boundary-layout-plan.md) (IMPROVEMENT_PLAN INC-22).
+- **Single boundary by design, and enforced.** Nudge lays out exactly one boundary per diagram; sibling and nested boundaries are **refused** before layout by `assertSupportedDiagram` (`src/core/validation.js`), not partially drawn. See [the contract section below](#the-single-boundary-contract). This replaced a silent-drop failure mode: the engine used to plan only the first boundary and discard the rest while still routing the relationships that pointed at the discarded elements.
 - **No cycle detection warning:** A cycle in the boundary's internal edges is silently broken — all-cycle graphs seed Layer 0 with the most source-like element(s), and any remaining stuck nodes are dumped into a final layer.
 - **Legacy checkpoint helpers remain in `llm_client.js`:** `getLLMZoneVerification` and `getLLMRoutingVerification` are still present for older experiments, but the active container optimizer imports the visual-hint functions instead.
 - **Edge routing is grid-based pathfinding:** The grid router uses A* over a visibility graph, rip-up-and-reroute, and channel nudging to find optimal collision-free paths, falling back to legacy candidate routing when necessary. Crossings are expensive but not impossible, preventing long and visually awkward detours.

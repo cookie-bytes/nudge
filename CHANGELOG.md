@@ -49,8 +49,39 @@ any release.
   (MIT), so layout is no longer graded only against fixtures written here.
 - **One declared severity ordering** (`src/core/severity.js`) shared by every
   Node-side scorer, replacing three separately tuned cost models.
+- **Self-relationships now route as a loop** beside their element. The grid router
+  previously refused them (a self-loop is a fixed shape, not a path search) and the
+  legacy fallback drew a straight line from one bounding-box face to the opposite
+  one — through the element the relationship belongs to.
 
 ### Changed
+- 🔴 **Nudge is now explicitly a single-Boundary tool, and says so.** Diagrams with
+  sibling or nested boundaries are **refused** with an actionable message naming the
+  offending boundaries, instead of being partially drawn. Previously the engine laid
+  out the first boundary and silently discarded everything else while still routing
+  the relationships that pointed at the discarded elements: one corpus diagram
+  rendered with 6 of 12 elements missing and four labelled arrows dangling into the
+  corner, and reported success.
+
+  This follows C4's own structure — a Container diagram zooms into one system, a
+  Component diagram into one container — and matches observed usage: all 7
+  third-party corpus diagrams declare exactly one boundary and none nest. The source
+  keyword is not restricted: `System_Boundary`, `Container_Boundary` and
+  `Enterprise_Boundary` all describe one boundary, so an `Enterprise_Boundary`
+  wrapping plain systems still renders.
+
+  **Migration:** split the diagram into one per system, or keep one boundary and
+  declare the others as `System_Ext(...)` outside it. Affected input previously
+  produced a diagram that was missing elements, so no correct output changes.
+
+  **Quality delta:** corpus known defects **92 → 24** across 39 fixtures. 68 of those
+  described the two unrenderable multi-boundary diagrams, now kept as rejection
+  fixtures. Five of seven defect classes are zero corpus-wide; only Connection-Line
+  Crossing (22) and Label-Line Intersection (2) remain — the two least severe in the
+  declared ordering. Every information-destroying class is zero.
+- **The grid router now routes every relationship Nudge accepts** (326/326, asserted
+  absolutely). The legacy candidate router is dead code and `NUDGE_ROUTER=legacy` is
+  slated for removal in a future release.
 - **Text measurement is now pure JavaScript**, against a baked Outfit glyph table
   generated at install time, replacing canvas `measureText`. Layout no longer
   depends on a webfont arriving over the network, and the layout core is
@@ -81,7 +112,8 @@ is the most severe class of label defect.
 
 The declared cost: clamping those labels back inside puts them in occupied
 space. `labelLabelOverlaps` 0 → 10 and `labelLineIntersections` 2 → 12, both
-concentrated in the two hardest multi-boundary fixtures. Total known defects
+concentrated in the two hardest multi-boundary fixtures (since removed from the
+corpus — see the single-Boundary change above). Total known defects
 70 → 92 (the last +2 arrived with the new third-party corpus). By the declared
 severity ordering this is a net improvement — an off-canvas label destroys
 information, an overlapping one degrades readability — and every affected label

@@ -50,11 +50,35 @@ graph TD
     G --> K
 ```
 
-1. **Ingestion**: Parses C4 Context or C4 Container diagrams from `.mermaid`, `.puml`/`.plantuml`, or `.yaml` specifications. C4Context diagrams are normalised by wrapping their internal architecture elements in a hidden synthetic boundary — persons and external systems stay outside — so context diagrams reuse the full container pipeline.
+1. **Ingestion**: Parses C4 Context or C4 Container diagrams from `.mermaid`, `.puml`/`.plantuml`, or `.yaml` specifications. C4Context diagrams are normalised by wrapping their internal architecture elements in a hidden synthetic boundary — persons and external systems stay outside — so context diagrams reuse the full container pipeline. **One boundary per diagram** — see [Scope](#scope-one-boundary-per-diagram).
 2. **Deterministic rendering**: Produces a complete baseline layout without needing cloud services. Context and container diagrams use Nudge's custom deterministic rules; flat diagrams without person/external elements use ELKjs.
 3. **Geometric critique**: Measures DOM bounding boxes to detect Element Overlaps, Connection-Line Element Crossings, Connection-Label Element Crossings, poor aspect ratio, and tight spacing. Container routing uses A* pathfinding over a sparse orthogonal visibility graph, hardest-first routing, and rip-up-and-reroute to optimize line paths and avoid corridors.
 4. **Optional enhancement**: When LLM calls are enabled, Nudge asks a local OpenAI-compatible model for small layout improvements. Container and context diagram hints are accepted only when the candidate score is no worse than the current accepted state. Flat diagram patches are applied through the existing critic loop.
 5. **Export**: Writes a best-effort SVG and PNG even if geometric issues remain.
+
+---
+
+## Scope: one boundary per diagram
+
+Nudge lays out **exactly one boundary per diagram**, and refuses diagrams with sibling or nested boundaries rather than drawing them partially.
+
+This mirrors C4 itself: a Container diagram shows the containers inside a *single* system in scope, with other systems outside it as external elements, and a Component diagram zooms into a *single* container. The boundary is the level of zoom.
+
+```
+❌ Unsupported diagram
+
+This diagram declares 2 top-level boundaries ("Experience Layer" (frontend),
+"Platform Services" (platform)). Nudge lays out one boundary per diagram.
+
+In C4 a Container diagram shows the containers inside a single system in scope,
+with other systems outside it as external elements. To draw this, either split it
+into one diagram per system, or keep one boundary and declare the others as
+System_Ext(...) outside it.
+```
+
+The source keyword is not restricted — `System_Boundary`, `Container_Boundary` and `Enterprise_Boundary` all describe one boundary, so an `Enterprise_Boundary` wrapping plain systems renders normally. Only *nesting* and *siblings* are refused.
+
+The check runs in `normalizeDiagramModel`, so the CLI, the MCP server and the public API all behave identically. Programmatic callers get an `UnsupportedDiagramError` with `code: 'UNSUPPORTED_DIAGRAM'`, a `reason` of `multiple_boundaries` or `nested_boundary`, and the offending boundary ids.
 
 ---
 
@@ -71,7 +95,7 @@ Container diagrams containing boundary blocks bypass ELKjs entirely and use a cu
 - **Phase 1: Kahn Layering (Boundary Interior)**: Children of the boundary are sorted into horizontal layers using a modified Kahn's topological sort. Nodes receiving cross-boundary edges are automatically seeded as entry nodes in the top row (Layer 0); unconnected utility nodes are pushed down to minimise clutter. When every element sits on a relationship cycle (e.g. mutual request/response pairs), the first layer is seeded with the most source-like element(s) — maximum out-degree minus in-degree; remaining cycles are silently broken by appending leftover nodes to a final layer.
 - **Phase 2: Dedicated Utility Rows**: Message buses and databases are excluded from Kahn's sort and reinserted into purpose-built rows. Busy buses widen into clear spines; all message buses are corner-anchored in the bottom-right. Databases sit in tighter rows beneath their deepest contributing service.
 - **Phase 3: Zone Classification & Connectivity Sorting**: External nodes are classified into layout zones — callers go **above**, callees go **below**, and overflow nodes spill into **left** and **right** columns. Each zone is automatically sorted by the average layer/column index of the internal nodes it connects to, so external nodes align visually with their counterparts inside the boundary with minimal edge crossings.
-- **Phase 4: Orthogonal Grid Routing**: Connection lines are routed using an A* pathfinding algorithm on a sparse orthogonal visibility graph. Vertices are generated at inflated element boundaries, centerlines, and channel midlines to keep the search space small and keep routes centered. A* search state includes the current heading to penalize bends. Face ports are reserved on use with cost penalties. The router routes lines hardest-first, followed by an iterative rip-up-and-reroute loop that optimizes global crossings, overlaps, and bends. Finally, a channel nudging phase offsets overlapping parallel segments into separate lanes. Standard straight orthogonal and diagonal lines are rendered, bypassing the legacy candidate router (which remains as a fallback for cross-hierarchy or unplaced edges, or when using `NUDGE_ROUTER=legacy`).
+- **Phase 4: Orthogonal Grid Routing**: Connection lines are routed using an A* pathfinding algorithm on a sparse orthogonal visibility graph. Vertices are generated at inflated element boundaries, centerlines, and channel midlines to keep the search space small and keep routes centered. A* search state includes the current heading to penalize bends. Face ports are reserved on use with cost penalties. The router routes lines hardest-first, followed by an iterative rip-up-and-reroute loop that optimizes global crossings, overlaps, and bends. Finally, a channel nudging phase offsets overlapping parallel segments into separate lanes. Standard straight orthogonal and diagonal lines are rendered. The grid router now routes every relationship Nudge accepts (326/326 across the test corpus, asserted absolutely), so the legacy candidate router is dead code retained only behind `NUDGE_ROUTER=legacy` and slated for removal.
 - **Phase 5: Rule-Based Edge Label Placement**: Relationship labels are placed along the edge using four strategies evaluated in order: (0) straight-line midpoint, (1) target-anchored, (2) source-anchored, (3) edge-density-aware segment scoring. Every strategy checks for collision against node bounding boxes, source/target boxes, previously-placed labels, and nearby connection lines, so duplicate-text labels on co-terminal edges are separated and labels avoid busy corridors where possible. Long labels wrap automatically; technology notes (e.g. `[HTTPS]`) are rendered in a smaller, semi-transparent style beneath the main text.
 
 ### Optional Visual-Hint Pipeline (Context & container diagrams)
@@ -170,7 +194,7 @@ You can customize Nudge's layout tuning behavior and LLM connections using envir
 
 **Optimize the included Core Banking container diagram** (the example shown in the comparison above):
 ```bash
-node src/cli/index.js test/core-banking-single-boundary.mermaid
+node src/cli/index.js test/fixtures/diagrams/core/core-banking-single-boundary.mermaid
 ```
 
 **Run on any Mermaid, PlantUML, or YAML file:**

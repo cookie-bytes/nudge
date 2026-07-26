@@ -24,8 +24,8 @@ const OUT = path.join(ROOT, 'test_outputs', 'comparison');
 
 const DEFAULTS = [
   'core/library_context.mermaid',
-  'refactor/multi_boundary_cross_parent_routes.mermaid',
-  'refactor/nested_boundary_characterization.mermaid',
+  'core/label_crowding_parallel_rels.mermaid',
+  'refactor/message_bus_sizing_and_lanes.mermaid',
 ];
 
 const argv = process.argv.slice(2);

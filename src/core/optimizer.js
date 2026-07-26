@@ -3,6 +3,7 @@ import fs from 'fs';
 import { chromium } from 'playwright';
 import { analyzeLayout } from './geometry.js';
 import { scoreLayout, isClean } from './severity.js';
+import { assertSupportedDiagram } from './validation.js';
 import {
   getLLMOptimizationPatch,
   getLLMLabelPlacementHints
@@ -149,6 +150,13 @@ export function normalizeDiagramModel(diagramModel) {
   // `warnings` collections survive by identity and are intentionally passed
   // through untouched — do not spread this model into a fresh object here, or a
   // future refactor would silently drop them before rendering.
+
+  // Enforce the single-Boundary contract before anything else, so an
+  // unsupported diagram is refused rather than half-drawn. Deliberately ahead of
+  // the synthetic context Boundary below: that one is ours, added to a diagram
+  // that by definition had none.
+  assertSupportedDiagram(diagramModel);
+
   const hasBoundary = (diagramModel.nodes || []).some(n => n.type === 'boundary');
   if (!diagramModel.diagramType) {
     diagramModel.diagramType = hasBoundary ? 'C4Container' : 'C4Context';

@@ -5,18 +5,25 @@
 // scripts stayed live indefinitely (docs/IMPROVEMENT_PLAN.md INC-20). This test
 // makes it a number: when it reaches zero, ~1,800 lines can be deleted.
 //
-// Deliberately a ratchet, not a gate. The fallback is correct behaviour today —
-// the grid router cannot route relationships whose endpoints are not placed
-// leaf elements, as in multi-boundary diagrams — so the number must shrink,
-// never grow.
+// **The criterion is now met: zero fallbacks across the corpus.**
 //
-// Read this number correctly: it is a *layout* defect, not a routing one. Every
-// fallback is a relationship whose endpoint element the engine never laid out at
-// all, because `container_plan.js` plans a single Boundary and silently drops the
-// rest (see element_coverage.test.js — 22 dropped elements across 4 fixtures).
-// This count therefore reaches zero as a consequence of multi-Boundary layout
-// landing (IMPROVEMENT_PLAN INC-22, docs/multi-boundary-layout-plan.md), not by
-// improving the router.
+// It was reached in two steps, neither of them a router change. Self-relationships
+// stopped falling back once the grid router learned to emit a loop instead of
+// refusing them (a self-loop is a fixed shape, not a search). The remaining 28
+// were never a routing problem at all: they were relationships whose endpoint
+// elements the engine never laid out, because `container_plan.js` plans a single
+// Boundary and silently dropped the rest. Nudge is a single-Boundary tool by
+// design, so those diagrams are now refused up front rather than half-drawn
+// (src/core/validation.js).
+//
+// So this is now an absolute invariant, not a ratchet: every relationship in
+// every diagram Nudge accepts is routed by the grid router.
+//
+// Retiring the legacy router is therefore unblocked — ~1,800 lines across
+// connection_line_router.js and route_candidate_rules.js, plus cost model #2 of
+// the two still live. It is deliberately left as its own change: it also removes
+// the documented `NUDGE_ROUTER=legacy` escape hatch, which is part of the CLI
+// surface the CHANGELOG's semver policy covers.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -28,14 +35,7 @@ import { parsePlantUMLC4 } from '../../src/plantuml_parser.js';
 import { normalizeDiagramModel } from '../../src/core/optimizer.js';
 import { findFixtures } from '../quality_baseline.js';
 
-// Measured over the full fixture corpus. Every fallback is concentrated in the
-// two multi-boundary fixtures — which are also the two carrying the bulk of the
-// corpus's remaining defects (18 and 12 respectively). That is not a
-// coincidence worth ignoring: the relationships the grid router hands off are
-// the same ones that end up crossing and overlapping.
-const FALLBACK_BUDGET = 28; // 14 per source format (.mermaid + .puml)
-
-test('the grid router handles all but a known set of relationships', { timeout: 600000 }, async () => {
+test('the grid router routes every relationship Nudge accepts', { timeout: 600000 }, async () => {
   const browser = await chromium.launch({
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox'],
@@ -76,23 +76,18 @@ test('the grid router handles all but a known set of relationships', { timeout: 
   assert.ok(totalEdges > 0, 'expected at least one container-routed fixture');
 
   console.log(
-    `  [router] legacy fallbacks: ${totalFallbacks}/${totalEdges} relationships ` +
-    `(budget ${FALLBACK_BUDGET})`
+    `  [router] grid-routed ${totalEdges}/${totalEdges} relationships, ` +
+    `${totalFallbacks} legacy fallbacks`
   );
   for (const line of perFixture) console.log(`    ${line}`);
 
-  assert.ok(
-    totalFallbacks <= FALLBACK_BUDGET,
-    `Legacy router fallbacks regressed: ${totalFallbacks} > ${FALLBACK_BUDGET}.\n` +
+  assert.equal(
+    totalFallbacks, 0,
+    `The grid router handed ${totalFallbacks} relationship(s) to the legacy router.\n\n` +
+    'This is an absolute invariant, not a budget: every diagram Nudge accepts must ' +
+    'route entirely on the grid. A fallback means either a routing regression, or a ' +
+    'diagram shape that should have been refused by src/core/validation.js rather ' +
+    'than routed by guesswork.\n\n' +
     perFixture.join('\n')
   );
-
-  if (totalFallbacks === 0) {
-    assert.fail(
-      'No fixture falls back to the legacy router any more. That is the stated ' +
-      'retirement criterion: delete src/renderer/routing/connection_line_router.js, ' +
-      'route_candidate_rules.js, the NUDGE_ROUTER=legacy branch and the scripts/*_probe.js ' +
-      'files, then remove this assertion.'
-    );
-  }
 });

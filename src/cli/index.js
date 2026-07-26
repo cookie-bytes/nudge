@@ -79,13 +79,25 @@ if (!Array.isArray(diagramModel.edges)) {
 console.log(`Diagram loaded: "${diagramModel.title}"`);
 console.log('Initial Layout Options:', JSON.stringify(diagramModel.layoutOptions, null, 2));
 
-const { success, history, svgContent, pngPath } = await optimizeDiagram({
-  diagramModel,
-  outputDir: OUTPUT_DIR,
-  onLog: (msg) => console.log(msg),
-  checkpointTimeout: Number(process.env.NUDGE_CHECKPOINT_TIMEOUT || 90000),
-  enhance,
-});
+let result;
+try {
+  result = await optimizeDiagram({
+    diagramModel,
+    outputDir: OUTPUT_DIR,
+    onLog: (msg) => console.log(msg),
+    checkpointTimeout: Number(process.env.NUDGE_CHECKPOINT_TIMEOUT || 90000),
+    enhance,
+  });
+} catch (err) {
+  // An unsupported diagram is a contract refusal, not a crash. Print the
+  // explanation on its own, with no stack trace to read past.
+  if (err?.code === 'UNSUPPORTED_DIAGRAM') {
+    console.error(`\n❌ Unsupported diagram\n\n${err.message}\n`);
+    process.exit(1);
+  }
+  throw err;
+}
+const { success, history, svgContent, pngPath } = result;
 
 console.log('\n=================================');
 console.log('       OPTIMIZATION SUMMARY       ');
