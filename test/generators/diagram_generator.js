@@ -86,7 +86,7 @@ export function generateDiagram(seed) {
     // therefore rare in a hand-authored corpus, which is exactly why it belongs
     // in a generator — it is the shape most likely to have no routing case.
     if (random() < 0.08) {
-      edges.push({ id: `edge_${n++}`, source: a.id, target: a.id, label: `Reconciles itself [${pick(random, TECHNOLOGIES)}]` });
+      edges.push({ id: `edge_${n++}`, from: a.id, to: a.id, label: `Reconciles itself [${pick(random, TECHNOLOGIES)}]` });
     }
     for (const b of all) {
       if (a.id === b.id) continue;
@@ -95,11 +95,11 @@ export function generateDiagram(seed) {
       const text = longLabels
         ? `${verb} the downstream ${pick(random, NOUNS).toLowerCase()} [${pick(random, TECHNOLOGIES)}]`
         : `${verb} [${pick(random, TECHNOLOGIES)}]`;
-      edges.push({ id: `edge_${n++}`, source: a.id, target: b.id, label: text });
+      edges.push({ id: `edge_${n++}`, from: a.id, to: b.id, label: text });
       // Parallel relationships: the same ordered pair connected twice. This is
       // the shape that crowds labels into one corridor.
       if (random() < 0.15) {
-        edges.push({ id: `edge_${n++}`, source: a.id, target: b.id, label: `Also ${verb.toLowerCase()}` });
+        edges.push({ id: `edge_${n++}`, from: a.id, to: b.id, label: `Also ${verb.toLowerCase()}` });
       }
     }
   }

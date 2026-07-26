@@ -32,7 +32,24 @@ function boxesOverlap(a, b) {
          a.y + EPS < b.y + b.height && a.y + a.height > b.y + EPS;
 }
 
-function pointOnBoxFace(p, box) {
+/**
+ * The box connection lines actually dock to.
+ *
+ * A person's drawn silhouette (torso) is inset `width * 0.1` on each side of its
+ * bounding box, and the renderer deliberately routes to that narrower box so
+ * left/right dock points land on the body rather than in the blank margin beside
+ * it — see `src/render_engine.js` (`routableBoxes`) and
+ * `architectureElementShapes.drawPersonShape`. Checking endpoints against the
+ * raw bounding box would flag correct, visually-on-the-body endpoints.
+ */
+function dockBox(node) {
+  if (node.type !== 'person') return node;
+  const inset = node.width * 0.1;
+  return { x: node.x + inset, y: node.y, width: node.width - 2 * inset, height: node.height };
+}
+
+function pointOnBoxFace(p, node) {
+  const box = dockBox(node);
   const onVertical = Math.abs(p.x - box.x) <= 2 || Math.abs(p.x - (box.x + box.width)) <= 2;
   const onHorizontal = Math.abs(p.y - box.y) <= 2 || Math.abs(p.y - (box.y + box.height)) <= 2;
   const withinY = p.y >= box.y - 2 && p.y <= box.y + box.height + 2;

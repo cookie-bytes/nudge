@@ -250,10 +250,74 @@ globalThis.NudgeRenderer.gridConnectionLineRouter = (() => {
       return states;
     }
 
+    // Is the axis-aligned rectangle free of every element except `selfId`, and
+    // inside the canvas? Used to choose which side a self-loop hangs off.
+    function regionIsClear(x0, y0, x1, y1, selfId) {
+      if (x0 < bounds.x || y0 < bounds.y ||
+          x1 > bounds.x + bounds.width || y1 > bounds.y + bounds.height) return false;
+      for (const o of obstacles) {
+        if (o.id === selfId) continue;
+        if (x0 < o.x + o.width && x1 > o.x && y0 < o.y + o.height && y1 > o.y) return false;
+      }
+      return true;
+    }
+
+    /**
+     * A self-relationship is a fixed shape, not a search: leave one face, run
+     * parallel to it, and re-enter the same face two slots along.
+     *
+     * A* cannot express this — start and goal are the same element, so the
+     * search terminates immediately on a zero-length path. Before this existed
+     * the router returned null and the legacy fallback drew the relationship as
+     * a straight line from one bounding-box face to the opposite one, passing
+     * clean through the element it belongs to.
+     *
+     * Sides are tried in reading-order preference and the first one with room
+     * wins; if the element is boxed in on all four sides the right-hand loop is
+     * emitted anyway, so the outcome is a cramped loop rather than no route.
+     */
+    function routeSelfLoop(e, idx) {
+      const el = obstacleById.get(e.from);
+      const facePorts = graph.ports.get(e.from);
+      if (!el || !facePorts) return null;
+
+      const depth = clearance + 16;
+      const build = (face) => {
+        const ports = facePorts[face];
+        if (!ports || ports.length < 2) return null;
+        const a = ports[0];
+        const b = ports[ports.length - 1];
+        const outward = { right: { x: depth, y: 0 }, left: { x: -depth, y: 0 },
+                          top: { x: 0, y: -depth }, bottom: { x: 0, y: depth } }[face];
+        const p1 = { x: a.x + outward.x, y: a.y + outward.y };
+        const p2 = { x: b.x + outward.x, y: b.y + outward.y };
+        const x0 = Math.min(a.x, b.x, p1.x, p2.x);
+        const x1 = Math.max(a.x, b.x, p1.x, p2.x);
+        const y0 = Math.min(a.y, b.y, p1.y, p2.y);
+        const y1 = Math.max(a.y, b.y, p1.y, p2.y);
+        return {
+          points: [{ x: a.x, y: a.y }, p1, p2, { x: b.x, y: b.y }],
+          portKeys: [`${e.from}:${face}:${a.slot}`, `${e.from}:${face}:${b.slot}`],
+          clear: regionIsClear(x0, y0, x1, y1, e.from)
+        };
+      };
+
+      const candidates = ['right', 'bottom', 'top', 'left'].map(build).filter(Boolean);
+      if (candidates.length === 0) return null;
+      const chosen = candidates.find(c => c.clear) || candidates[0];
+
+      for (const portKey of chosen.portKeys) {
+        portUse.set(portKey, (portUse.get(portKey) || 0) + 1);
+      }
+      portsUsedByEdge.set(idx, chosen.portKeys);
+      return pointsToSection(chosen.points);
+    }
+
     function routeOne(e, idx) {
       const src = obstacleById.get(e.from);
       const tgt = obstacleById.get(e.to);
-      if (!src || !tgt || src.id === tgt.id) return null;
+      if (!src || !tgt) return null;
+      if (src.id === tgt.id) return routeSelfLoop(e, idx);
 
       const starts = terminalStates(e.from, 'source');
       const goalStates = terminalStates(e.to, 'target');

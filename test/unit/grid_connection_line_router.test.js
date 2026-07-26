@@ -116,13 +116,48 @@ test('internal lines stay inside the boundary when a clean inside route exists',
 
 test('edges with unroutable endpoints return null instead of throwing', () => {
   const obstacles = [{ id: 'only', x: 100, y: 100, width: 100, height: 80 }];
-  const allEdges = [
-    { from: 'only', to: 'ghost', label: 'broken' },
-    { from: 'only', to: 'only', label: 'self' }
-  ];
+  const allEdges = [{ from: 'only', to: 'ghost', label: 'broken' }];
   const sections = routeAllEdges({ allEdges, obstacles, bounds: BOUNDS });
   assert.equal(sections[0], null);
-  assert.equal(sections[1], null);
+});
+
+test('a self-relationship routes as a loop beside its element, not through it', () => {
+  // A* cannot express this — start and goal are the same element. The router
+  // used to return null here and the legacy fallback drew the line straight
+  // through the element it belongs to.
+  const el = { id: 'only', x: 100, y: 100, width: 100, height: 80 };
+  const sections = routeAllEdges({
+    allEdges: [{ from: 'only', to: 'only', label: 'self' }],
+    obstacles: [el],
+    bounds: BOUNDS
+  });
+
+  const section = sections[0];
+  assert.ok(section, 'self-relationship produced no route');
+  const points = [section.startPoint, ...(section.bendPoints || []), section.endPoint];
+
+  const onFace = (p) =>
+    (Math.abs(p.x - el.x) < 0.5 || Math.abs(p.x - (el.x + el.width)) < 0.5 ||
+     Math.abs(p.y - el.y) < 0.5 || Math.abs(p.y - (el.y + el.height)) < 0.5);
+  assert.ok(onFace(section.startPoint), 'start point is not on the element face');
+  assert.ok(onFace(section.endPoint), 'end point is not on the element face');
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    assert.ok(
+      Math.abs(a.x - b.x) < 0.5 || Math.abs(a.y - b.y) < 0.5,
+      `segment ${i} is diagonal`
+    );
+    // No segment may cross the element's interior.
+    const loX = Math.min(a.x, b.x), hiX = Math.max(a.x, b.x);
+    const loY = Math.min(a.y, b.y), hiY = Math.max(a.y, b.y);
+    assert.ok(
+      !(loX < el.x + el.width - 0.5 && hiX > el.x + 0.5 &&
+        loY < el.y + el.height - 0.5 && hiY > el.y + 0.5),
+      `segment ${i} passes through the element interior`
+    );
+  }
 });
 
 test('nudging separates lines forced through a shared channel', () => {
