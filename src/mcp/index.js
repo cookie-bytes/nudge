@@ -53,8 +53,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           theme: {
             type: 'string',
-            enum: ['dark', 'light'],
-            description: 'Colour theme for the returned diagram. Defaults to dark. (The CLI also accepts "both"; this tool returns one inline SVG, so it takes a single theme.)',
+            enum: ['auto', 'dark', 'light'],
+            description: 'Colour theme for the returned SVG. "auto" (the default) embeds both palettes and follows the viewer\'s prefers-color-scheme, falling back to dark. "dark" or "light" pins it. (The CLI also accepts "both", which writes two files; this tool returns one inline SVG.)',
           },
         },
         required: ['content'],
@@ -71,7 +71,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     };
   }
 
-  const { content, format, enhance = false, theme = 'dark' } = request.params.arguments;
+  const { content, format, enhance = false, theme = 'auto' } = request.params.arguments;
 
   // Auto-detect format if not specified
   const trimmed = content.trimStart();

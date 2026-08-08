@@ -8,10 +8,13 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'fs';
+import path from 'path';
 import {
   readThemes, report, tierReport, contrast, deltaE, parseColor, luminance,
   ALL_PAIRS, TIER_PAIRS, KNOWN_BELOW, AA_TEXT, AA_GRAPHICS,
 } from '../theme_contrast.js';
+import { LIGHT_THEME_SELECTOR, resolveThemes, THEME_REQUESTS } from '../../src/core/optimizer.js';
 
 const themes = readThemes();
 
@@ -76,6 +79,32 @@ test('the light theme carries no contrast exemptions', () => {
   // Dark's exemptions are inherited from a palette that predates this check.
   // The light palette was designed against it, so it has no excuse.
   assert.deepEqual(KNOWN_BELOW.light, {});
+});
+
+test('the adaptive export can still find the light palette', () => {
+  // captureSvg builds the prefers-color-scheme rule by looking this selector up
+  // in the CSSOM. Renaming the block in render.html would leave every adaptive
+  // export silently dark-only; the exporter throws when it finds nothing, but
+  // that is a slow browser test away — this catches the rename in milliseconds.
+  const css = fs.readFileSync(path.resolve('src/render.html'), 'utf8');
+  assert.ok(
+    css.includes(LIGHT_THEME_SELECTOR),
+    `render.html must declare the light palette under exactly "${LIGHT_THEME_SELECTOR}"`
+  );
+});
+
+test('resolveThemes maps each accepted request to what gets rendered', () => {
+  assert.deepEqual(resolveThemes(), { themes: ['dark'], adaptive: true });
+  assert.deepEqual(resolveThemes('auto'), { themes: ['dark'], adaptive: true });
+  assert.deepEqual(resolveThemes('dark'), { themes: ['dark'], adaptive: false });
+  assert.deepEqual(resolveThemes('light'), { themes: ['light'], adaptive: false });
+  assert.deepEqual(resolveThemes('both'), { themes: ['dark', 'light'], adaptive: false });
+  assert.throws(() => resolveThemes('solarized'), /unknown theme/);
+  // Naming a palette must pin it — an "adaptive" pinned theme would make
+  // --theme dark a suggestion the viewer could override.
+  for (const request of THEME_REQUESTS.filter(t => t !== 'auto')) {
+    assert.equal(resolveThemes(request).adaptive, false, `${request} must not adapt`);
+  }
 });
 
 // --- the measuring tools themselves ---

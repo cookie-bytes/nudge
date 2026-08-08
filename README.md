@@ -169,12 +169,22 @@ node src/cli/index.js path/to/diagram.mermaid --enhance
 
 #### Themes
 
-Diagrams render in a dark palette by default. Pass `--theme` for a light one, or
-`both` to get a matching pair from a single run:
+Exported SVGs carry both palettes and follow the reader's system preference, so
+one file is readable on a light page and a dark one. PNGs can't do that — a
+raster has to pick — so they render dark.
+
+Pass `--theme` to pin a palette instead, or `both` to get a matching pair of
+files from a single run:
 
 ```bash
 node src/cli/index.js path/to/diagram.mermaid --theme light
 ```
+
+| `--theme` | PNG | SVG |
+|---|---|---|
+| `auto` *(default)* | dark | follows `prefers-color-scheme`, dark where unknown |
+| `dark` / `light` | that palette | that palette, pinned |
+| `both` | one of each | one of each, pinned |
 
 A theme changes only colour — the layout is identical — so `--theme both` costs
 one extra screenshot rather than a second layout pass. With `both`, the dark

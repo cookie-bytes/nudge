@@ -84,7 +84,7 @@ export async function renderDiagram({
   outputDir,
   signal,
   onLog = () => {},
-  theme = 'dark',
+  theme = 'auto',
 } = {}) {
   const model = parseDiagram(source, { format });
 

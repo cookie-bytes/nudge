@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" data-theme="dark" viewBox="0 0 1620 2774"><style>    :root {
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1620 2774"><style>    :root {
       --canvas: #0f172a;
       --boundary-stroke: #cbd5e1;
       --boundary-label: #94a3b8;
@@ -255,7 +255,8 @@
       -webkit-box-orient: vertical;
       overflow: hidden;
       text-overflow: ellipsis;
-    }</style>
+    }
+@media (prefers-color-scheme: light){:root:not([data-theme]){--canvas: #f8fafc; --boundary-stroke: #334155; --boundary-stroke-opacity: 0.7; --boundary-label: #475569; --person-fill: #0c4a6e; --person-accent: #0369a1; --focal-fill: #1e40af; --focal-stroke: #1e3a8a; --supporting-fill: #33518c; --supporting-stroke: #24406f; --external-fill: #475569; --external-stroke: #334155; --datastore-accent: #2563eb; --datastore-rim: #dbeafe; --line: #64748b; --label-text: #334155; --title-text: #0f172a; --on-element: #f8fafc; --panel-fill: #ffffff; --panel-stroke: #cbd5e1; --panel-label: #334155; --note-fill: #fef9c3; --note-fold: #fde68a; --note-stroke: #a16207; --note-ink: #422006; --shadow: rgba(15, 23, 42, 0.12); --shadow-subtle: rgba(15, 23, 42, 0.1);}}</style>
       <defs>
         <!-- Arrowhead markers -->
         <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="10" markerHeight="10" orient="auto-start-reverse">

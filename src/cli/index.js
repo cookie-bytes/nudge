@@ -5,7 +5,7 @@ import path from 'path';
 import yaml from 'js-yaml';
 import { parseMermaidC4 } from '../mermaid_parser.js';
 import { parsePlantUMLC4 } from '../plantuml_parser.js';
-import { optimizeDiagram, THEMES } from '../core/optimizer.js';
+import { optimizeDiagram, THEME_REQUESTS } from '../core/optimizer.js';
 
 const args = process.argv.slice(2);
 const enhanceIndex = args.indexOf('--enhance');
@@ -33,10 +33,12 @@ if (outIndex !== -1) {
   }
 }
 
-// --theme dark|light|both. `both` writes the primary (dark) outputs under the
-// usual optimized.* names plus a suffixed optimized.light.* pair, so adding it
-// to an existing command never moves the files that command already consumed.
-let themeArg = 'dark';
+// --theme auto|dark|light|both. `auto` (the default) pins the PNG to dark and
+// lets the SVG follow the viewer's prefers-color-scheme. `both` writes the
+// primary (dark) outputs under the usual optimized.* names plus a suffixed
+// optimized.light.* pair, so adding it to an existing command never moves the
+// files that command already consumed.
+let themeArg = 'auto';
 const themeIndex = args.findIndex(a => a === '--theme' || a.startsWith('--theme='));
 if (themeIndex !== -1) {
   const token = args[themeIndex];
@@ -47,8 +49,8 @@ if (themeIndex !== -1) {
     themeArg = args[themeIndex + 1];
     args.splice(themeIndex, 2);
   }
-  if (!THEMES.includes(themeArg) && themeArg !== 'both') {
-    console.error(`--theme must be one of: ${[...THEMES, 'both'].join(', ')}.`);
+  if (!THEME_REQUESTS.includes(themeArg)) {
+    console.error(`--theme must be one of: ${THEME_REQUESTS.join(', ')}.`);
     process.exit(1);
   }
 }
@@ -63,7 +65,7 @@ console.log('=== Nudge: Deterministic C4 Layout Engine ===');
 console.log(`Input: ${INPUT_PATH}`);
 console.log(`Output: ${OUTPUT_DIR}`);
 console.log(`LLM Enhancement: ${enhance ? 'Enabled' : 'Disabled (deterministic-only mode)'}`);
-console.log(`Theme: ${themeArg}`);
+console.log(`Theme: ${themeArg}${themeArg === 'auto' ? " (PNG dark; SVG follows the viewer's preference)" : ''}`);
 
 let diagramModel;
 try {

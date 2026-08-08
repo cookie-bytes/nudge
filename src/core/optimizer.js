@@ -196,15 +196,27 @@ export function normalizeDiagramModel(diagramModel) {
   return diagramModel;
 }
 
-/** The themes the renderer can draw. The first is the default. */
+/** The palettes the renderer can draw. */
 export const THEMES = ['dark', 'light'];
 
-/** `theme` option -> the ordered list to render. The first is the primary. */
-export function resolveThemes(theme = 'dark') {
-  if (theme === 'both') return ['dark', 'light'];
-  if (THEMES.includes(theme)) return [theme];
+/** Accepted values for the `theme` option. */
+export const THEME_REQUESTS = ['auto', 'dark', 'light', 'both'];
+
+/**
+ * `theme` option -> what to render, and whether the SVG adapts to its viewer.
+ *
+ * `auto` is the default and only affects the SVG. A raster has to commit to one
+ * palette, so the PNG is dark as it has always been; the SVG instead carries
+ * both palettes and picks one from the viewer's `prefers-color-scheme`, falling
+ * back to dark where that is unknown. Naming a palette explicitly pins both
+ * outputs to it.
+ */
+export function resolveThemes(theme = 'auto') {
+  if (theme === 'auto') return { themes: ['dark'], adaptive: true };
+  if (theme === 'both') return { themes: ['dark', 'light'], adaptive: false };
+  if (THEMES.includes(theme)) return { themes: [theme], adaptive: false };
   throw new TypeError(
-    `optimizeDiagram: unknown theme ${JSON.stringify(theme)}. Expected one of ${[...THEMES, 'both'].join(', ')}.`
+    `optimizeDiagram: unknown theme ${JSON.stringify(theme)}. Expected one of ${THEME_REQUESTS.join(', ')}.`
   );
 }
 
@@ -219,10 +231,37 @@ async function applyTheme(page, theme) {
   await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
 }
 
-async function captureSvg(page, width, height, theme = 'dark') {
-  const [svgMarkup, styles] = await Promise.all([
+export const LIGHT_THEME_SELECTOR = ':root[data-theme="light"]';
+
+/**
+ * Read the light palette's declarations straight out of the CSSOM.
+ *
+ * An adaptive export needs the light values under a second selector — one the
+ * stylesheet cannot express, because a media query cannot be part of a selector
+ * list. Rather than keep a second copy of the palette in render.html, where the
+ * two could silently drift, the copy is generated at export time from the one
+ * that renders. Read through the CSSOM rather than by parsing the stylesheet
+ * text: the browser has already parsed it exactly, so there is no regex to be
+ * wrong about a format change.
+ */
+async function readLightDeclarations(page) {
+  return page.evaluate((selector) => {
+    // Specifically the inline stylesheet — the same element `exportStyles`
+    // reads. Walking `document.styleSheets` instead would reach the
+    // cross-origin webfont link, whose `cssRules` throws SecurityError.
+    const sheet = document.querySelector('head style')?.sheet;
+    for (const rule of sheet?.cssRules ?? []) {
+      if (rule.selectorText === selector) return rule.style.cssText;
+    }
+    return '';
+  }, LIGHT_THEME_SELECTOR);
+}
+
+async function captureSvg(page, width, height, { theme = 'dark', adaptive = false } = {}) {
+  const [svgMarkup, styles, lightDeclarations] = await Promise.all([
     page.locator('#svg-root').innerHTML(),
     page.evaluate(() => document.querySelector('head style')?.textContent ?? ''),
+    adaptive ? readLightDeclarations(page) : Promise.resolve(''),
   ]);
   // The export is served and parsed as image/svg+xml, where a style element's
   // content is XML text — so a literal angle bracket anywhere in it ends the
@@ -245,9 +284,39 @@ async function captureSvg(page, width, height, theme = 'dark') {
   // emit (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&nbsp;`) this is the only one XML
   // does not already know, so handling it here covers every source.
   const xmlSafeMarkup = svgMarkup.replace(/&nbsp;/g, '&#160;');
+
   // Both palettes ride along in the inlined stylesheet, and `:root` resolves to
-  // this element in a standalone SVG — so the attribute below is what picks one.
-  return `<svg xmlns="http://www.w3.org/2000/svg" data-theme="${theme}" viewBox="0 0 ${width} ${height}"><style>${exportStyles}</style>${xmlSafeMarkup}</svg>`;
+  // the svg element itself in a standalone SVG. Which one applies is decided
+  // here, in one of two ways.
+  //
+  // Pinned: `data-theme` names the palette. The attribute selector outranks the
+  // bare `:root` block on specificity, and specificity is unaffected by media
+  // queries, so a pinned theme beats the adaptive rule in both directions.
+  //
+  // Adaptive: no attribute, and an appended media query supplies the light
+  // values when the viewer asks for light. `:not([data-theme])` keeps it off
+  // any document that pinned a palette.
+  //
+  // Note `prefers-color-scheme: light` matches a viewer reporting *no*
+  // preference as well as one asking for light — that is what the spec says,
+  // not an accident here. So the split is: explicit dark stays dark, explicit
+  // light and no-preference go light, and a renderer too old to know the
+  // feature matches nothing and gets dark, exactly as every export did before
+  // this existed. Anyone who needs a guarantee either way pins the theme.
+  // Loud, not silent: an adaptive export that quietly lost its light palette
+  // looks like a perfectly good dark-only SVG, and would sail past every check
+  // that does not open it under a light preference.
+  if (adaptive && !lightDeclarations) {
+    throw new Error(
+      `captureSvg: no declarations found for "${LIGHT_THEME_SELECTOR}" in render.html, ` +
+      'so an adaptive SVG would silently export as dark-only.'
+    );
+  }
+  const adaptiveRule = adaptive
+    ? `\n@media (prefers-color-scheme: light){:root:not([data-theme]){${lightDeclarations}}}`
+    : '';
+  const themeAttr = adaptive ? '' : ` data-theme="${theme}"`;
+  return `<svg xmlns="http://www.w3.org/2000/svg"${themeAttr} viewBox="0 0 ${width} ${height}"><style>${exportStyles}${adaptiveRule}</style>${xmlSafeMarkup}</svg>`;
 }
 
 /**
@@ -260,7 +329,7 @@ async function captureSvg(page, width, height, theme = 'dark') {
  *
  * The caller must leave the page showing the layout it wants captured.
  */
-async function captureThemedOutputs({ page, width, height, outputDir, themes, onLog }) {
+async function captureThemedOutputs({ page, width, height, outputDir, themes, adaptive = false, onLog }) {
   const [primary] = themes;
   await page.setViewportSize({
     width: Math.ceil(width) + 100,
@@ -274,7 +343,12 @@ async function captureThemedOutputs({ page, width, height, outputDir, themes, on
     const suffix = theme === primary ? '' : `.${theme}`;
     const pngPath = path.join(outputDir, `optimized${suffix}.png`);
     await svgElement.screenshot({ path: pngPath });
-    const svg = await captureSvg(page, width, height, theme);
+    // Only the primary export adapts: an `optimized.light.svg` that could
+    // render dark would defeat the point of asking for it by name.
+    const svg = await captureSvg(page, width, height, {
+      theme,
+      adaptive: adaptive && theme === primary,
+    });
     const svgPath = path.join(outputDir, `optimized${suffix}.svg`);
     fs.writeFileSync(svgPath, svg);
     outputs[theme] = { svg, svgPath, pngPath };
@@ -306,7 +380,7 @@ export async function optimizeDiagram({
   enhance = false,
   theme = 'dark',
 }) {
-  const themes = resolveThemes(theme);
+  const { themes, adaptive } = resolveThemes(theme);
   const primaryTheme = themes[0];
 
   fs.mkdirSync(outputDir, { recursive: true });
@@ -543,6 +617,7 @@ export async function optimizeDiagram({
         height: finalStep.result.height,
         outputDir,
         themes,
+        adaptive,
         onLog,
       });
       const svg = themeOutputs[primaryTheme].svg;
@@ -658,6 +733,7 @@ export async function optimizeDiagram({
           height: bestRenderResult.height,
           outputDir,
           themes,
+          adaptive,
           onLog,
         });
         svgContent = themeOutputs[primaryTheme].svg;
@@ -737,6 +813,7 @@ export async function optimizeDiagram({
             height: result.height,
             outputDir,
             themes,
+            adaptive,
             onLog,
           });
           svgContent = themeOutputs[primaryTheme].svg;
@@ -788,6 +865,7 @@ export async function optimizeDiagram({
           height: lastRenderResult.height,
           outputDir,
           themes,
+          adaptive,
           onLog,
         });
         svgContent = themeOutputs[primaryTheme].svg;

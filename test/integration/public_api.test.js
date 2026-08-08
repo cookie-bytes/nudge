@@ -121,7 +121,7 @@ test('the exported SVG opens as a standalone document and paints its own ground'
 });
 
 test('renderDiagram renders the requested theme', { timeout: 180000 }, async () => {
-  const dark = await renderDiagram({ source: MERMAID });
+  const dark = await renderDiagram({ source: MERMAID, theme: 'dark' });
   const light = await renderDiagram({ source: MERMAID, theme: 'light' });
 
   assert.match(dark.svg, /<svg[^>]*data-theme="dark"/);
@@ -137,6 +137,53 @@ test('renderDiagram renders the requested theme', { timeout: 180000 }, async () 
 
 test('renderDiagram rejects an unknown theme rather than silently picking one', { timeout: 180000 }, async () => {
   await assert.rejects(() => renderDiagram({ source: MERMAID, theme: 'solarized' }), /unknown theme/);
+});
+
+test('the default export follows the viewer, and a pinned one refuses to', { timeout: 180000 }, async () => {
+  // The point of the whole exercise: one file that is readable wherever it is
+  // opened, instead of a dark diagram that happens to land on a white page.
+  const auto = await renderDiagram({ source: MERMAID });
+  const pinned = await renderDiagram({ source: MERMAID, theme: 'dark' });
+
+  // An adaptive export carries no data-theme — the attribute is precisely what
+  // would stop the media query applying.
+  assert.doesNotMatch(auto.svg, /<svg[^>]*data-theme=/);
+  assert.match(auto.svg, /@media \(prefers-color-scheme: light\)/);
+  assert.doesNotMatch(pinned.svg, /@media \(prefers-color-scheme/);
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-adaptive-'));
+  const browser = await chromium.launch();
+  try {
+    const ground = async (svg, colorScheme) => {
+      const file = path.join(dir, `${colorScheme}-${svg.length}.svg`);
+      fs.writeFileSync(file, svg);
+      const context = await browser.newContext({ colorScheme });
+      const page = await context.newPage();
+      await page.goto(`file://${file}`);
+      const fill = await page.evaluate(() => {
+        if (document.querySelector('parsererror')) return 'parse-error';
+        return getComputedStyle(document.getElementById('canvas-rect')).fill;
+      });
+      await context.close();
+      return fill;
+    };
+
+    const autoDark = await ground(auto.svg, 'dark');
+    const autoLight = await ground(auto.svg, 'light');
+    assert.notEqual(autoDark, 'parse-error');
+    assert.notEqual(
+      autoDark, autoLight,
+      'the same adaptive file must render differently under the two preferences'
+    );
+
+    // Pinning has to beat the viewer in both directions, or "--theme dark" is
+    // a suggestion rather than a guarantee.
+    assert.equal(await ground(pinned.svg, 'dark'), await ground(pinned.svg, 'light'));
+    assert.equal(await ground(pinned.svg, 'light'), autoDark, 'pinned dark must be the dark palette');
+  } finally {
+    await browser.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("theme: 'both' writes a suffixed second pair without moving the first", { timeout: 180000 }, async () => {

@@ -27,14 +27,24 @@ any release.
 ## [Unreleased]
 
 ### Added
-- **Light theme, and a `--theme` flag to pick one.** `--theme dark|light|both` on
-  the CLI, `theme` on `renderDiagram` and on the MCP tool (`dark`/`light` there —
-  it returns one inline SVG). Dark remains the default and is byte-for-byte
-  unchanged. Themes are a stylesheet swap over identical geometry, so a second
+- 🔴 **Exported SVGs now follow the reader's colour preference by default.** A
+  single `optimized.svg` carries both palettes and picks one from
+  `prefers-color-scheme`, so the same file is readable on a light docs site and
+  a dark one. PNGs are unaffected — a raster has to commit to a palette, and
+  that stays dark. Pin the old behaviour with `--theme dark` (or `theme: 'dark'`)
+  if you were relying on the export always being dark. Explicit dark stays dark,
+  explicit light and no-preference go light, and a renderer too old to know the
+  feature gets dark, exactly as before.
+- **Light theme, and a `--theme` flag to pick one.** `--theme auto|dark|light|both`
+  on the CLI, `theme` on `renderDiagram` and on the MCP tool (`auto`/`dark`/`light`
+  there — it returns one inline SVG). `auto` is the default; the dark palette is
+  byte-for-byte unchanged. Themes are a stylesheet swap over identical geometry, so a second
   theme costs one screenshot, not another layout pass. `--theme both` writes the
   primary pair under the usual `optimized.*` names plus a suffixed
   `optimized.light.*`, so adding the flag never moves files an existing command
   already consumed. `renderDiagram` gains a `themes` field keyed by theme name.
+  Only the adaptive default embeds the media query; a theme asked for by name is
+  pinned, and pinning wins over the viewer's preference in both directions.
 - **Every colour is a semantic token.** `src/render.html` declares ~27 custom
   properties (`--focal-fill`, `--line`, `--note-ink`, …) that both palettes fill
   in, replacing colour literals scattered through the stylesheet. This is the
