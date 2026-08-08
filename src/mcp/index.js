@@ -51,6 +51,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: 'boolean',
             description: 'Enable optional LLM optimization / visual-hint enhancement pipeline (requires local LLM server). Defaults to false.',
           },
+          theme: {
+            type: 'string',
+            enum: ['dark', 'light'],
+            description: 'Colour theme for the returned diagram. Defaults to dark. (The CLI also accepts "both"; this tool returns one inline SVG, so it takes a single theme.)',
+          },
         },
         required: ['content'],
       },
@@ -66,7 +71,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     };
   }
 
-  const { content, format, enhance = false } = request.params.arguments;
+  const { content, format, enhance = false, theme = 'dark' } = request.params.arguments;
 
   // Auto-detect format if not specified
   const trimmed = content.trimStart();
@@ -112,6 +117,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       checkpointTimeout: 15000,
       optimizationTimeout: 20000,
       enhance,
+      theme,
     });
 
     const finalEntry = history.at(-1) || {};

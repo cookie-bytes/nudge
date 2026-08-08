@@ -14,6 +14,24 @@ window.NudgeRenderer.architectureElementShapes = {
     return typeName;
   },
 
+  // Element and note text is HTML inside a foreignObject, which needs its
+  // namespace declared *in the markup* rather than only in the live DOM.
+  //
+  // In the page these divs are already in the XHTML namespace and render fine,
+  // so nothing here is visible while Playwright is driving the render. But the
+  // export is built by serialising this subtree with innerHTML, and the HTML
+  // serialiser does not write an xmlns for foreign content. Re-parsed as
+  // image/svg+xml, the divs then inherit the SVG namespace from foreignObject,
+  // where `div` means nothing — so they lay out at zero width and every element
+  // in the exported diagram is an empty box. Declaring xmlns on the wrapper is
+  // enough; descendants inherit it.
+  createForeignContentWrapper(className) {
+    const wrapper = document.createElement("div");
+    wrapper.className = className;
+    wrapper.setAttribute("xmlns", "http://www.w3.org/1999/xhtml");
+    return wrapper;
+  },
+
   // Helper for rendering the foreignObject text container
   appendNodeText(node, x, y, width, height, typeLabelText, container) {
     const fo = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
@@ -22,8 +40,7 @@ window.NudgeRenderer.architectureElementShapes = {
     fo.setAttribute("width", width);
     fo.setAttribute("height", height);
 
-    const wrapper = document.createElement("div");
-    wrapper.className = "node-content-wrapper";
+    const wrapper = window.NudgeRenderer.architectureElementShapes.createForeignContentWrapper("node-content-wrapper");
 
     const title = document.createElement("div");
     title.className = "node-title";
@@ -254,8 +271,7 @@ window.NudgeRenderer.architectureElementShapes = {
         fo.setAttribute("width", Math.max(0, W - 2 * PAD - FOLD));
         fo.setAttribute("height", Math.max(0, H - 2 * PAD));
 
-        const wrapper = document.createElement("div");
-        wrapper.className = "note-content";
+        const wrapper = window.NudgeRenderer.architectureElementShapes.createForeignContentWrapper("note-content");
         const lines = Array.isArray(node.lines) && node.lines.length
           ? node.lines
           : String(node.text || '').split(/<br\s*\/?>/i);

@@ -40,7 +40,42 @@ test('optimizeDiagram positions notes and auto-places them without overlap', asy
     const svg = fs.readFileSync(path.join(outputDir, 'optimized.svg'), 'utf8');
     assert.match(svg, /class="note"/, 'expected a rendered note box');
     assert.ok(svg.includes('Owned by Team Phoenix'), 'expected note text in the SVG');
-    assert.match(svg, /\.note\s*\{[^}]*fill:\s*#fef9c3/, 'expected the .note fill inline');
+    // Two hops since tokenisation: the rule names the token, the token block
+    // defines it. Self-containment means both survive the export.
+    assert.match(svg, /\.note\s*\{[^}]*fill:\s*var\(--note-fill\)/, 'expected the .note fill inline');
+    assert.match(svg, /--note-fill:\s*#fef9c3/, 'expected the note token defined inline');
+  } finally {
+    fs.rmSync(outputDir, { recursive: true, force: true });
+  }
+});
+
+// A blank line inside a note is drawn as a non-breaking space to keep the line
+// box open. The HTML serialiser writes that back as `&nbsp;` — an entity XML
+// does not predefine — so before this was handled, one blank line anywhere in
+// one note made the *entire* exported SVG refuse to open, while the PNG and
+// every geometry check stayed perfectly green.
+test('a blank note line does not break the exported SVG', async () => {
+  const model = parseMermaidC4(`
+    C4Context
+      title Blank Note Line
+      Person(user, "User")
+      System(shop, "Shop Platform", "In scope")
+      Rel(user, shop, "Uses", "HTTPS")
+      %% Scope: shop
+      Note right of shop: First line<br/><br/>After a gap
+  `);
+
+  const outputDir = tmpOut();
+  try {
+    await optimizeDiagram({ diagramModel: model, outputDir, onLog: () => {}, enhance: false });
+    const svg = fs.readFileSync(path.join(outputDir, 'optimized.svg'), 'utf8');
+
+    assert.ok(svg.includes('After a gap'), 'expected the note text in the export');
+    assert.ok(
+      !svg.includes('&nbsp;'),
+      'the export must not carry &nbsp;, which is undefined in XML'
+    );
+    assert.ok(svg.includes('&#160;'), 'the blank line should survive as a numeric reference');
   } finally {
     fs.rmSync(outputDir, { recursive: true, force: true });
   }

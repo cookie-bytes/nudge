@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { chromium } from 'playwright';
 import { renderDiagram, parseDiagram, detectFormat, FORMATS } from '../../src/index.js';
 
 const MERMAID = fs.readFileSync(
@@ -54,6 +55,106 @@ test('renderDiagram returns self-contained SVG and the full defect vector', { ti
     assert.equal(typeof result.report[key], 'number', `report.${key} must be a number`);
   }
   assert.equal(result.report.elementOverlaps, 0);
+});
+
+test('the exported SVG opens as a standalone document and paints its own ground', { timeout: 180000 }, async () => {
+  // The export is consumed as image/svg+xml, not as a fragment inside our own
+  // page, so it has to satisfy two things the in-page render never tests.
+  //
+  // First, well-formed XML: a stray angle bracket anywhere in the inlined
+  // stylesheet makes the file refuse to open at all, and nothing in the render
+  // pipeline would notice — the PNGs would keep coming out perfect.
+  //
+  // Second, an opaque ground of its own. `body { background-color }` is inlined
+  // along with everything else but matches nothing in a standalone SVG, so
+  // until the canvas rect existed every exported diagram was light-on-
+  // transparent: fine on our dark page, unreadable on any light background.
+  const { svg } = await renderDiagram({ source: MERMAID });
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-svg-test-')), 'export.svg');
+  fs.writeFileSync(file, svg);
+
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`file://${file}`);
+    const probe = await page.evaluate(() => {
+      const err = document.querySelector('parsererror');
+      if (err) return { parseError: err.textContent.replace(/\s+/g, ' ').slice(0, 300) };
+      const root = document.documentElement;
+      const ground = document.getElementById('canvas-rect');
+      const fill = ground && getComputedStyle(ground).fill;
+      const wrappers = [...document.querySelectorAll('foreignObject')]
+        .map(fo => fo.firstElementChild)
+        .filter(Boolean);
+      return {
+        parseError: null,
+        rootTag: root.tagName,
+        hasGround: !!ground,
+        groundFill: fill,
+        // A token that failed to resolve computes to the initial value, so
+        // this also proves the custom properties survived the export.
+        lineStroke: getComputedStyle(document.querySelector('.edge-line')).stroke,
+        wrapperCount: wrappers.length,
+        allWrappersXhtml: wrappers.every(w => w.namespaceURI === 'http://www.w3.org/1999/xhtml'),
+        allWrappersPainted: wrappers.every(w => w.getBoundingClientRect().width > 0),
+      };
+    });
+
+    assert.equal(probe.parseError, null, `exported SVG is not well-formed XML: ${probe.parseError}`);
+    assert.equal(probe.rootTag, 'svg');
+    assert.ok(probe.hasGround, 'exported SVG must carry its own background rect');
+    assert.match(probe.groundFill, /^rgb\(/, 'the ground must resolve to an opaque colour');
+    assert.notEqual(probe.groundFill, 'none');
+    assert.match(probe.lineStroke, /^rgb\(/, 'theme tokens must resolve in the exported document');
+
+    // Element text is HTML in a foreignObject. Without an explicit xmlns in the
+    // markup it re-parses into the SVG namespace and lays out at zero width, so
+    // every element in the export is an empty box — invisible to the render
+    // pipeline, which only ever measures the live page.
+    assert.ok(probe.wrapperCount > 0, 'expected element text wrappers in the export');
+    assert.ok(probe.allWrappersXhtml, 'foreignObject content must be in the XHTML namespace');
+    assert.ok(probe.allWrappersPainted, 'foreignObject content must lay out with non-zero width');
+  } finally {
+    await browser.close();
+    fs.rmSync(path.dirname(file), { recursive: true, force: true });
+  }
+});
+
+test('renderDiagram renders the requested theme', { timeout: 180000 }, async () => {
+  const dark = await renderDiagram({ source: MERMAID });
+  const light = await renderDiagram({ source: MERMAID, theme: 'light' });
+
+  assert.match(dark.svg, /<svg[^>]*data-theme="dark"/);
+  assert.match(light.svg, /<svg[^>]*data-theme="light"/);
+
+  // Themes are a stylesheet swap, not a different layout: the drawn geometry
+  // has to be identical or the two exports are different diagrams.
+  const geometry = (svg) => svg.replace(/<style>[\s\S]*?<\/style>/, '').replace(/ data-theme="\w+"/, '');
+  assert.equal(geometry(dark.svg), geometry(light.svg), 'themes must not change geometry');
+
+  assert.deepEqual(dark.report, light.report, 'themes must not change the defect vector');
+});
+
+test('renderDiagram rejects an unknown theme rather than silently picking one', { timeout: 180000 }, async () => {
+  await assert.rejects(() => renderDiagram({ source: MERMAID, theme: 'solarized' }), /unknown theme/);
+});
+
+test("theme: 'both' writes a suffixed second pair without moving the first", { timeout: 180000 }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-both-'));
+  try {
+    const result = await renderDiagram({ source: MERMAID, theme: 'both', outputDir: dir });
+
+    // The primary keeps the unsuffixed names, so adding --theme both to an
+    // existing command never moves the files that command already consumed.
+    for (const name of ['optimized.png', 'optimized.svg', 'optimized.light.png', 'optimized.light.svg']) {
+      assert.ok(fs.existsSync(path.join(dir, name)), `expected ${name}`);
+    }
+    assert.deepEqual(Object.keys(result.themes).sort(), ['dark', 'light']);
+    assert.equal(result.svg, result.themes.dark.svg, 'the primary theme is what `svg` returns');
+    assert.match(result.themes.light.svg, /data-theme="light"/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('renderDiagram writes nothing into the working directory by default', { timeout: 180000 }, async () => {

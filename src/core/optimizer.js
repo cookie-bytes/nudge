@@ -196,12 +196,93 @@ export function normalizeDiagramModel(diagramModel) {
   return diagramModel;
 }
 
-async function captureSvg(page, width, height) {
+/** The themes the renderer can draw. The first is the default. */
+export const THEMES = ['dark', 'light'];
+
+/** `theme` option -> the ordered list to render. The first is the primary. */
+export function resolveThemes(theme = 'dark') {
+  if (theme === 'both') return ['dark', 'light'];
+  if (THEMES.includes(theme)) return [theme];
+  throw new TypeError(
+    `optimizeDiagram: unknown theme ${JSON.stringify(theme)}. Expected one of ${[...THEMES, 'both'].join(', ')}.`
+  );
+}
+
+/**
+ * Select a palette on the live page.
+ *
+ * Dark is what the bare `:root` block declares, so `data-theme="dark"` matches
+ * no rule and is a deliberate no-op — set anyway so the attribute always states
+ * which theme a render is, in the page and in the export alike.
+ */
+async function applyTheme(page, theme) {
+  await page.evaluate((t) => document.documentElement.setAttribute('data-theme', t), theme);
+}
+
+async function captureSvg(page, width, height, theme = 'dark') {
   const [svgMarkup, styles] = await Promise.all([
     page.locator('#svg-root').innerHTML(),
     page.evaluate(() => document.querySelector('head style')?.textContent ?? ''),
   ]);
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}"><style>${styles}</style>${svgMarkup}</svg>`;
+  // The export is served and parsed as image/svg+xml, where a style element's
+  // content is XML text — so a literal angle bracket anywhere in it ends the
+  // document. CSS itself has no reason to contain one here, but prose comments
+  // do (the theme token block documents which elements `:root` matches), and a
+  // single stray bracket makes the whole file unopenable rather than merely
+  // mis-styled. Stripping comments removes the entire failure mode instead of
+  // relying on everyone who edits render.html remembering the rule; it also
+  // trims a few KB off every exported diagram.
+  const exportStyles = styles
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter(line => line.trim() !== '')
+    .map(line => line.trimEnd())
+    .join('\n');
+  // The HTML serialiser writes a non-breaking space as `&nbsp;`, which XML does
+  // not predefine — so one blank note line, or one U+00A0 anywhere in a label,
+  // makes the whole exported file refuse to open. `&#160;` is the same
+  // character and is valid in both grammars. Of the entities the serialiser can
+  // emit (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&nbsp;`) this is the only one XML
+  // does not already know, so handling it here covers every source.
+  const xmlSafeMarkup = svgMarkup.replace(/&nbsp;/g, '&#160;');
+  // Both palettes ride along in the inlined stylesheet, and `:root` resolves to
+  // this element in a standalone SVG — so the attribute below is what picks one.
+  return `<svg xmlns="http://www.w3.org/2000/svg" data-theme="${theme}" viewBox="0 0 ${width} ${height}"><style>${exportStyles}</style>${xmlSafeMarkup}</svg>`;
+}
+
+/**
+ * Write the final PNG and SVG for each requested theme.
+ *
+ * Themes differ only in the stylesheet and the root attribute — the geometry is
+ * identical — so every extra theme costs one screenshot and one serialisation,
+ * not another layout pass. The primary theme keeps the plain `optimized.*`
+ * names so existing callers are unaffected; extras are suffixed.
+ *
+ * The caller must leave the page showing the layout it wants captured.
+ */
+async function captureThemedOutputs({ page, width, height, outputDir, themes, onLog }) {
+  const [primary] = themes;
+  await page.setViewportSize({
+    width: Math.ceil(width) + 100,
+    height: Math.ceil(height) + 100,
+  });
+  const svgElement = await page.$('#svg-root');
+
+  const outputs = {};
+  for (const theme of themes) {
+    await applyTheme(page, theme);
+    const suffix = theme === primary ? '' : `.${theme}`;
+    const pngPath = path.join(outputDir, `optimized${suffix}.png`);
+    await svgElement.screenshot({ path: pngPath });
+    const svg = await captureSvg(page, width, height, theme);
+    const svgPath = path.join(outputDir, `optimized${suffix}.svg`);
+    fs.writeFileSync(svgPath, svg);
+    outputs[theme] = { svg, svgPath, pngPath };
+    onLog(`[Snapshot] Saved ${theme} theme to: ${pngPath}`);
+  }
+
+  if (themes.length > 1) await applyTheme(page, primary);
+  return outputs;
 }
 
 /**
@@ -223,7 +304,11 @@ export async function optimizeDiagram({
   checkpointTimeout = 30000,
   optimizationTimeout = 120000,
   enhance = false,
+  theme = 'dark',
 }) {
+  const themes = resolveThemes(theme);
+  const primaryTheme = themes[0];
+
   fs.mkdirSync(outputDir, { recursive: true });
 
   normalizeDiagramModel(diagramModel);
@@ -263,6 +348,10 @@ export async function optimizeDiagram({
 
     const templateUrl = new URL('../render.html', import.meta.url).href;
     await page.goto(templateUrl);
+    // Before any render: the intermediate step PNGs should be in the same
+    // theme as the final output, not the default one.
+    await applyTheme(page, primaryTheme);
+    if (themes.length > 1) onLog(`[Optimizer] Rendering themes: ${themes.join(', ')}.`);
 
     if (signal?.aborted) {
       onLog('[Optimizer] Optimization cancelled prior to start.');
@@ -437,10 +526,27 @@ export async function optimizeDiagram({
       onLog(`[Critique] Aspect Ratio: ${report.aspectRatio}`);
       onLog(`[Critique] Collisions: ${report.collisions.length} (${report.overlapCount} overlaps, ${report.intersectionCount} edge crossings)`);
 
-      const svg = await captureSvg(page, finalStep.result.width, finalStep.result.height);
-      fs.writeFileSync(path.join(outputDir, 'optimized.svg'), svg);
-      const finalPngPath = path.join(outputDir, 'optimized.png');
-      fs.copyFileSync(finalStep.screenshotPath, finalPngPath);
+      // Re-render the accepted overrides before capturing.
+      //
+      // The note-placement search above restores `overrides` and `acceptedStep`
+      // when no side clears a note, but it never re-renders — so the DOM can
+      // still hold the last *rejected* candidate. The PNG was copied from the
+      // accepted step's file and was therefore right, while the SVG is read
+      // live and would show the rejected layout: two outputs of one run
+      // disagreeing. Re-rendering makes them agree by construction, and gives
+      // the theme capture below a page that is definitely the final layout.
+      await page.evaluate(async (data) => window.renderDiagram(data), diagramModel);
+
+      const themeOutputs = await captureThemedOutputs({
+        page,
+        width: finalStep.result.width,
+        height: finalStep.result.height,
+        outputDir,
+        themes,
+        onLog,
+      });
+      const svg = themeOutputs[primaryTheme].svg;
+      const finalPngPath = themeOutputs[primaryTheme].pngPath;
 
       const history = [{
         iteration: 1,
@@ -463,13 +569,14 @@ export async function optimizeDiagram({
         onLog(`[Critique] ${labelElementCrossings} Connection-Label Element Crossing(s) — labels buried in elements.`);
       }
       const success = isClean(report);
-      return { success, history, svgContent: svg, pngPath: finalPngPath, notes, warnings };
+      return { success, history, svgContent: svg, pngPath: finalPngPath, themes: themeOutputs, notes, warnings };
     }
 
     let currentOptions = { ...diagramModel.layoutOptions };
     const history = [];
     let svgContent = null;
     let pngPath = null;
+    let themeOutputs = null;
     let success = false;
     let lastRenderResult = null;
 
@@ -541,21 +648,21 @@ export async function optimizeDiagram({
         addWarnings(bestRenderResult.warnings);
         diagramModel.layoutOptions = { ...bestOptions };
 
-        await page.setViewportSize({
-          width: Math.ceil(bestRenderResult.width) + 100,
-          height: Math.ceil(bestRenderResult.height) + 100,
+        // The search left the *last* config in the DOM, which is not
+        // necessarily the best-scoring one; re-render the winner before capture.
+        await page.evaluate(async (data) => window.renderDiagram(data), diagramModel);
+
+        themeOutputs = await captureThemedOutputs({
+          page,
+          width: bestRenderResult.width,
+          height: bestRenderResult.height,
+          outputDir,
+          themes,
+          onLog,
         });
-
-        const screenshotPath = path.join(outputDir, `optimized.png`);
-        const svgElement = await page.$('#svg-root');
-        await svgElement.screenshot({ path: screenshotPath });
-        onLog(`[Snapshot] Saved visual state to: ${screenshotPath}`);
-
-        svgContent = await captureSvg(page, bestRenderResult.width, bestRenderResult.height);
-        const svgFilePath = path.join(outputDir, 'optimized.svg');
-        fs.writeFileSync(svgFilePath, svgContent);
-
-        pngPath = screenshotPath;
+        svgContent = themeOutputs[primaryTheme].svg;
+        pngPath = themeOutputs[primaryTheme].pngPath;
+        const screenshotPath = pngPath;
 
         history.push({
           iteration: 1,
@@ -623,12 +730,17 @@ export async function optimizeDiagram({
 
         if (!success && hardCollisions.length === 0) {
           onLog('[Critique] No node overlaps or edge crossings detected. Layout is visually clean.');
-          svgContent = await captureSvg(page, result.width, result.height);
-          const svgFilePath = path.join(outputDir, 'optimized.svg');
-          fs.writeFileSync(svgFilePath, svgContent);
-
-          pngPath = path.join(outputDir, 'optimized.png');
-          fs.copyFileSync(screenshotPath, pngPath);
+          // The page still shows this iteration, so it needs no re-render.
+          themeOutputs = await captureThemedOutputs({
+            page,
+            width: result.width,
+            height: result.height,
+            outputDir,
+            themes,
+            onLog,
+          });
+          svgContent = themeOutputs[primaryTheme].svg;
+          pngPath = themeOutputs[primaryTheme].pngPath;
           success = true;
         }
 
@@ -667,20 +779,25 @@ export async function optimizeDiagram({
         }
       }
 
+      // Best-effort export when no iteration came out clean: the page still
+      // holds the last one rendered, which is what `lastRenderResult` describes.
       if (!success && lastRenderResult) {
-        svgContent = await captureSvg(page, lastRenderResult.width, lastRenderResult.height);
-        fs.writeFileSync(path.join(outputDir, 'optimized.svg'), svgContent);
-      }
-
-      if (history.length > 0) {
-        pngPath = path.join(outputDir, 'optimized.png');
-        fs.copyFileSync(history.at(-1).screenshot, pngPath);
+        themeOutputs = await captureThemedOutputs({
+          page,
+          width: lastRenderResult.width,
+          height: lastRenderResult.height,
+          outputDir,
+          themes,
+          onLog,
+        });
+        svgContent = themeOutputs[primaryTheme].svg;
+        pngPath = themeOutputs[primaryTheme].pngPath;
       }
     }
 
     for (const w of warnings) onLog(`[Notes] ${w}`);
 
-    return { success, history, svgContent, pngPath, notes, warnings };
+    return { success, history, svgContent, pngPath, themes: themeOutputs, notes, warnings };
   } finally {
     await browser.close();
   }

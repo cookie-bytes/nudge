@@ -58,8 +58,11 @@ test('CLI colours a C4Context in three system tiers (focal / supporting / extern
     assert.ok(svg.includes('node node-supporting'), 'expected a supporting node-supporting');
     assert.ok(svg.includes('node node-external'), 'expected an external node-external');
     // captureSvg embeds <head><style> inline, so the supporting fill must live
-    // in the exported SVG for it to be self-contained.
-    assert.match(svg, /\.node-supporting\s*\{[^}]*fill:\s*#2a3c66/);
+    // in the exported SVG for it to be self-contained. Since tokenisation that
+    // takes two hops — the rule names the token, the token block defines it —
+    // and self-containment means both have to survive the export.
+    assert.match(svg, /\.node-supporting\s*\{[^}]*fill:\s*var\(--supporting-fill\)/);
+    assert.match(svg, /--supporting-fill:\s*#2a3c66/);
     done();
   });
 });

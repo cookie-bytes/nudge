@@ -84,6 +84,7 @@ export async function renderDiagram({
   outputDir,
   signal,
   onLog = () => {},
+  theme = 'dark',
 } = {}) {
   const model = parseDiagram(source, { format });
 
@@ -92,18 +93,25 @@ export async function renderDiagram({
   const dir = outputDir || fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-'));
   fs.mkdirSync(dir, { recursive: true });
 
-  const { success, history, svgContent, pngPath, notes = [], warnings = [] } = await optimizeDiagram({
+  const {
+    success, history, svgContent, pngPath, themes = null, notes = [], warnings = [],
+  } = await optimizeDiagram({
     diagramModel: model,
     outputDir: dir,
     onLog,
     signal,
     enhance,
+    theme,
   });
 
   const final = history.at(-1) || {};
   return {
     svg: svgContent ?? null,
     png: pngPath ?? null,
+    // Per-theme outputs, keyed by theme name. With the default single theme
+    // this holds one entry matching `svg`/`png`; with theme: 'both' it holds
+    // the light pair alongside.
+    themes: themes ?? null,
     success,
     title: model.title ?? null,
     report: {

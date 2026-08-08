@@ -27,6 +27,25 @@ any release.
 ## [Unreleased]
 
 ### Added
+- **Light theme, and a `--theme` flag to pick one.** `--theme dark|light|both` on
+  the CLI, `theme` on `renderDiagram` and on the MCP tool (`dark`/`light` there —
+  it returns one inline SVG). Dark remains the default and is byte-for-byte
+  unchanged. Themes are a stylesheet swap over identical geometry, so a second
+  theme costs one screenshot, not another layout pass. `--theme both` writes the
+  primary pair under the usual `optimized.*` names plus a suffixed
+  `optimized.light.*`, so adding the flag never moves files an existing command
+  already consumed. `renderDiagram` gains a `themes` field keyed by theme name.
+- **Every colour is a semantic token.** `src/render.html` declares ~27 custom
+  properties (`--focal-fill`, `--line`, `--note-ink`, …) that both palettes fill
+  in, replacing colour literals scattered through the stylesheet. This is the
+  groundwork for user-supplied themes: a theme is a map over this key set.
+- **Contrast floors are tested** (`test/unit/theme_contrast.test.js`). Every
+  text/background and meaningful-graphics pairing the renderer produces is held
+  to WCAG AA, and the three element tiers are held perceptually distinct. The
+  geometric critic cannot see colour, so an unreadable palette scored a perfect
+  defect vector until now. Two dark-theme pairings — dimmed element text on the
+  Sky 600 person fill — do not meet the floor and are recorded as held-flat
+  exemptions rather than gated, on the same ratchet principle as layout defects.
 - **Public API** (`src/index.js`) — `renderDiagram({ source, format }) → { svg, report }`,
   plus `parseDiagram` and `detectFormat`. Nudge can now be used as a library
   instead of only by shelling out to the CLI.
@@ -102,6 +121,27 @@ any release.
   parity rig.
 - `package.json` has a `files` allowlist. `npm publish` shipped 190 files
   including private tooling and the whole test corpus; it now ships 47.
+
+### Fixed
+- **Exported SVGs were transparent.** `body { background-color }` was inlined
+  into the export along with the rest of the stylesheet, but `body` matches
+  nothing in a standalone SVG, so every exported diagram was light-on-nothing:
+  fine on a dark page, unreadable anywhere else. The diagram now paints its own
+  ground as a real rect.
+- **Exported SVGs showed every element as an empty box.** Element and note text
+  is HTML inside `foreignObject`, and the HTML serialiser writes no `xmlns` for
+  foreign content — so re-parsed as `image/svg+xml` the text landed in the SVG
+  namespace and laid out at zero width. Titles, types, tech and descriptions
+  were all invisible in the `.svg` deliverable. PNGs were never affected, which
+  is why it went unnoticed.
+- **One blank line in one note made the whole exported SVG unopenable.** Blank
+  note lines are drawn as a non-breaking space, which serialises to `&nbsp;` —
+  an entity XML does not predefine. The export now emits `&#160;`.
+- **The exported SVG could disagree with the PNG of the same run.** The
+  note-placement search restores the accepted layout without re-rendering, and
+  the canned-config search screenshots after the loop rather than after the
+  winner — so the live DOM could hold a rejected candidate while the reported
+  metrics described the accepted one. Both paths now re-render before capture.
 
 ### Quality delta
 

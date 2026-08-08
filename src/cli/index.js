@@ -5,7 +5,7 @@ import path from 'path';
 import yaml from 'js-yaml';
 import { parseMermaidC4 } from '../mermaid_parser.js';
 import { parsePlantUMLC4 } from '../plantuml_parser.js';
-import { optimizeDiagram } from '../core/optimizer.js';
+import { optimizeDiagram, THEMES } from '../core/optimizer.js';
 
 const args = process.argv.slice(2);
 const enhanceIndex = args.indexOf('--enhance');
@@ -33,6 +33,26 @@ if (outIndex !== -1) {
   }
 }
 
+// --theme dark|light|both. `both` writes the primary (dark) outputs under the
+// usual optimized.* names plus a suffixed optimized.light.* pair, so adding it
+// to an existing command never moves the files that command already consumed.
+let themeArg = 'dark';
+const themeIndex = args.findIndex(a => a === '--theme' || a.startsWith('--theme='));
+if (themeIndex !== -1) {
+  const token = args[themeIndex];
+  if (token.startsWith('--theme=')) {
+    themeArg = token.slice('--theme='.length);
+    args.splice(themeIndex, 1);
+  } else {
+    themeArg = args[themeIndex + 1];
+    args.splice(themeIndex, 2);
+  }
+  if (!THEMES.includes(themeArg) && themeArg !== 'both') {
+    console.error(`--theme must be one of: ${[...THEMES, 'both'].join(', ')}.`);
+    process.exit(1);
+  }
+}
+
 const inputArg = args[0];
 const INPUT_PATH = inputArg ? path.resolve(inputArg) : path.resolve('examples/system_context.yaml');
 const OUTPUT_DIR = path.resolve(outArg || process.env.NUDGE_OUTPUT_DIR || '.nudge');
@@ -43,6 +63,7 @@ console.log('=== Nudge: Deterministic C4 Layout Engine ===');
 console.log(`Input: ${INPUT_PATH}`);
 console.log(`Output: ${OUTPUT_DIR}`);
 console.log(`LLM Enhancement: ${enhance ? 'Enabled' : 'Disabled (deterministic-only mode)'}`);
+console.log(`Theme: ${themeArg}`);
 
 let diagramModel;
 try {
@@ -87,6 +108,7 @@ try {
     onLog: (msg) => console.log(msg),
     checkpointTimeout: Number(process.env.NUDGE_CHECKPOINT_TIMEOUT || 90000),
     enhance,
+    theme: themeArg,
   });
 } catch (err) {
   // An unsupported diagram is a contract refusal, not a crash. Print the
@@ -97,7 +119,7 @@ try {
   }
   throw err;
 }
-const { success, history, svgContent, pngPath } = result;
+const { success, history, svgContent, pngPath, themes: themeOutputs } = result;
 
 console.log('\n=================================');
 console.log('       OPTIMIZATION SUMMARY       ');
@@ -122,8 +144,11 @@ console.table(history.map(h => ({
 
 if (success) {
   console.log('\n🎉 Success! Optimized assets exported:');
-  console.log(`   SVG: ${path.join(OUTPUT_DIR, 'optimized.svg')}`);
-  console.log(`   PNG: ${pngPath}`);
+  for (const [name, out] of Object.entries(themeOutputs || {})) {
+    const label = Object.keys(themeOutputs).length > 1 ? ` (${name})` : '';
+    console.log(`   SVG${label}: ${out.svgPath}`);
+    console.log(`   PNG${label}: ${out.pngPath}`);
+  }
 } else {
   console.log('\n⚠️  Finished with remaining layout issues. Best-effort PNG saved.');
   console.log(`   PNG: ${pngPath}`);

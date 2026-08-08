@@ -167,6 +167,23 @@ To enable optional AI polish / LLM layout enhancement, start your local LLM serv
 node src/cli/index.js path/to/diagram.mermaid --enhance
 ```
 
+#### Themes
+
+Diagrams render in a dark palette by default. Pass `--theme` for a light one, or
+`both` to get a matching pair from a single run:
+
+```bash
+node src/cli/index.js path/to/diagram.mermaid --theme light
+```
+
+A theme changes only colour — the layout is identical — so `--theme both` costs
+one extra screenshot rather than a second layout pass. With `both`, the dark
+outputs keep the usual `optimized.png` / `optimized.svg` names and the light pair
+is written alongside as `optimized.light.png` / `optimized.light.svg`.
+
+Every colour is a named token in `src/render.html`, and both palettes are checked
+against WCAG AA contrast floors by `test/unit/theme_contrast.test.js`.
+
 #### Configuration & Environment Variables
 
 You can customize Nudge's layout tuning behavior and LLM connections using environment variables:
@@ -288,6 +305,7 @@ Working fixtures: [`examples/system_context_with_notes.mermaid`](examples/system
 - `step_0_initial.png`, `step_1_label_hints.png` — staged container visual-hint snapshots; in deterministic mode these are inspection snapshots without LLM calls
 - `optimized.png` — final layout as PNG
 - `optimized.svg` — final layout as a self-contained SVG with embedded styles
+- `optimized.light.png` / `optimized.light.svg` — the second palette, when `--theme both` is passed
 - `layout.cache.json` — final ELKjs parameter patch (flat diagrams)
 - `visual_hints.json` — raw accepted/reviewed visual-hint payloads for context/container diagrams when LLM calls run
 

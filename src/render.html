@@ -11,10 +11,127 @@
        which measures against them instead of a canvas (INC-9). -->
   <script src="vendor/outfit_metrics.js"></script>
   <style>
+    /* Theme tokens.
+     *
+     * Every colour in the diagram resolves through one of these. They are
+     * *semantic* ("the focal element's fill"), not literal ("blue 900"), so a
+     * second palette is a second block of the same names rather than a fork of
+     * the stylesheet — and so a user-supplied theme can eventually be a map
+     * over this exact key set.
+     *
+     * `:root` matches the html element when render.html is loaded in the page,
+     * and the svg element itself in an exported standalone SVG (where it is the
+     * document element). Both inherit the properties down to every shape.
+     *
+     * captureSvg() strips CSS comments when it inlines this stylesheet into an
+     * exported SVG, so design rationale can live here freely without risking
+     * the export's XML well-formedness.
+     *
+     * Values below are the dark palette, unchanged from before tokenisation.
+     */
+    :root {
+      --canvas: #0f172a;              /* Slate 900 — the diagram's ground */
+      --boundary-stroke: #cbd5e1;     /* Slate 300 */
+      --boundary-label: #94a3b8;      /* Slate 400 */
+
+      --person-fill: #0284c7;         /* Sky 600 */
+      --person-accent: #0ea5e9;       /* Sky 500 — head, lighter than body */
+
+      /* The three-tier element hierarchy: focal (the system in scope),
+         supporting (internal but secondary), external (out of scope). On a
+         dark ground these separate by brightness. */
+      --focal-fill: #1e3a8a;          /* Blue 900 */
+      --focal-stroke: #3b82f6;        /* Blue 500 */
+      --supporting-fill: #2a3c66;     /* Muted internal blue — a dimmer, desaturated relative of the focal fill. Reads as internal (blue family) but secondary, and stays distinct from the grey external. */
+      --supporting-stroke: #4763a5;   /* Mid blue — dimmer than the focal's bright stroke */
+      --external-fill: #334155;       /* Slate 700 */
+      --external-stroke: #64748b;     /* Slate 500 */
+
+      --datastore-accent: #3b82f6;    /* Cylinder lid / bus cap — lighter than the body so it reads as solid */
+      --datastore-rim: #dbeafe;       /* Blue 100 — bright rim highlight */
+
+      --line: #cbd5e1;                /* Connection lines and arrowheads — distinct from the boundary stroke's opacity-reduced grey */
+      --label-text: #cbd5e1;
+      --title-text: #f8fafc;
+      --on-element: #f8fafc;          /* Text drawn on top of an element fill */
+
+      --panel-fill: #111c34;          /* Legend — slightly lifted from the canvas */
+      --panel-stroke: #334155;
+      --panel-label: #e2e8f0;         /* Slate 200 */
+
+      --note-fill: #fef9c3;           /* Amber 100 — pale sticky-note */
+      --note-fold: #fde68a;           /* Amber 200 — slightly darker fold */
+      --note-stroke: #ca8a04;         /* Amber 600 */
+      --note-ink: #422006;            /* Amber 950 — dark ink on a pale note */
+
+      --boundary-stroke-opacity: 0.5;
+
+      --shadow: rgba(0, 0, 0, 0.3);
+      --shadow-subtle: rgba(0, 0, 0, 0.35);
+    }
+    /* Light theme.
+     *
+     * Not an inversion of the dark palette. The element fills are already dark
+     * saturated colours carrying white text, and that is exactly how C4 reads on
+     * a white page — so the tiers stay recognisably themselves and what changes
+     * is the ground and everything drawn directly on it: lines, labels, title,
+     * boundary, legend, shadows.
+     *
+     * Two things do not survive the flip and are re-derived here:
+     *
+     * - Person was Sky 600, light enough on a dark ground but the one fill where
+     *   dimmed white text falls under the readability floor. Light theme takes
+     *   the deeper Sky the same text can sit on. (Dark keeps the old value and
+     *   its recorded exemption in test/theme_contrast.js.)
+     * - The boundary border relied on a light grey at half opacity, which cannot
+     *   reach the graphics floor against any near-white ground no matter which
+     *   grey it is. Light theme trades opacity for a darker stroke instead.
+     *
+     * Shadows go from black at 0.3 — plausible only against near-black — to a
+     * tenth-opacity slate, and the note amber darkens just enough to hold an
+     * edge against a pale canvas. Every value here is checked by
+     * test/unit/theme_contrast.test.js.
+     */
+    :root[data-theme="light"] {
+      --canvas: #f8fafc;
+      --boundary-stroke: #334155;
+      --boundary-stroke-opacity: 0.7;
+      --boundary-label: #475569;
+
+      --person-fill: #0c4a6e;
+      --person-accent: #0369a1;
+
+      --focal-fill: #1e40af;
+      --focal-stroke: #1e3a8a;
+      --supporting-fill: #33518c;
+      --supporting-stroke: #24406f;
+      --external-fill: #475569;
+      --external-stroke: #334155;
+
+      --datastore-accent: #2563eb;
+      --datastore-rim: #dbeafe;
+
+      --line: #64748b;
+      --label-text: #334155;
+      --title-text: #0f172a;
+      --on-element: #f8fafc;
+
+      --panel-fill: #ffffff;
+      --panel-stroke: #cbd5e1;
+      --panel-label: #334155;
+
+      --note-fill: #fef9c3;
+      --note-fold: #fde68a;
+      --note-stroke: #a16207;
+      --note-ink: #422006;
+
+      --shadow: rgba(15, 23, 42, 0.12);
+      --shadow-subtle: rgba(15, 23, 42, 0.1);
+    }
     body {
       margin: 0;
       padding: 0;
-      background-color: #0f172a; /* Slate 900 */
+      background-color: var(--canvas);
       font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       overflow: hidden;
     }
@@ -31,111 +148,121 @@
       user-select: none;
     }
     /* SVG Styling */
+    /* The canvas ground, drawn as a real rect rather than left to the page
+       background. An exported SVG is a standalone document where `body` never
+       matches, so without this the export is transparent and unreadable on any
+       light background. */
+    .canvas {
+      fill: var(--canvas);
+    }
     .boundary {
       fill: transparent;
-      stroke: #cbd5e1; /* Light grey (Slate 300) */
-      stroke-opacity: 0.5;
+      stroke: var(--boundary-stroke);
+      stroke-opacity: var(--boundary-stroke-opacity);
       stroke-width: 3px;
       stroke-dasharray: 8, 8; /* Dashed */
       rx: 8;
     }
     .boundary-label {
-      fill: #94a3b8;
+      fill: var(--boundary-label);
       font-size: 14px;
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.05em;
     }
     .node {
-      filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.3));
+      filter: drop-shadow(0 4px 6px var(--shadow));
       stroke-width: 2px;
       rx: 6;
     }
     .node-person {
-      fill: #0284c7; /* Sky 600 */
-      stroke: #0ea5e9;
+      fill: var(--person-fill);
+      stroke: var(--person-accent);
     }
     .person-head {
-      fill: #0ea5e9; /* Sky 500 — lighter than body */
+      fill: var(--person-accent);
       stroke: none;
     }
     .node-container {
-      fill: #1e3a8a; /* Blue 900 — system in scope (focal) */
-      stroke: #3b82f6;
+      fill: var(--focal-fill); /* System in scope */
+      stroke: var(--focal-stroke);
     }
     .node-supporting {
-      fill: #2a3c66; /* Muted internal blue — a dimmer, desaturated relative of the focal Blue 900. Reads as internal (blue family) but secondary, and stays distinct from the grey external Slate 700. */
-      stroke: #4763a5; /* Mid blue — dimmer than the focal's bright Blue 500 stroke */
+      fill: var(--supporting-fill);
+      stroke: var(--supporting-stroke);
     }
     .node-external {
-      fill: #334155; /* Slate 700 */
-      stroke: #64748b;
+      fill: var(--external-fill);
+      stroke: var(--external-stroke);
     }
     .node-database {
-      fill: #1e3a8a; /* Blue 900 body */
-      stroke: #3b82f6; /* Blue 500 */
+      fill: var(--focal-fill);
+      stroke: var(--focal-stroke);
     }
     .db-cap {
-      fill: #3b82f6; /* Blue 500 — clearly lighter than body so lid reads as solid */
+      fill: var(--datastore-accent);
       stroke: none;
     }
     .db-rim {
       fill: none;
-      stroke: #dbeafe; /* Blue 100 — bright */
+      stroke: var(--datastore-rim);
       stroke-width: 2.5px;
       stroke-linecap: round;
     }
     .node-message-bus {
-      fill: #1e3a8a; /* Blue 900 body */
-      stroke: #3b82f6; /* Blue 500 */
+      fill: var(--focal-fill);
+      stroke: var(--focal-stroke);
     }
     .message-bus-cap {
-      fill: #3b82f6; /* Blue 500 — lighter than body */
-      stroke: #1e3a8a; /* Blue 900 cap border */
+      fill: var(--datastore-accent);
+      stroke: var(--focal-fill);
       stroke-width: 2px;
     }
     /* Edge and Connector lines */
     .edge-line {
       fill: none;
-      stroke: #cbd5e1; /* Slate 300 — distinct from Slate 400 boundary stroke */
+      stroke: var(--line);
       stroke-width: 1.8px;
       stroke-linecap: round;
       stroke-linejoin: round;
       stroke-dasharray: 6, 6;
       transition: stroke 0.2s;
     }
+    .arrow-head {
+      fill: var(--line);
+    }
     .edge-label-bg {
-      fill: #0f172a; /* Same as background to mask line */
+      fill: var(--canvas); /* Same as the ground, to mask the line beneath */
       rx: 4;
     }
     .edge-label-text {
-      fill: #cbd5e1;
+      fill: var(--label-text);
       font-size: 11px;
       font-weight: 500;
       text-anchor: middle;
     }
     .diagram-title-text {
-      fill: #f8fafc;
+      fill: var(--title-text);
       font-size: 16px;
       font-weight: 700;
       letter-spacing: 0.025em;
     }
     /* Legend — horizontal key of element kinds present in the diagram */
     .legend-panel {
-      fill: #111c34; /* Slightly lifted from the Slate 900 background */
-      stroke: #334155; /* Slate 700 */
+      fill: var(--panel-fill);
+      stroke: var(--panel-stroke);
       stroke-width: 1px;
       rx: 8;
     }
     .legend-label {
-      fill: #e2e8f0; /* Slate 200 */
+      fill: var(--panel-label);
       font-size: 13px;
       font-weight: 500;
     }
     /* Icons are miniatures of the real shapes: lighten the stroke and shadow
        that are tuned for full-size nodes so they don't read as heavy. */
     .legend-icon .node {
-      filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
+      filter: drop-shadow(0 1px 1px var(--shadow-subtle));
       stroke-width: 1.25px;
     }
     .legend-icon .message-bus-cap {
@@ -143,15 +270,15 @@
     }
     /* Annotation notes — folded-corner (dog-ear) boxes */
     .note {
-      fill: #fef9c3; /* Amber 100 — pale yellow sticky-note */
-      stroke: #ca8a04; /* Amber 600 */
+      fill: var(--note-fill);
+      stroke: var(--note-stroke);
       stroke-width: 1.5px;
       stroke-linejoin: round;
-      filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.3));
+      filter: drop-shadow(0 2px 3px var(--shadow));
     }
     .note-fold {
-      fill: #fde68a; /* Amber 200 — slightly darker fold */
-      stroke: #ca8a04;
+      fill: var(--note-fold);
+      stroke: var(--note-stroke);
       stroke-width: 1.5px;
       stroke-linejoin: round;
     }
@@ -162,7 +289,7 @@
       flex-direction: column;
       justify-content: center;
       box-sizing: border-box;
-      color: #422006; /* Amber 950 — dark ink on pale note */
+      color: var(--note-ink);
       font-size: 12px;
       line-height: 1.25;
       text-align: left;
@@ -178,7 +305,7 @@
       align-items: center;
       padding: 4px 8px;
       box-sizing: border-box;
-      color: #f8fafc;
+      color: var(--on-element);
       text-align: center;
     }
     .node-title {
@@ -220,9 +347,14 @@
       <defs>
         <!-- Arrowhead markers -->
         <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="10" markerHeight="10" orient="auto-start-reverse">
-          <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="#cbd5e1" />
+          <path d="M 0 1.5 L 9 5 L 0 8.5 z" class="arrow-head" />
         </marker>
       </defs>
+      <!-- The ground. Sized in percentages so it tracks the viewBox that
+           configureViewport sets, and so it stays correct in the exported
+           standalone SVG without any second sizing path. It sits outside the
+           layer groups because clearLayers() empties those on every render. -->
+      <rect id="canvas-rect" class="canvas" x="0" y="0" width="100%" height="100%" />
       <g id="title-layer"></g>
       <g id="boundaries-layer"></g>
       <g id="edges-layer"></g>
