@@ -54,7 +54,7 @@ graph TD
 2. **Deterministic rendering**: Produces a complete baseline layout without needing cloud services. Context and container diagrams use Nudge's custom deterministic rules; flat diagrams without person/external elements use ELKjs.
 3. **Geometric critique**: Measures DOM bounding boxes to detect Element Overlaps, Connection-Line Element Crossings, Connection-Label Element Crossings, poor aspect ratio, and tight spacing. Container routing uses A* pathfinding over a sparse orthogonal visibility graph, hardest-first routing, and rip-up-and-reroute to optimize line paths and avoid corridors.
 4. **Optional enhancement**: When LLM calls are enabled, Nudge asks a local OpenAI-compatible model for small layout improvements. Container and context diagram hints are accepted only when the candidate score is no worse than the current accepted state. Flat diagram patches are applied through the existing critic loop.
-5. **Export**: Writes a best-effort SVG and PNG even if geometric issues remain.
+5. **Export**: Writes a best-effort SVG and PNG even if geometric issues remain. The SVG carries both light and dark palettes and follows the reader's `prefers-color-scheme`; PNGs render dark by default, and `--theme both` emits a matching light/dark pair. See [Themes](#themes).
 
 ---
 
@@ -111,6 +111,7 @@ Each candidate is scored against Element Overlaps, Connection-Line Element Cross
 ## Features
 
 - 🎯 **Deterministic C4 Layout Engine**: Produces a complete layout from structured rules before any LLM enhancement is considered.
+- 🌓 **Light & Dark Theming**: Exported SVGs carry both palettes and follow the reader's `prefers-color-scheme`, so one file is readable on a light page and a dark one. Pin a palette with `--theme light`/`dark`, or emit a matching pair with `--theme both`. Every colour is a named token in `src/render.html` and both palettes are checked against WCAG AA contrast floors. See [Themes](#themes).
 - 📐 **Opinionated, Consistent C4 Geometry**: Standardized sizing, dedicated Utility Rows, External Zone sorting, and repeatable route scoring make diagrams feel consistent from run to run.
 - 🔍 **Automatic Defect Detection**: Finds Element Overlaps, Connection-Line Element Crossings, Connection-Label Element Crossings, and poor aspect ratios.
 - ✨ **Optional AI Polish**: Local LLM reviewers can suggest connection label placements (source/target/middle) for context and container diagrams, or ELKjs patches for flat diagrams. Suggestions are accepted only through score-gated checks.
@@ -403,6 +404,7 @@ Call the nudge optimize_diagram tool with this diagram and return the SVG:
 │   ├── core/
 │   │   ├── optimizer.js    # Shared optimization loop — called by both CLI and MCP
 │   │   ├── geometry.js     # Pure geometric algorithms: overlap, intersection, label placement
+│   │   ├── validation.js   # Diagram-model validation — enforces one boundary per diagram
 │   │   └── llm_client.js   # Stateless LLM API client — visual hints and optimization calls
 │   ├── cli/
 │   │   └── index.js        # CLI entry point — argument parsing, file I/O, console output
