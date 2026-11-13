@@ -2,6 +2,11 @@
 node_modules/
 jspm_packages/
 
+# Environment / secrets — never commit a real .env (the template is tracked).
+.env
+.env.*
+!.env.example
+
 # Vendored runtime assets (populated by postinstall).
 # `src/vendor/*` and not `src/vendor/`: git does not descend into an ignored
 # *directory*, so a negation for a file inside one never takes effect.
