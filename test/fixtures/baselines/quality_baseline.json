@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-07-26T13:29:11.964Z",
+  "generatedAt": "2026-11-13T10:50:01.624Z",
   "git": {
-    "commit": "3732b61baf22563c56754ffee3f397e161ca423a",
+    "commit": "c9508cc3b2a8b090ef4e1d1555db034eb21eb9cd",
     "dirty": true
   },
   "router": "grid",
@@ -719,6 +719,42 @@
       "aspectRatio": "0.52",
       "width": 777,
       "height": 1504
+    },
+    "refactor/narrow_channel_wide_label.mermaid": {
+      "elementOverlaps": 0,
+      "connectionLineElementCrossings": 0,
+      "connectionLabelElementCrossings": 0,
+      "labelOffCanvas": 0,
+      "connectionLineOverlaps": 0,
+      "connectionLineCrossings": 0,
+      "labelLineIntersections": 0,
+      "labelLabelOverlaps": 0,
+      "boundaryViolations": 0,
+      "orthogonalViolations": 0,
+      "connectionLineOverlapPx": 0,
+      "totalBends": 3,
+      "totalRouteLength": 2049,
+      "aspectRatio": "1.21",
+      "width": 1540,
+      "height": 1274
+    },
+    "refactor/narrow_channel_wide_label.puml": {
+      "elementOverlaps": 0,
+      "connectionLineElementCrossings": 0,
+      "connectionLabelElementCrossings": 0,
+      "labelOffCanvas": 0,
+      "connectionLineOverlaps": 0,
+      "connectionLineCrossings": 0,
+      "labelLineIntersections": 0,
+      "labelLabelOverlaps": 0,
+      "boundaryViolations": 0,
+      "orthogonalViolations": 0,
+      "connectionLineOverlapPx": 0,
+      "totalBends": 3,
+      "totalRouteLength": 2049,
+      "aspectRatio": "1.21",
+      "width": 1540,
+      "height": 1274
     }
   }
 }

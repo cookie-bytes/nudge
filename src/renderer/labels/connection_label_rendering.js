@@ -15,6 +15,7 @@ window.NudgeRenderer.connectionLabelRendering = {
     placedLabels,
     allComponents,
     boundaryBorderObstacles,
+    boundaryExtents = [],
     pointToBoxDist,
     wrapText,
     MAX_LABEL_WIDTH,
@@ -72,7 +73,12 @@ window.NudgeRenderer.connectionLabelRendering = {
     const P = window.NudgeRenderer.connectionLabelPlacement;
     const obstacleNodes = P.createElementObstacles(allComponents, boundaryBorderObstacles);
     const obstacles = P.createLabelObstacles(allComponents, boundaryBorderObstacles, placedLabels);
-    const bounds = P.contentBounds(obstacleNodes);
+    // Extent, not obstacles. A synthetic boundary contributes to how far the
+    // canvas reaches but must not block placement, so the two sets diverge —
+    // see buildBoundaryExtents in src/renderer/svg/svg_renderer.js. The extents
+    // subsume the border strips (four strips union to the inflated rect), so
+    // the strips are not repeated here.
+    const bounds = P.contentBounds([...allComponents, ...boundaryExtents]);
 
     // Placement as a constrained search over label *geometry*, not just
     // position (INC-16). A corridor too narrow for a 120px-wide box may have
@@ -159,7 +165,8 @@ window.NudgeRenderer.connectionLabelRendering = {
         labelBoxAt,
         targetNode,
         targetId,
-        labelEdgeHitCount
+        labelEdgeHitCount,
+        bounds
       }));
 
       const failure = P.placementFailure({
@@ -300,7 +307,12 @@ window.NudgeRenderer.connectionLabelRendering = {
       const mainText = match[1].trim();
       const techText = `[${match[2].trim()}]`;
       const mainLines = wrapText(mainText, MAX_LABEL_WIDTH, 11);
-      const blockHeight = (mainLines.length + 1) * LINE_HEIGHT;
+      // The technology string wraps too, and must wrap at the *same* width
+      // createConnectionLabel measured with — the critic scores the measured
+      // box (estimateLabelBox in src/core/geometry.js), so if the two disagree
+      // it judges a position nothing was drawn at.
+      const techLines = wrapText(techText, MAX_LABEL_WIDTH, 11);
+      const blockHeight = (mainLines.length + techLines.length) * LINE_HEIGHT;
       let lineY = midY - blockHeight / 2 + LINE_HEIGHT * 0.8;
 
       for (const line of mainLines) {
@@ -314,14 +326,17 @@ window.NudgeRenderer.connectionLabelRendering = {
         lineY += LINE_HEIGHT;
       }
 
-      const techEl = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      techEl.setAttribute("x", midX);
-      techEl.setAttribute("y", lineY);
-      techEl.setAttribute("text-anchor", "middle");
-      techEl.setAttribute("class", "edge-label-text");
-      techEl.setAttribute("style", "opacity: 0.85; font-size: 10px;");
-      techEl.textContent = techText;
-      labelsLayer.appendChild(techEl);
+      for (const line of techLines) {
+        const techEl = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        techEl.setAttribute("x", midX);
+        techEl.setAttribute("y", lineY);
+        techEl.setAttribute("text-anchor", "middle");
+        techEl.setAttribute("class", "edge-label-text");
+        techEl.setAttribute("style", "opacity: 0.85; font-size: 10px;");
+        techEl.textContent = line;
+        labelsLayer.appendChild(techEl);
+        lineY += LINE_HEIGHT;
+      }
     } else {
       const lines = wrapText(labelText, MAX_LABEL_WIDTH, 11);
       const blockHeight = lines.length * LINE_HEIGHT;

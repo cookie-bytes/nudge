@@ -92,6 +92,45 @@ test('createConnectionLabel splits the [technology] suffix onto its own line', (
   assert.ok(label.height >= 2 * 13, `expected two lines, height was ${label.height}`);
 });
 
+// The technology string used to be measured as one unbroken line, which made
+// `maxWidth` a lie for any label whose technology string was its widest part.
+// Such a label could not be narrowed at all, so the adaptive re-wrap (INC-16)
+// was a no-op on it and placement had to degrade to buried-in-an-element or
+// detached-from-its-line. See docs/label-buried-narrow-channel-fix.md.
+test('createConnectionLabel wraps a long [technology] string instead of leaving it on one line', () => {
+  const text = 'Authenticates via [OIDC application selecting manheim IDP configuration]';
+  const label = createConnectionLabel(text, 120);
+
+  assert.ok(
+    label.width <= 120,
+    `technology string did not wrap: width was ${label.width}, expected <= 120`
+  );
+  // Wrapping trades width for height: one main line plus three technology lines.
+  assert.ok(label.height >= 4 * 13, `expected four lines, height was ${label.height}`);
+});
+
+test('createConnectionLabel honours maxWidth for technology strings, so re-wrap can narrow a label', () => {
+  const text = 'Authenticates via [OIDC application selecting manheim IDP configuration]';
+  const wide = createConnectionLabel(text, 120);
+  const narrow = createConnectionLabel(text, 72);
+
+  assert.ok(
+    narrow.width < wide.width,
+    `re-wrapping did not narrow the box: ${wide.width} -> ${narrow.width}`
+  );
+  assert.ok(
+    narrow.height > wide.height,
+    `a narrower box must be taller: ${wide.height} -> ${narrow.height}`
+  );
+});
+
+test('createConnectionLabel leaves an unbreakable technology string alone', () => {
+  // No spaces to break on: wrapText cannot split it, and forcing a mid-word
+  // break would be worse than an over-wide box.
+  const label = createConnectionLabel('Connects over [JSON/HTTPS/WebSocket/TLS1.3]', 40);
+  assert.ok(label.width > 40, 'an unbreakable token should still report its true width');
+});
+
 test('measurement is deterministic across repeated calls', () => {
   const first = measureTextWidth('Delivers cached content to edge PoPs', 11);
   for (let i = 0; i < 100; i++) {

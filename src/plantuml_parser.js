@@ -31,7 +31,7 @@ export function parsePlantUMLC4(pumlString) {
   // Annotation note (parity with the Mermaid extension), using PlantUML's
   // native single-line note shape: `note right of X : text` /
   // `note left of X : text` / `note top of X : text`. `top of` maps to `over`.
-  const noteRegex = /^note\s+(right of|left of|top of)\s+(.+?)\s*:\s*(.+)$/i;
+  const noteRegex = /^note\s+(right of|left of|top of|bottom of|below of|bottom|below)\s+(.+?)\s*:\s*(.+)$/i;
   // Floating (unanchored) note: pinned to a canvas corner rather than an
   // element. `note bottom-right : text` (hyphen or space form). Parity with the
   // Mermaid extension. See docs/c4-floating-note-implementation-plan.md.
@@ -87,7 +87,10 @@ export function parsePlantUMLC4(pumlString) {
     if (noteMatch) {
       const [, rawPosition, rawRefs, text] = noteMatch;
       const lowered = rawPosition.toLowerCase();
-      const position = lowered === 'top of' ? 'over' : lowered.replace(/\s+of$/, '').trim();
+      let position;
+      if (lowered === 'top of') position = 'over';
+      else if (lowered === 'bottom of' || lowered === 'below of' || lowered === 'bottom' || lowered === 'below') position = 'below';
+      else position = lowered.replace(/\s+of$/, '').trim();
       const refs = rawRefs.split(',').map(r => r.trim()).filter(Boolean).slice(0, 2);
       if (refs.length > 0) {
         result.notes.push({

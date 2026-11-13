@@ -71,10 +71,20 @@ globalThis.NudgeRenderer.sharedText = (() => {
   function createConnectionLabel(labelText, maxWidth = MAX_LABEL_WIDTH) {
     const match = labelText.match(/^(.*?)\s*\[(.*?)\]$/);
     if (match) {
+      // The technology string wraps like any other text. It used to be measured
+      // as one unbroken line, which made `maxWidth` a lie for every label whose
+      // technology string was the widest part of it: such a label could not be
+      // narrowed at all, so the adaptive re-wrap (INC-16) was a no-op on it and
+      // it had to degrade to buried-in-an-element or detached-from-its-line.
+      // See docs/label-buried-narrow-channel-fix.md.
       const mainLines = wrapText(match[1].trim(), maxWidth, 11);
-      const techW = measureTextWidth(`[${match[2].trim()}]`, 11);
-      const w = Math.max(...mainLines.map(l => measureTextWidth(l, 11)), techW);
-      return { text: labelText, width: w, height: (mainLines.length + 1) * LINE_HEIGHT + 2 };
+      const techLines = wrapText(`[${match[2].trim()}]`, maxWidth, 11);
+      const w = Math.max(...[...mainLines, ...techLines].map(l => measureTextWidth(l, 11)));
+      return {
+        text: labelText,
+        width: w,
+        height: (mainLines.length + techLines.length) * LINE_HEIGHT + 2
+      };
     }
     const lines = wrapText(labelText, maxWidth, 11);
     return { text: labelText, width: Math.max(...lines.map(l => measureTextWidth(l, 11))), height: lines.length * LINE_HEIGHT + 2 };

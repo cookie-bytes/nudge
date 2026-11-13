@@ -1,0 +1,39 @@
+C4Context
+    title Narrow Channel Wide Label
+
+    %% Regression fixture for docs/label-buried-narrow-channel-fix.md.
+    %%
+    %% `checkout` → `payment-gateway` carries a technology string far wider than
+    %% the corridor between the two elements. Before the fix the label could not
+    %% be narrowed — createConnectionLabel measured a bracketed technology string
+    %% as one unbroken line, so the adaptive re-wrap (INC-16) was a no-op on it —
+    %% and it degraded into the source element as a Connection-Label Element
+    %% Crossing. No other corpus diagram has a technology string long enough to
+    %% exercise this.
+    %%
+    %% The topology is load-bearing, not decorative. `payment-gateway` must land
+    %% in the *right* external zone to get a narrow horizontal corridor, which
+    %% needs it called by an internal element that is not in the deepest layer
+    %% (see the zone classification in container_plan.js). Hence three layer-0
+    %% internals plus a deeper `fulfilment`. `ledger` has no internal edge, so it
+    %% inherits its partner's zone and stacks beneath the gateway.
+    %%
+    %% The synthetic context boundary matters too: its never-drawn border strips
+    %% used to bisect this very corridor.
+
+    Person(shopper, "Shopper", "Buys goods from the storefront.")
+    System(storefront, "Storefront", "Web storefront the shopper browses.")
+    System(catalogue, "Catalogue", "Serves product listings.")
+    System(checkout, "Checkout Service", "Takes payment for a basket.")
+    System(fulfilment, "Fulfilment Service", "Picks, packs and despatches orders.")
+    System_Ext(payment-gateway, "Payment Gateway", "Third party card processor.")
+    System_Ext(ledger, "Ledger", "Records settled transactions.")
+    System_Ext(courier, "Courier API", "Books despatch collections.")
+
+    Rel(shopper, storefront, "Browses and buys using", "HTTPS")
+    Rel(shopper, catalogue, "Browses listings on", "HTTPS")
+    Rel(shopper, checkout, "Pays through", "HTTPS")
+    Rel(storefront, fulfilment, "Raises orders with", "JSON/HTTPS")
+    Rel(checkout, payment-gateway, "Authorises payment via", "hosted payment page redirect with 3-D Secure step-up")
+    Rel(payment-gateway, ledger, "Settles through", "nightly batch")
+    Rel(fulfilment, courier, "Books collections with", "REST")

@@ -321,8 +321,27 @@ const elk = new ELK();
           noteWarnings
         );
 
-        // Canvas must grow to fit any note extending past the node bounds on the
-        // right/bottom (top/left overflow is handled by clamping in positionNotes).
+        // Canvas must grow to fit any note extending past the node bounds.
+        // For top/left overflow, shift the canvas origin so notes do not occlude boundary elements.
+        let minNoteX = NOTE_CANVAS_MIN_X;
+        let minNoteY = NOTE_CANVAS_MIN_Y;
+        for (const n of positionedNotes) {
+          minNoteX = Math.min(minNoteX, n.x);
+          minNoteY = Math.min(minNoteY, n.y);
+        }
+        const shiftX = Math.max(0, NOTE_CANVAS_MIN_X - minNoteX);
+        const shiftY = Math.max(0, NOTE_CANVAS_MIN_Y - minNoteY);
+
+        if (shiftX > 0 || shiftY > 0) {
+          for (const n of positionedNotes) {
+            n.x += shiftX;
+            n.y += shiftY;
+          }
+        }
+
+        const originX = DIAGRAM_H_PAD + shiftX;
+        const originY = 50 + shiftY;
+
         const NOTE_CANVAS_MARGIN = 16;
         let notesRight = 0, notesBottom = 0;
         for (const n of positionedNotes) {
@@ -338,22 +357,25 @@ const elk = new ELK();
         // Legend (bottom-left): a horizontal key of the element kinds actually
         // present. Built before canvas sizing so its height/width can be
         // reserved, then positioned against the final canvas bottom.
-        const legendModel = window.NudgeRenderer.legend.build(flatNodesForNotes, measureTextWidth);
+        const finalFlatNodes = (shiftX > 0 || shiftY > 0)
+          ? flattenNodes(laidOutGraph, originX, originY)
+          : flatNodesForNotes;
+        const legendModel = window.NudgeRenderer.legend.build(finalFlatNodes, measureTextWidth);
         const LEGEND_MARGIN_TOP = 12, LEGEND_MARGIN_BOTTOM = 12;
         const legendReserve = legendModel ? LEGEND_MARGIN_TOP + legendModel.height + LEGEND_MARGIN_BOTTOM : 0;
 
         const finalWidth = Math.max(
-          laidOutGraph.width + DIAGRAM_H_PAD * 2,
-          titleWidth,
+          laidOutGraph.width + originX + DIAGRAM_H_PAD,
+          titleWidth + shiftX,
           notesRight,
-          legendModel ? DIAGRAM_H_PAD * 2 + legendModel.width : 0
+          legendModel ? originX + DIAGRAM_H_PAD + legendModel.width : 0
         );
-        const finalHeight = Math.max(laidOutGraph.height + 50 + DIAGRAM_B_PAD, notesBottom) + legendReserve;
+        const finalHeight = Math.max(laidOutGraph.height + originY + DIAGRAM_B_PAD, notesBottom) + legendReserve;
 
-        const legendOriginX = DIAGRAM_H_PAD;
+        const legendOriginX = originX;
         const legendOriginY = legendModel ? finalHeight - LEGEND_MARGIN_BOTTOM - legendModel.height : 0;
 
-        // Render the graph using SVG (with 50px vertical offset for title)
+        // Render the graph using SVG
         const drawResult = window.NudgeRenderer.svgRenderer.drawGraph({
           graph: laidOutGraph,
           diagramData,
@@ -371,15 +393,17 @@ const elk = new ELK();
           LINE_HEIGHT,
           legendModel,
           legendOriginX,
-          legendOriginY
+          legendOriginY,
+          originX,
+          originY
         });
 
         return {
           success: true,
           width: finalWidth,
           height: finalHeight,
-          nodes: flattenNodes(laidOutGraph, DIAGRAM_H_PAD, 50),
-          edges: flattenEdges(laidOutGraph, DIAGRAM_H_PAD, 50),
+          nodes: flattenNodes(laidOutGraph, originX, originY),
+          edges: flattenEdges(laidOutGraph, originX, originY),
           notes: positionedNotes,
           warnings: [
             ...noteWarnings,
@@ -1045,8 +1069,6 @@ const elk = new ELK();
           const isRight = corner.endsWith('right');
           let x = isRight ? contentMaxX - width : contentMinX;
           let y = isBottom ? contentMaxY + NOTE_GAP : contentMinY - NOTE_GAP - height;
-          x = Math.max(x, NOTE_CANVAS_MIN_X);
-          y = Math.max(y, NOTE_CANVAS_MIN_Y);
           out.push({
             id: note.id,
             x: Math.round(x),
@@ -1102,14 +1124,6 @@ const elk = new ELK();
             y = anchor.y - NOTE_GAP - height;
             break;
         }
-
-        // Clamp into the drawable canvas: never above the title band or left of
-        // the margin (those areas clip). A hint that would push a note off the
-        // top/left instead lands it against the anchor — the critic then sees an
-        // overlap and the auto-placement loop relocates it to a clear side. The
-        // right/bottom edges need no clamp; the canvas grows to fit them.
-        x = Math.max(x, NOTE_CANVAS_MIN_X);
-        y = Math.max(y, NOTE_CANVAS_MIN_Y);
 
         out.push({
           id: note.id,

@@ -14,9 +14,10 @@ read in source at the cited line or measured by rendering the corpus through the
 pipeline. Nothing is inferred from behaviour alone.
 
 **Progress: 20 of 22 increments landed** — Phases 0, 1, 2, 3, 4 and 6 complete; Phase 5's crux
-(INC-16) and its scope decision (INC-23) landed. Line numbers cited below refer to the original
-commit and have moved. Remaining: **INC-15** (router lateral clearance) and **INC-18** (Playwright
-optional) — both deliberately deferred as large, high-blast-radius changes.
+(INC-16) landed, and INC-23 supplied the capability INC-16 was missing (a label whose technology
+string is its widest part can now actually be re-wrapped narrower). Line numbers cited below refer
+to the original commit and have moved. Remaining: **INC-15** (router lateral clearance) and
+**INC-18** (Playwright optional) — both deliberately deferred as large, high-blast-radius changes.
 Standing measurements, all ratcheted and printed by `npm test`:
 
 | Measure | Value | Where |
@@ -528,6 +529,35 @@ pivot that makes everything downstream falsifiable.
   the semver surface is the public API, the CLI flags and the MCP tool schema; **changed layout
   output is not a breaking change**, and in exchange every release states its quality delta
   against the INC-6 baseline. npm provenance and a release workflow are still open.
+
+- [x] **INC-23 · A Connection Label can be narrowed to fit its channel** · *size: medium* ·
+  [detailed spec + outcome: label-buried-narrow-channel-fix.md](label-buried-narrow-channel-fix.md)
+  - **Why:** `createConnectionLabel` wrapped a label's main text but measured the bracketed
+    technology string as one unbroken line. So for any label whose technology string was its
+    widest part, `maxWidth` was a lie and INC-16's adaptive re-wrap was a **no-op** — the one
+    lever that can fit a wide label into a narrow corridor did not move. Such a label had to
+    degrade either into an element (a class-3 Connection-Label Element Crossing, the One
+    Marketplace context diagram) or far away from its own line (an orphan the critic scores as
+    clean, [label-orphaning-fix.md](label-orphaning-fix.md)). Two failure modes, one missing
+    capability.
+  - **Landed:** technology strings wrap at `maxWidth` in both the measurement
+    (`createConnectionLabel`) and the drawing (`appendLabelText`) — the two must agree or the
+    critic scores a box nothing was drawn at. Separately, `buildBoundaryBorderObstacles` no longer
+    emits border strips for a **synthetic** boundary: the hidden wrapper around a C4Context's
+    internal elements is never drawn, so its strips protected nothing while bisecting real
+    corridors and blocking real escapes.
+  - **Extent is not obstacles.** Dropping those strips regressed three fixtures until the cause
+    was found: `contentBounds` was fed the obstacle set, whose only non-element members were the
+    strips, so removing them silently shrank the canvas and clamped labels onto their neighbours.
+    `buildBoundaryExtents` now supplies every boundary's footprint for bounds while the obstacle
+    list drops synthetic strips, and `nudgeLabelClear` takes `bounds` as a parameter instead of
+    re-deriving it. The `_borderStrip` list had quietly been doing two unrelated jobs.
+  - **Cost: zero.** Corpus defect totals are unchanged (92 ungated, all classes flat). Three
+    tech-dominated labels across two fixtures re-wrap narrower and taller; element geometry and
+    every route are byte-identical. The corpus gained
+    `refactor/narrow_channel_wide_label.{mermaid,puml}`, **verified to fail before the fix** —
+    nothing in the existing corpus had a technology string long enough to exercise this, which is
+    why the ratchet never caught it.
 
 ---
 

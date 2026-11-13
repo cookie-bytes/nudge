@@ -55,7 +55,14 @@ window.NudgeRenderer.sharedGeometry = (() => {
         type: graphNode.type,
         label: graphNode.label,
         inScope: graphNode.inScope,
-        supporting: graphNode.supporting
+        supporting: graphNode.supporting,
+        // Carried through because a synthetic boundary is never drawn, and
+        // consumers downstream have to be able to tell that (see
+        // buildBoundaryBorderObstacles). Dropping it here is what let an
+        // invisible border act as a hard obstacle for label placement.
+        // Added only when set, so the emitted node JSON is unchanged for every
+        // node that is not a synthetic boundary.
+        ...(graphNode._synthetic ? { _synthetic: true } : {})
       });
     }
 

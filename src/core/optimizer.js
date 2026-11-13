@@ -555,6 +555,8 @@ export async function optimizeDiagram({
           const stepBeforeSearch = acceptedStep;
 
           let resolved = false;
+          let bestCandidate = null;
+
           for (const side of [note.position, 'right', 'left', 'over', 'below']) {
             // Skip the side already in effect (re-rendering it is a no-op).
             const effectiveSide = (overrides.notePlacements || {})[note.id] || note.position;
@@ -571,17 +573,53 @@ export async function optimizeDiagram({
               `note ${note.id} -> ${side}`
             );
             acceptedStep = accepted.step || acceptedStep;
-            if (accepted.accepted && !overlappingNoteIds(acceptedStep.result).has(note.id)) {
-              resolved = true;
-              break;
+
+            if (accepted.step && accepted.step.result) {
+              const report = analyzeLayout(accepted.step.result);
+              const noteOverlaps = report.collisions.filter(
+                c => c.type === 'note_overlap' && (c.elements?.includes(note.id) || c.note === note.id)
+              ).length;
+              const isClean = !overlappingNoteIds(accepted.step.result).has(note.id);
+
+              if (
+                !bestCandidate ||
+                noteOverlaps < bestCandidate.noteOverlaps ||
+                (noteOverlaps === bestCandidate.noteOverlaps && accepted.score < bestCandidate.score)
+              ) {
+                bestCandidate = {
+                  step: accepted.step,
+                  overrides: candidateOverrides,
+                  side,
+                  noteOverlaps,
+                  score: accepted.score,
+                  isClean
+                };
+              }
+
+              if (accepted.accepted && isClean) {
+                resolved = true;
+                break;
+              }
             }
           }
 
           if (!resolved) {
-            // No side cleared the note: leave it at the author's hint and warn.
-            overrides = overridesBeforeSearch;
-            acceptedStep = stepBeforeSearch;
-            warnings.push(`Note ${note.id} could not be placed without overlap; left at author's hint ('${note.position}').`);
+            // Check if initial hinted placement had an element overlap
+            const initialReport = analyzeLayout(stepBeforeSearch.result);
+            const initialNoteOverlaps = initialReport.collisions.filter(
+              c => c.type === 'note_overlap' && (c.elements?.includes(note.id) || c.note === note.id)
+            ).length;
+
+            if (bestCandidate && bestCandidate.noteOverlaps < initialNoteOverlaps) {
+              overrides = bestCandidate.overrides;
+              acceptedStep = bestCandidate.step;
+              warnings.push(`Note ${note.id} could not be placed completely clear; relocated from '${note.position}' to '${bestCandidate.side}' to avoid element overlap.`);
+            } else {
+              // No side cleared or improved the note: leave it at the author's hint and warn.
+              overrides = overridesBeforeSearch;
+              acceptedStep = stepBeforeSearch;
+              warnings.push(`Note ${note.id} could not be placed without overlap; left at author's hint ('${note.position}').`);
+            }
           }
         }
       }

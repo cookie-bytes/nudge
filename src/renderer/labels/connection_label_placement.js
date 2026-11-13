@@ -444,7 +444,8 @@ globalThis.NudgeRenderer.connectionLabelPlacement = {
     labelBoxAt,
     targetNode,
     targetId,
-    labelEdgeHitCount
+    labelEdgeHitCount,
+    bounds = null
   }) {
     // Post-placement nudge: if final position overlaps an already-placed label
     // (Rule 3 / straight-middle don't check placedLabels during scoring), try vertical offsets.
@@ -459,7 +460,8 @@ globalThis.NudgeRenderer.connectionLabelPlacement = {
         placedLabels,
         obstacleNodes,
         boxesOverlap,
-        checkLabelCollision
+        checkLabelCollision,
+        bounds
       });
       midX = nudged.x;
       midY = nudged.y;
@@ -1058,7 +1060,8 @@ globalThis.NudgeRenderer.connectionLabelPlacement = {
     placedLabels,
     obstacleNodes,
     boxesOverlap,
-    checkLabelCollision
+    checkLabelCollision,
+    bounds: providedBounds = null
   }) {
     const labelH = textHeight + 2 * V_PAD;
     const labelW = textWidth + 2 * H_PAD;
@@ -1078,24 +1081,15 @@ globalThis.NudgeRenderer.connectionLabelPlacement = {
     // failure mode in docs/IMPROVEMENT_PLAN.md §1.1, caught by the property
     // test in test/integration/layout_invariants.test.js.
     //
-    // The obstacle set is every element plus the boundary border strips, so its
-    // union box is the content extent; the canvas is that plus padding, making
-    // this a safe conservative proxy without threading canvas size through the
-    // whole render call chain.
-    let bounds = null;
-    for (const obstacle of obstacleNodes) {
-      if (!Number.isFinite(obstacle.x) || !Number.isFinite(obstacle.y)) continue;
-      const right = obstacle.x + obstacle.width;
-      const bottom = obstacle.y + obstacle.height;
-      bounds = bounds
-        ? {
-            left: Math.min(bounds.left, obstacle.x),
-            top: Math.min(bounds.top, obstacle.y),
-            right: Math.max(bounds.right, right),
-            bottom: Math.max(bounds.bottom, bottom),
-          }
-        : { left: obstacle.x, top: obstacle.y, right, bottom };
-    }
+    // The extent is every element plus every boundary footprint, so its union
+    // box is the content extent; the canvas is that plus padding, making this a
+    // safe conservative proxy without threading canvas size through the whole
+    // render call chain. The caller passes it in because the obstacle set alone
+    // no longer describes it — a synthetic boundary is part of the extent but
+    // not an obstacle. Falling back to the obstacles keeps direct callers (the
+    // unit tests) working.
+    const bounds = providedBounds
+      ?? globalThis.NudgeRenderer.connectionLabelPlacement.contentBounds(obstacleNodes);
 
     const inBounds = (cx, cy) => {
       if (!bounds) return true;

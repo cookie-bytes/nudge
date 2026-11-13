@@ -14,9 +14,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import '../../src/vendor/outfit_metrics.js';
+import '../../src/renderer/shared/text.js';
 import '../../src/renderer/labels/connection_label_placement.js';
 
 const P = globalThis.NudgeRenderer.connectionLabelPlacement;
+const T = globalThis.NudgeRenderer.sharedText;
 
 const H_PAD = 4;
 const V_PAD = 3;
@@ -179,6 +182,37 @@ function nudge({ midX, midY, blockers = [], placedLabels = [] }) {
   });
 }
 
+// The obstacle set no longer describes the content extent on its own: a
+// synthetic context boundary is part of how far the diagram reaches but must
+// not block a label, so the caller computes bounds from a wider set and passes
+// them in. Deriving them from the obstacles instead silently shrank the canvas
+// and clamped labels on top of their neighbours.
+// See docs/label-buried-narrow-channel-fix.md.
+test('nudgeLabelClear accepts explicit bounds instead of inferring them from the obstacles', () => {
+  const blocker = box(150, 0, 120, 1000);
+  const tight = P.nudgeLabelClear({
+    midX: 200, midY: 100, textWidth: 60, textHeight: 20, H_PAD, V_PAD,
+    placedLabels: [],
+    obstacleNodes: [blocker],
+    boxesOverlap: P.boxesOverlap,
+    checkLabelCollision: (x, y, w, h, list) => P.checkLabelCollision(x, y, w, h, list, H_PAD, V_PAD),
+  });
+  // Bounds inferred from the single blocker collapse onto it, so no escape is
+  // in bounds and the label stays buried.
+  assert.deepEqual(tight, { x: 200, y: 100 }, 'inferred bounds leave it nowhere to go');
+
+  const roomy = P.nudgeLabelClear({
+    midX: 200, midY: 100, textWidth: 60, textHeight: 20, H_PAD, V_PAD,
+    placedLabels: [],
+    obstacleNodes: [blocker],
+    boxesOverlap: P.boxesOverlap,
+    checkLabelCollision: (x, y, w, h, list) => P.checkLabelCollision(x, y, w, h, list, H_PAD, V_PAD),
+    bounds: { left: 0, top: 0, right: 1000, bottom: 1000 },
+  });
+  assert.notEqual(roomy.x, 200, 'given the real extent it escapes sideways');
+  assert.ok(!P.checkLabelCollision(roomy.x, roomy.y, 60, 20, [blocker], H_PAD, V_PAD));
+});
+
 test('nudgeLabelClear leaves an already-clear label exactly where it is', () => {
   const result = nudge({ midX: 200, midY: 100, blockers: [box(600, 600, 50, 50)] });
   assert.deepEqual(result, { x: 200, y: 100 });
@@ -333,4 +367,157 @@ test('clampToBounds leaves an already-in-bounds box untouched', () => {
     midX: 500, midY: 500, textWidth: 60, textHeight: 20, H_PAD, V_PAD, bounds: BOUNDS,
   });
   assert.deepEqual(clamped, { x: 500, y: 500 });
+});
+
+// --- The narrow-channel case (docs/label-buried-narrow-channel-fix.md) -------
+
+// Geometry lifted verbatim from the One Marketplace context diagram, which
+// shipped a Connection Label buried in an architecture element. The channel
+// between the two elements is 220px; the label's technology string alone used
+// to measure 272px, and because it could not be wrapped there was no position
+// on the route that was not inside a box.
+//
+// The two halves of the fix meet here, so this pins both: `createConnectionLabel`
+// has to actually narrow the box, and the synthetic boundary that is never
+// drawn must not be an obstacle. Swap either back and this fails.
+const NARROW_CHANNEL = {
+  text: 'Authenticates via [OIDC application selecting manheim IDP configuration]',
+  route: [{ x: 1040, y: 470 }, { x: 1260, y: 470 }],
+  source: box(840, 440, 200, 140, { id: 'dealer-auction' }),
+  target: box(1260, 400, 200, 140, { id: 'google-idp' }),
+  others: [
+    box(160, 440, 200, 140, { id: 'simulcast' }),
+    box(500, 440, 200, 140, { id: 'manheim' }),
+    box(500, 690, 200, 140, { id: 'cdp-auth-service' }),
+    box(1260, 650, 200, 140, { id: 'autotrader-idp' }),
+  ],
+};
+
+function placeInNarrowChannel({ obstacles = [] } = {}) {
+  const { text, route, source, target, others } = NARROW_CHANNEL;
+  const elements = [source, target, ...others];
+  const obstacleNodes = [...elements, ...obstacles];
+  const dims = T.createConnectionLabel(text, T.MAX_LABEL_WIDTH);
+
+  const sampler = P.createLineSampler({ bendPoints: [] }, route[0], route[1], 0, 0, false);
+  const accessors = P.createCollisionAccessors({
+    H_PAD, V_PAD, allEdgesPoints: [], edge: { id: 'edge-under-test' },
+    targetNode: target, targetId: target.id, placedLabels: [],
+  });
+  const score = P.createCandidateScorer({
+    textWidth: dims.width, textHeight: dims.height,
+    obstacles: obstacleNodes, placedLabels: [], allComponents: elements,
+    preferSourceSideLabel: false, pStart: route[0],
+    pointToBoxDist: (x, y, n) => Math.hypot(
+      Math.max(n.x - x, 0, x - (n.x + n.width)),
+      Math.max(n.y - y, 0, y - (n.y + n.height)),
+    ),
+    labelBoxAt: accessors.labelBoxAt,
+    checkLabelCollision: accessors.checkLabelCollision,
+    labelEdgeHitCount: accessors.labelEdgeHitCount,
+    sharedTargetLabelPressure: accessors.sharedTargetLabelPressure,
+    boxesOverlap: P.boxesOverlap,
+  });
+  const adapters = P.createPlacementAdapters({
+    preferSourceSideLabel: false, arrowAtSource: false,
+    points: sampler.points, totalLen: sampler.totalLen, segLens: sampler.segLens,
+    pStart: route[0], textWidth: dims.width, textHeight: dims.height,
+    getPointAtFraction: sampler.getPointAtFraction, labelCandidateScore: score,
+    hasBendPoints: false, obstacles: obstacleNodes,
+    checkLabelCollision: accessors.checkLabelCollision,
+    checkLabelEdgeCollision: accessors.checkLabelEdgeCollision,
+  });
+
+  let { midX, midY } = P.chooseInitialLabelPlacement({
+    preferSourceSideLabel: false, isConsumeBusLabel: false,
+    anchorOrder: P.getAnchorOrder(false),
+    tryPlaceClearMidpoint: adapters.tryPlaceClearMidpoint,
+    tryPlaceSourceSideRouteBand: adapters.tryPlaceSourceSideRouteBand,
+    tryPlaceAnchor: adapters.tryPlaceAnchor,
+    labelAnchorCandidate: adapters.labelAnchorCandidate,
+    points: sampler.points, textWidth: dims.width, textHeight: dims.height,
+    labelCandidateScore: score, edge: { id: 'edge-under-test' }, labelHints: null,
+  });
+
+  ({ midX, midY } = P.adjustFinalLabelPlacement({
+    midX, midY, points: sampler.points,
+    textWidth: dims.width, textHeight: dims.height, H_PAD, V_PAD,
+    placedLabels: [], obstacleNodes,
+    boxesOverlap: P.boxesOverlap,
+    checkLabelCollision: accessors.checkLabelCollision,
+    labelBoxAt: accessors.labelBoxAt,
+    targetNode: target, targetId: target.id,
+    labelEdgeHitCount: accessors.labelEdgeHitCount,
+    bounds: P.contentBounds([...obstacleNodes, ...elements]),
+  }));
+
+  return {
+    box: P.labelBoxAt(midX, midY, dims.width, dims.height, H_PAD, V_PAD),
+    dims,
+    elements,
+    route: sampler.points,
+  };
+}
+
+test('a label too wide for its channel is narrowed enough to sit in it', () => {
+  const { dims } = placeInNarrowChannel();
+  const channelWidth = NARROW_CHANNEL.target.x - (NARROW_CHANNEL.source.x + NARROW_CHANNEL.source.width);
+  assert.ok(
+    dims.width + 2 * H_PAD <= channelWidth,
+    `label box ${dims.width + 2 * H_PAD}px still exceeds the ${channelWidth}px channel`,
+  );
+});
+
+test('a label in a narrow channel is never buried in an architecture element', () => {
+  const { box: placed, elements } = placeInNarrowChannel();
+  for (const element of elements) {
+    assert.ok(
+      !P.boxesOverlap(placed, element),
+      `label was buried in '${element.id}'`,
+    );
+  }
+});
+
+test('a label in a narrow channel stays attached to its own line', () => {
+  // The other half of the done bar: escaping burial by parking the label far
+  // from its route swaps one defect for an orphan the critic cannot see.
+  const { box: placed, dims, route } = placeInNarrowChannel();
+  const labelHeight = dims.height + 2 * V_PAD;
+  const distance = P.boxToPolylineDistance(placed, route);
+  assert.ok(
+    distance <= labelHeight,
+    `label drifted ${distance.toFixed(1)}px from its line (max ${labelHeight}px)`,
+  );
+});
+
+test('with no border strips in the way the label sits centred in its channel', () => {
+  // This is what A1 buys. A C4Context's synthetic boundary is never drawn, and
+  // one of its border strips ran straight down this corridor; while those
+  // strips were emitted, the best on-line position was displaced sideways to
+  // dodge an invisible obstacle. `buildBoundaryBorderObstacles` now skips
+  // synthetic boundaries, so nothing is in the corridor and the label lands on
+  // the midpoint — the first candidate the placer tries.
+  //
+  // Marking the strips `_borderStrip` is not enough on its own: the flag makes
+  // them *soft* for the failure check and the rescue cost, but they are still
+  // hard obstacles for the midpoint and nudge stages. They have to not exist.
+  const { box: placed } = placeInNarrowChannel();
+  const centre = placed.x + placed.width / 2;
+  const channelMidpoint = (NARROW_CHANNEL.source.x + NARROW_CHANNEL.source.width
+    + NARROW_CHANNEL.target.x) / 2;
+
+  assert.equal(centre, channelMidpoint, 'label is not centred in the channel');
+
+  const strips = [
+    box(68, 348, 1064, 24, { _borderStrip: true }),
+    box(68, 902, 1064, 24, { _borderStrip: true }),
+    box(68, 348, 24, 578, { _borderStrip: true }),
+    box(1108, 348, 24, 578, { _borderStrip: true }),
+  ];
+  const displaced = placeInNarrowChannel({ obstacles: strips });
+  assert.notEqual(
+    displaced.box.x + displaced.box.width / 2, channelMidpoint,
+    'strips in the corridor should displace the label — if they no longer do, '
+    + 'this test has stopped covering why synthetic boundaries are excluded',
+  );
 });

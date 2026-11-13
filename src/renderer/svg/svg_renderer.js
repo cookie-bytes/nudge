@@ -7,13 +7,13 @@ window.NudgeRenderer.svgRenderer = {
     });
   },
 
-  renderDiagramTitle(diagramData, DIAGRAM_H_PAD) {
+  renderDiagramTitle(diagramData, titleX = DIAGRAM_H_PAD) {
     const displayType = diagramData && diagramData.diagramType === "C4Container" ? "C4 Container Diagram" : "C4 Context Diagram";
     const titleText = `${displayType} : ${(diagramData && diagramData.title) || "Untitled"}`;
     const titleLayer = document.getElementById("title-layer");
     if (titleLayer) {
       const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
-      text.setAttribute("x", DIAGRAM_H_PAD);
+      text.setAttribute("x", titleX);
       text.setAttribute("y", 35);
       text.setAttribute("class", "diagram-title-text");
       text.textContent = titleText;
@@ -41,14 +41,17 @@ window.NudgeRenderer.svgRenderer = {
     return finalWidth;
   },
 
-  prepareDrawContext({ graph, DIAGRAM_H_PAD, flattenNodes, flattenEdges }) {
-    const flatNodes = flattenNodes(graph, DIAGRAM_H_PAD, 50);
+  prepareDrawContext({ graph, DIAGRAM_H_PAD, flattenNodes, flattenEdges, originX, originY }) {
+    const ox = originX != null ? originX : DIAGRAM_H_PAD;
+    const oy = originY != null ? originY : 50;
+    const flatNodes = flattenNodes(graph, ox, oy);
     const flatNodeById = new Map(flatNodes.map(n => [n.id, n]));
     const allComponents = flatNodes.filter(n => n.type !== 'boundary');
     const boundaryBorderObstacles = window.NudgeRenderer.svgRenderer.buildBoundaryBorderObstacles(flatNodes);
+    const boundaryExtents = window.NudgeRenderer.svgRenderer.buildBoundaryExtents(flatNodes);
 
     // Gather all edges and their exact drawn points to check for label-edge crossings
-    const flatEdges = flattenEdges(graph, DIAGRAM_H_PAD, 50);
+    const flatEdges = flattenEdges(graph, ox, oy);
     const allEdgesPoints = window.NudgeRenderer.connectionLineRendering.buildAllEdgesPoints(flatEdges);
 
     return {
@@ -56,14 +59,47 @@ window.NudgeRenderer.svgRenderer = {
       flatNodeById,
       allComponents,
       boundaryBorderObstacles,
+      boundaryExtents,
       flatEdges,
       allEdgesPoints
     };
   },
 
-  buildBoundaryBorderObstacles(flatNodes) {
+  // Every boundary's full footprint, synthetic ones included, as one inflated
+  // rect each. This is *extent*, not obstacle: a synthetic boundary is not
+  // drawn and must not block a label, but it still describes how far the
+  // diagram's content reaches, and `contentBounds` needs that to decide what
+  // counts as off-canvas.
+  //
+  // Keeping the two apart matters. `contentBounds` used to be fed the border
+  // strips and nothing else, so excluding synthetic strips from the obstacle
+  // set silently shrank the drawable area too — a label sitting beside a route
+  // that runs outside the element union was then judged off-canvas and clamped
+  // on top of its neighbour. The inflation matches the strip clearance, so the
+  // union here is identical to the union the four strips used to produce.
+  buildBoundaryExtents(flatNodes) {
+    const clearance = 12;
     return flatNodes
       .filter(n => n.type === 'boundary')
+      .map(n => ({
+        x: n.x - clearance,
+        y: n.y - clearance,
+        width: n.width + clearance * 2,
+        height: n.height + clearance * 2
+      }));
+  },
+
+  buildBoundaryBorderObstacles(flatNodes) {
+    return flatNodes
+      // A synthetic boundary — the hidden wrapper normalizeDiagramModel puts
+      // around a C4Context's internal elements — is never drawn, so there is no
+      // border for a label to clip and nothing for these strips to protect.
+      // Emitting them anyway cost the placer four large forbidden regions: in
+      // the One Marketplace context the strips blocked the only clear escape
+      // for a wide label *and* bisected the corridor it had to sit in, forcing
+      // a Connection-Label Element Crossing. See
+      // docs/label-buried-narrow-channel-fix.md.
+      .filter(n => n.type === 'boundary' && !n._synthetic)
       .flatMap(n => {
         const clearance = 12;
         // _borderStrip marks these as soft obstacles: a label clipping a thin
@@ -117,6 +153,7 @@ window.NudgeRenderer.svgRenderer = {
     unsatisfiableLabels,
     allComponents,
     boundaryBorderObstacles,
+    boundaryExtents,
     pointToBoxDist,
     wrapText,
     MAX_LABEL_WIDTH,
@@ -166,6 +203,7 @@ window.NudgeRenderer.svgRenderer = {
             placedLabels,
             allComponents,
             boundaryBorderObstacles,
+            boundaryExtents,
             pointToBoxDist,
             wrapText,
             MAX_LABEL_WIDTH,
@@ -190,6 +228,7 @@ window.NudgeRenderer.svgRenderer = {
         unsatisfiableLabels,
         allComponents,
         boundaryBorderObstacles,
+        boundaryExtents,
         pointToBoxDist,
         wrapText,
         MAX_LABEL_WIDTH,
@@ -225,14 +264,16 @@ window.NudgeRenderer.svgRenderer = {
     LINE_HEIGHT,
     legendModel = null,
     legendOriginX = 0,
-    legendOriginY = 0
+    legendOriginY = 0,
+    originX = DIAGRAM_H_PAD,
+    originY = 50
   }) {
     const svg = document.getElementById("svg-root");
     // Clear layers
     window.NudgeRenderer.svgRenderer.clearLayers();
 
-    // Render diagram title
-    const titleText = window.NudgeRenderer.svgRenderer.renderDiagramTitle(diagramData, DIAGRAM_H_PAD);
+    // Render diagram title (aligned with originX)
+    const titleText = window.NudgeRenderer.svgRenderer.renderDiagramTitle(diagramData, originX);
 
     const finalWidth = window.NudgeRenderer.svgRenderer.configureViewport({
       svg,
@@ -248,12 +289,15 @@ window.NudgeRenderer.svgRenderer = {
       flatNodeById,
       allComponents,
       boundaryBorderObstacles,
+      boundaryExtents,
       allEdgesPoints
     } = window.NudgeRenderer.svgRenderer.prepareDrawContext({
       graph,
       DIAGRAM_H_PAD,
       flattenNodes,
-      flattenEdges
+      flattenEdges,
+      originX,
+      originY
     });
     const placedLabels = [];
     const unsatisfiableLabels = [];
@@ -262,12 +306,12 @@ window.NudgeRenderer.svgRenderer = {
       BOUNDARY_H_PAD
     });
 
-    // 1. Draw nodes and boundary boxes (with vertical offset of 50px)
+    // 1. Draw nodes and boundary boxes (using dynamic origin)
     window.NudgeRenderer.svgRenderer.renderNodeTree({
       node: graph,
       shapeStrategies,
-      absoluteParentX: DIAGRAM_H_PAD,
-      absoluteParentY: 50
+      absoluteParentX: originX,
+      absoluteParentY: originY
     });
 
     // 1b. Draw annotation notes above the nodes (their boxes already carry
@@ -276,17 +320,18 @@ window.NudgeRenderer.svgRenderer = {
 
     const labelHints = diagramData._layoutOverrides?.labelHints;
 
-    // 2. Draw connector lines (edges) recursively (with vertical offset of 50px)
+    // 2. Draw connector lines (edges) recursively (using dynamic origin)
     window.NudgeRenderer.svgRenderer.renderEdges({
       node: graph,
-      absoluteParentX: DIAGRAM_H_PAD,
-      absoluteParentY: 50,
+      absoluteParentX: originX,
+      absoluteParentY: originY,
       flatNodeById,
       allEdgesPoints,
       placedLabels,
       unsatisfiableLabels,
       allComponents,
       boundaryBorderObstacles,
+      boundaryExtents,
       pointToBoxDist,
       wrapText,
       MAX_LABEL_WIDTH,

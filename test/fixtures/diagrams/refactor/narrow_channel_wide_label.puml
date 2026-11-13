@@ -1,0 +1,30 @@
+@startuml
+!include <C4/C4_Context>
+    title Narrow Channel Wide Label
+
+  ' Regression fixture for docs/label-buried-narrow-channel-fix.md — the
+  ' PlantUML twin of narrow_channel_wide_label.mermaid. Keep the two in step:
+  ' the parity rig compares the two lanes, and a defect present in both is
+  ' invisible to it.
+  '
+  ' checkout -> payment-gateway carries a technology string far wider than the
+  ' corridor between the two elements. The topology puts payment-gateway in the
+  ' right external zone, which is what makes that corridor narrow.
+
+    Person(shopper, "Shopper", "Buys goods from the storefront.")
+    System(storefront, "Storefront", "Web storefront the shopper browses.")
+    System(catalogue, "Catalogue", "Serves product listings.")
+    System(checkout, "Checkout Service", "Takes payment for a basket.")
+    System(fulfilment, "Fulfilment Service", "Picks, packs and despatches orders.")
+    System_Ext(payment-gateway, "Payment Gateway", "Third party card processor.")
+    System_Ext(ledger, "Ledger", "Records settled transactions.")
+    System_Ext(courier, "Courier API", "Books despatch collections.")
+
+    Rel(shopper, storefront, "Browses and buys using", "HTTPS")
+    Rel(shopper, catalogue, "Browses listings on", "HTTPS")
+    Rel(shopper, checkout, "Pays through", "HTTPS")
+    Rel(storefront, fulfilment, "Raises orders with", "JSON/HTTPS")
+    Rel(checkout, payment-gateway, "Authorises payment via", "hosted payment page redirect with 3-D Secure step-up")
+    Rel(payment-gateway, ledger, "Settles through", "nightly batch")
+    Rel(fulfilment, courier, "Books collections with", "REST")
+@enduml

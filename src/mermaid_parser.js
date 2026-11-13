@@ -29,7 +29,7 @@ export function parseMermaidC4(mermaidString) {
   // syntax): `Note right of X: text` / `Note left of X: text` /
   // `Note over X: text` / spanning `Note over X,Y: text`. A note line is
   // line-prefixed (not `Name(...)` form) so it never reaches the macro branch.
-  const noteRegex = /^Note\s+(right of|left of|over)\s+(.+?)\s*:\s*(.+)$/i;
+  const noteRegex = /^Note\s+(right of|left of|over|below of|bottom of|below|bottom)\s+(.+?)\s*:\s*(.+)$/i;
   // Floating (unanchored) note: pinned to a canvas corner rather than an
   // element. `Note bottom-right: text` (hyphen or space form). No anchor id;
   // rendered in the margin. See docs/c4-floating-note-implementation-plan.md.
@@ -82,7 +82,8 @@ export function parseMermaidC4(mermaidString) {
     const noteMatch = line.match(noteRegex);
     if (noteMatch) {
       const [, rawPosition, rawRefs, text] = noteMatch;
-      const position = rawPosition.toLowerCase().replace(/\s+of$/, '').trim(); // 'right of'->'right', 'over'->'over'
+      const rawPos = rawPosition.toLowerCase().replace(/\s+of$/, '').trim(); // 'right of'->'right', 'over'->'over', 'bottom of'->'bottom'
+      const position = (rawPos === 'bottom') ? 'below' : rawPos;
       const refs = rawRefs.split(',').map(r => r.trim()).filter(Boolean).slice(0, 2);
       if (refs.length > 0) {
         result.notes.push({
