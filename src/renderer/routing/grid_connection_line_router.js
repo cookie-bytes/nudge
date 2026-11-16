@@ -599,26 +599,28 @@ globalThis.NudgeRenderer.gridConnectionLineRouter = (() => {
     const FACE_MARGIN = 8;   // dock points keep this distance from face corners
     const MIN_STUB = 4;      // interior moves must not collapse/flip neighbours
 
+    // Does an axis-aligned run at `lane` from `lo` to `hi` pass through the
+    // interior of any element? Shared by the post-route passes that slide runs.
+    function segmentHitsObstacle(vertical, lane, lo, hi) {
+      const m = 2;
+      for (const o of obstacles) {
+        if (vertical) {
+          if (lane > o.x + m && lane < o.x + o.width - m &&
+              Math.max(lo, o.y + m) < Math.min(hi, o.y + o.height - m)) return true;
+        } else {
+          if (lane > o.y + m && lane < o.y + o.height - m &&
+              Math.max(lo, o.x + m) < Math.min(hi, o.x + o.width - m)) return true;
+        }
+      }
+      return false;
+    }
+
     function straightenKinks(sections) {
       const pointsByEdge = sections.map(section =>
         section
           ? [section.startPoint, ...(section.bendPoints || []), section.endPoint].map(p => ({ x: p.x, y: p.y }))
           : null
       );
-
-      function segmentHitsObstacle(vertical, lane, lo, hi) {
-        const m = 2;
-        for (const o of obstacles) {
-          if (vertical) {
-            if (lane > o.x + m && lane < o.x + o.width - m &&
-                Math.max(lo, o.y + m) < Math.min(hi, o.y + o.height - m)) return true;
-          } else {
-            if (lane > o.y + m && lane < o.y + o.height - m &&
-                Math.max(lo, o.x + m) < Math.min(hi, o.x + o.width - m)) return true;
-          }
-        }
-        return false;
-      }
 
       pointsByEdge.forEach((pts, idx) => {
         if (!pts) return;
@@ -862,6 +864,92 @@ globalThis.NudgeRenderer.gridConnectionLineRouter = (() => {
       });
     }
 
+    // ── Straight-drop centring (sensible-defaults pass) ─────────────────────
+    // A straight, bend-free line between two elements that face each other
+    // (stacked, or side by side) reads best through the middle of both. The
+    // router picks among equal-cost dock slots arbitrarily, so such a line
+    // often lands a quarter-width off centre. Once every line is final, slide
+    // each such line onto the centre of the two faces' overlap — but only
+    // when it is the sole line on both faces (a neighbour on the face would
+    // squeeze its connection label against that line), the new lane clears
+    // every element and every near-parallel neighbour, and the line's
+    // conflict cost does not rise. Runs last so routing order is untouched.
+    function centreStraightDrops(sections) {
+      const pointsByEdge = sections.map(section =>
+        section
+          ? [section.startPoint, ...(section.bendPoints || []), section.endPoint].map(p => ({ x: p.x, y: p.y }))
+          : null
+      );
+
+      // Line endpoints, other than `selfIdx`'s, that dock on one face of `el`.
+      function othersOnFace(el, vertical, faceCoord, selfIdx) {
+        let count = 0;
+        pointsByEdge.forEach((pts, k) => {
+          if (!pts || k === selfIdx) return;
+          for (const p of [pts[0], pts[pts.length - 1]]) {
+            const across = vertical ? p.y : p.x;
+            const along = vertical ? p.x : p.y;
+            const lo = vertical ? el.x : el.y;
+            const hi = vertical ? el.x + el.width : el.y + el.height;
+            if (Math.abs(across - faceCoord) <= 1 && along >= lo - 1 && along <= hi + 1) count++;
+          }
+        });
+        return count;
+      }
+
+      function nearParallelNeighbour(vertical, lane, lo, hi, selfIdx) {
+        return pointsByEdge.some((pts, k) => {
+          if (!pts || k === selfIdx) return false;
+          return polylineToSegments(pts, k).some(s =>
+            s.axis === (vertical ? 'v' : 'h') &&
+            Math.abs(s.lane - lane) < MIN_PARALLEL_GAP &&
+            Math.max(s.lo, lo) < Math.min(s.hi, hi));
+        });
+      }
+
+      pointsByEdge.forEach((pts, idx) => {
+        if (!pts || pts.length !== 2) return;
+        const src = obstacleById.get(allEdges[idx].from);
+        const tgt = obstacleById.get(allEdges[idx].to);
+        if (!src || !tgt || src.id === tgt.id) return;
+        const [a, b] = pts;
+        const vertical = Math.abs(a.x - b.x) <= 0.5 && Math.abs(a.y - b.y) > 0.5;
+        const horizontal = Math.abs(a.y - b.y) <= 0.5 && Math.abs(a.x - b.x) > 0.5;
+        if (!vertical && !horizontal) return;
+
+        // Centre of the overlap of the two faces, across the line's direction.
+        const lo = vertical ? Math.max(src.x, tgt.x) : Math.max(src.y, tgt.y);
+        const hi = vertical
+          ? Math.min(src.x + src.width, tgt.x + tgt.width)
+          : Math.min(src.y + src.height, tgt.y + tgt.height);
+        if (hi - lo < 2 * FACE_MARGIN) return;
+        const lane = (lo + hi) / 2;
+        const current = vertical ? a.x : a.y;
+        if (Math.abs(current - lane) <= 0.5) return;
+
+        if (othersOnFace(src, vertical, vertical ? a.y : a.x, idx) > 0) return;
+        if (othersOnFace(tgt, vertical, vertical ? b.y : b.x, idx) > 0) return;
+
+        const runLo = Math.min(vertical ? a.y : a.x, vertical ? b.y : b.x);
+        const runHi = Math.max(vertical ? a.y : a.x, vertical ? b.y : b.x);
+        if (segmentHitsObstacle(vertical, lane, runLo, runHi)) return;
+        if (nearParallelNeighbour(vertical, lane, runLo, runHi, idx)) return;
+
+        const saved = pts.map(p => ({ ...p }));
+        const before = edgeConflictCostIn(pointsByEdge, idx);
+        for (const p of pts) { if (vertical) p.x = lane; else p.y = lane; }
+        if (edgeConflictCostIn(pointsByEdge, idx) > before) {
+          pts.forEach((p, i) => { p.x = saved[i].x; p.y = saved[i].y; });
+        }
+      });
+
+      return sections.map((section, idx) => {
+        if (!section) return section;
+        const points = collapseCollinear(pointsByEdge[idx]);
+        return points.length >= 2 ? pointsToSection(points) : section;
+      });
+    }
+
     function routeAll() {
       const sections = new Array(allEdges.length).fill(null);
 
@@ -925,7 +1013,7 @@ globalThis.NudgeRenderer.gridConnectionLineRouter = (() => {
         }
       }
 
-      return lengthenTerminalApproaches(straightenKinks(nudgeSections(sections)));
+      return centreStraightDrops(lengthenTerminalApproaches(straightenKinks(nudgeSections(sections))));
     }
 
     return { routeAll, graph };

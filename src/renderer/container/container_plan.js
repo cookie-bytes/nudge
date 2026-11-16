@@ -276,6 +276,23 @@ window.NudgeRenderer.containerPlan = {
       zoneMap.set(node.id, zone);
     }
 
+    // Author-declared sides win over the connectivity classification. A
+    // directed Relationship (`Rel_R(api, aims)`) names the side of its source
+    // that its target sits on, so an external target takes that side and an
+    // external source takes the opposite one. Only Relationships that cross
+    // the Boundary count; the first directed one declared for an element wins.
+    const DIRECTION_ZONE = { up: 'above', down: 'below', left: 'left', right: 'right' };
+    const OPPOSITE_ZONE  = { above: 'below', below: 'above', left: 'right', right: 'left' };
+    const authoredZoneIds = new Set();
+    for (const e of extEdges) {
+      const zone = DIRECTION_ZONE[e.direction];
+      if (!zone) continue;
+      const extId = extMap.has(e.to) ? e.to : e.from;
+      if (!extMap.has(extId) || authoredZoneIds.has(extId)) continue;
+      zoneMap.set(extId, extId === e.to ? zone : OPPOSITE_ZONE[zone]);
+      authoredZoneIds.add(extId);
+    }
+
     let aboveNodes = extNodes.filter(n => zoneMap.get(n.id) === 'above');
     let belowNodes = extNodes.filter(n => zoneMap.get(n.id) === 'below');
     let leftNodes  = extNodes.filter(n => zoneMap.get(n.id) === 'left');
@@ -373,7 +390,7 @@ window.NudgeRenderer.containerPlan = {
     return {
       boundaryNode, children, childIds, allEdges, intEdges,
       extNodes, extMap, layers, nodeLayerIdx, nodeColIdx,
-      aboveNodes, belowNodes, leftNodes, rightNodes
+      aboveNodes, belowNodes, leftNodes, rightNodes, authoredZoneIds
     };
   }
 };

@@ -51,7 +51,7 @@ const elk = new ELK();
             ? null
             : window.NudgeRenderer.containerPlan.buildContainerZonePlan(diagramData);
           if (plan) {
-            const { extNodes } = plan;
+            const { extNodes, authoredZoneIds } = plan;
             
             const getLaidOutNodes = (graph) => {
               const res = [];
@@ -166,6 +166,9 @@ const elk = new ELK();
             const movedByLoop = new Set();
             console.log("[Optimizer] Loop started. extNodes count:", extNodes.length);
             for (const extNode of extNodes) {
+              // The author named this element's side with a directed
+              // Relationship (Rel_U/D/L/R); never move it off that side.
+              if (authoredZoneIds?.has(extNode.id)) continue;
               const connectedEdges = (laidOutGraph.edges || []).filter(e =>
                 e.sources?.includes(extNode.id) || e.targets?.includes(extNode.id)
               );
