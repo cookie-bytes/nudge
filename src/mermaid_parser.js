@@ -242,11 +242,10 @@ export function parseMermaidC4(mermaidString) {
         if (tech) {
           edgeLabel = `${label} [${tech}]`;
         }
-        result.edges.push({
-          from,
-          to,
-          label: edgeLabel
-        });
+        const edge = { from, to, label: edgeLabel };
+        const direction = relDirection(macroLower);
+        if (direction) edge.direction = direction;
+        result.edges.push(edge);
         continue;
       }
     }
@@ -308,4 +307,15 @@ function parseArgs(argsStr) {
     }
     return clean;
   });
+}
+
+// Direction suffix of a Relationship macro — `Rel_U`/`Rel_Up`, `Rel_D`/`Rel_Down`,
+// `Rel_L`/`Rel_Left`, `Rel_R`/`Rel_Right`, and the `BiRel_*` forms — as the side
+// of the source the target is drawn on. C4-PlantUML defines these and Mermaid's
+// C4 syntax lists them as supported. `Rel_Back` and `Rel_Neighbor` describe
+// arrow rendering and rank, not a side, so they return null like plain `Rel`.
+function relDirection(macroLower) {
+  const m = /^(?:bi)?rel_(u|up|d|down|l|left|r|right)$/.exec(macroLower);
+  if (!m) return null;
+  return { u: 'up', up: 'up', d: 'down', down: 'down', l: 'left', left: 'left', r: 'right', right: 'right' }[m[1]];
 }
