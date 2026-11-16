@@ -228,3 +228,31 @@ test('weights profile exposes the documented cost knobs', () => {
     assert.ok(Number.isFinite(WEIGHTS[key]), `missing weight: ${key}`);
   }
 });
+
+test('straight drops between stacked elements dock at the face centre regardless of unrelated elements', () => {
+  // Geometry captured from a real render where both drops docked on the ¾ slot:
+  // every slot gives an equal-cost straight drop, and before the portCentre
+  // tie-break the A* heap picked one by internal order, which changed when an
+  // unrelated element (here, far to the left) added grid lines.
+  const stacked = [
+    { id: 'bus', x: 590, y: 0, width: 200, height: 140 },
+    { id: 'gw', x: 590, y: 330, width: 200, height: 140 },
+    { id: 'api', x: 590, y: 580, width: 200, height: 140 }
+  ];
+  const allEdges = [{ from: 'bus', to: 'gw', label: 'events' }, { from: 'gw', to: 'api', label: 'forwards' }];
+  const bounds = { x: 0, y: 0, width: 1380, height: 1534 };
+  const layouts = [
+    stacked,
+    [...stacked, { id: 'auth', x: 0, y: 460, width: 200, height: 140 }],
+    [...stacked, { id: 'awards', x: 1180, y: 540, width: 200, height: 140 }]
+  ];
+  for (const obstacles of layouts) {
+    const sections = routeAllEdges({ allEdges, obstacles, bounds });
+    sections.forEach((section, i) => {
+      const label = `${allEdges[i].from}->${allEdges[i].to} with ${obstacles.length} elements`;
+      assert.equal(section.bendPoints.length, 0, `${label}: straight drop`);
+      assert.equal(section.startPoint.x, 690, `${label}: exits at source centre`);
+      assert.equal(section.endPoint.x, 690, `${label}: enters at target centre`);
+    });
+  }
+});
