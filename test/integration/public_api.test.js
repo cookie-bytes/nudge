@@ -120,6 +120,85 @@ test('the exported SVG opens as a standalone document and paints its own ground'
   }
 });
 
+test('the exported SVG carries the font it was measured against', { timeout: 180000 }, async () => {
+  // Every box in the diagram is sized from the baked Outfit metrics, so a
+  // viewer that substitutes another face lays out text that does not fit the
+  // geometry — overflowing boxes, overlapping labels. The export used to name
+  // `Outfit` and carry nothing, because the face arrived over a <link> to
+  // Google Fonts that `captureSvg` neither inlines nor can inline. It looked
+  // correct to everyone with Outfit installed, and to every PNG.
+  const { svg } = await renderDiagram({ source: MERMAID });
+
+  assert.ok(svg.includes('@font-face'), 'the export must declare its own faces');
+  assert.ok(svg.includes('data:font/woff2;base64,'), 'faces must be embedded, not linked');
+  // Namespace declarations are themselves http:// URIs but are never fetched,
+  // so this bans the two things that would be: a fetched resource and an
+  // imported stylesheet.
+  assert.doesNotMatch(svg, /url\(\s*['"]?https?:/i, 'the export must not fetch a resource');
+  assert.doesNotMatch(svg, /@import/i, 'the export must not import a stylesheet');
+  assert.doesNotMatch(svg, /fonts\.(googleapis|gstatic)\.com/, 'the export must not reference Google Fonts');
+
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'nudge-font-test-')), 'export.svg');
+  fs.writeFileSync(file, svg);
+
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    // Offline, so a face that is still fetched rather than embedded cannot
+    // quietly succeed here and fail on a reader's machine.
+    await page.context().setOffline(true);
+    await page.goto(`file://${file}`);
+    const probe = await page.evaluate(async () => {
+      await document.fonts.ready;
+      // Deliberately *not* loading the faces by hand first. A face loads when
+      // something renders in it, so an untouched `status` is the signal that
+      // the document asked for the font at all — which is the half of this that
+      // carrying the bytes does not cover. `font-family` used to be declared on
+      // `body`, which a standalone SVG does not have, so every label fell back
+      // to the viewer's serif default while the embedded faces sat unused.
+      const titleFamily = getComputedStyle(document.querySelector('.diagram-title-text')).fontFamily;
+      const wrapper = document.querySelector('foreignObject > *');
+      return {
+        titleFamily,
+        // Element text is HTML in a foreignObject; inheritance has to reach it.
+        wrapperFamily: wrapper && getComputedStyle(wrapper).fontFamily,
+        // Faces from @font-face rules land in document.fonts; a system-installed
+        // Outfit would not, so this cannot pass for the wrong reason on a
+        // machine that happens to have the font.
+        families: [...document.fonts].map(f => f.family),
+        statuses: [...document.fonts].map(f => f.status),
+        // True only when a loaded face can actually render at this weight.
+        resolvesBold: document.fonts.check('600 13px Outfit'),
+        resolvesRegular: document.fonts.check('400 11px Outfit'),
+      };
+    });
+
+    assert.ok(probe.families.length > 0, 'the exported document declared no faces');
+    assert.deepEqual(
+      [...new Set(probe.families)],
+      ['Outfit'],
+      'the export should carry Outfit and nothing else'
+    );
+    // Carrying the bytes is half of it; the document also has to ask for them.
+    assert.match(probe.titleFamily, /^["']?Outfit/, 'the diagram title must render in Outfit');
+    assert.match(probe.wrapperFamily, /^["']?Outfit/, 'element text must inherit Outfit into foreignObject');
+
+    // A face loads when something renders in it, so these are only 'loaded'
+    // because the two assertions above hold. 'error' would mean a payload that
+    // does not decode — a truncated or mis-encoded base64 blob.
+    assert.ok(!probe.statuses.includes('error'), 'an embedded face failed to decode');
+    assert.ok(
+      probe.statuses.includes('loaded'),
+      `no embedded face was used by the document (statuses: ${probe.statuses.join(', ')})`
+    );
+    assert.ok(probe.resolvesBold, 'Outfit must resolve at the weight element titles use');
+    assert.ok(probe.resolvesRegular, 'Outfit must resolve at the weight descriptions use');
+  } finally {
+    await browser.close();
+    fs.rmSync(path.dirname(file), { recursive: true, force: true });
+  }
+});
+
 test('renderDiagram renders the requested theme', { timeout: 180000 }, async () => {
   const dark = await renderDiagram({ source: MERMAID, theme: 'dark' });
   const light = await renderDiagram({ source: MERMAID, theme: 'light' });

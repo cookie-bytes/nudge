@@ -17,6 +17,10 @@ src/vendor/*
 # Generation is byte-deterministic and test/unit/font_metrics_sync.test.js fails
 # if the committed table ever drifts from the generator.
 !src/vendor/outfit_metrics.js
+# ...and the baked @font-face rules, committed for the same reason: without them
+# an `--omit=dev` install renders and exports in whatever face the viewer
+# substitutes, which is not the one every box was sized from.
+!src/vendor/outfit_faces.js
 
 # Debug logs
 npm-debug.log*

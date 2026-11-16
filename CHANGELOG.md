@@ -133,7 +133,32 @@ any release.
   including private tooling and the whole test corpus; it now ships 47.
 
 ### Fixed
-- **Exported SVGs were transparent.** `body { background-color }` was inlined
+- **Exported SVGs named a font they did not carry.** The stylesheet asked for
+  `Outfit` while the face itself arrived over a `<link>` to Google Fonts, which
+  `captureSvg` neither inlines nor can inline. Any reader without Outfit
+  installed got a substituted face — and since every box is sized from the baked
+  Outfit metrics, substituted text does not fit the geometry it was measured
+  for: overflowing boxes and overlapping labels. PNGs were never affected,
+  because Chromium had fetched the webfont before it rasterised. The four
+  weights the renderer uses are now baked into `src/vendor/outfit_faces.js` as
+  `data:` URLs and inlined with the rest of the stylesheet, so an export is
+  self-contained and renders identically everywhere. This adds ~73 kB to each
+  exported SVG, which is still well under half the PNG of the same diagram.
+- **Exported SVGs rendered every label in the viewer's serif default.**
+  `font-family` was declared on `body`, which — exactly like the background
+  colour before it — matches nothing in a standalone SVG, so the export
+  inherited no typeface at all and fell back to serif. This was invisible while
+  the faces were missing too (a substituted face either way), and it is why
+  embedding the font alone did not fix the export. The typeface is now declared
+  on `:root`, which is the html element in the render page and the svg element
+  in the export, and inheritance reaches `foreignObject` content in both.
+- **Rendering no longer touches the network.** `render.html` loads over
+  `file://`, so that Google Fonts `<link>` was a live fetch on every render —
+  and nothing waited for it. A screenshot taken before the face arrived
+  rasterised a fallback into boxes measured for Outfit: the same
+  lazily-loaded-webfont race that text measurement was moved off canvas to
+  escape, still present in the drawing layer. The faces are now local and
+  `document.fonts.ready` is awaited before any capture.
   into the export along with the rest of the stylesheet, but `body` matches
   nothing in a standalone SVG, so every exported diagram was light-on-nothing:
   fine on a dark page, unreadable anywhere else. The diagram now paints its own

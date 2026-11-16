@@ -21,7 +21,7 @@
     "UBIQUITOUS_LANGUAGE.md"
   ],
   "scripts": {
-    "postinstall": "node -e \"const fs=require('fs');fs.mkdirSync('src/vendor',{recursive:true});fs.copyFileSync(require.resolve('elkjs/lib/elk.bundled.js'),'src/vendor/elk.bundled.js');\" && node -e \"const fs=require('fs'),s='scripts/generate_font_metrics.js';if(fs.existsSync(s))require('child_process').execFileSync(process.execPath,[s],{stdio:'inherit'});else if(!fs.existsSync('src/vendor/outfit_metrics.js'))throw new Error('outfit_metrics.js missing from package');\"",
+    "postinstall": "node -e \"const fs=require('fs');fs.mkdirSync('src/vendor',{recursive:true});fs.copyFileSync(require.resolve('elkjs/lib/elk.bundled.js'),'src/vendor/elk.bundled.js');\" && node -e \"const fs=require('fs'),s='scripts/generate_font_metrics.js';if(fs.existsSync(s))require('child_process').execFileSync(process.execPath,[s],{stdio:'inherit'});else if(!fs.existsSync('src/vendor/outfit_metrics.js'))throw new Error('outfit_metrics.js missing from package');\" && node -e \"const fs=require('fs'),s='scripts/generate_font_faces.js';if(fs.existsSync(s))require('child_process').execFileSync(process.execPath,[s],{stdio:'inherit'});else if(!fs.existsSync('src/vendor/outfit_faces.js'))throw new Error('outfit_faces.js missing from package');\"",
     "start": "node src/cli/index.js examples/search_service_container.mermaid",
     "probe:apply-port-hints": "node scripts/port_hint_apply_probe.js",
     "probe:port-hints": "node scripts/port_hint_probe.js",
