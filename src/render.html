@@ -3,13 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <title>Nudge Diagram Renderer</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <script src="vendor/elk.bundled.js"></script>
   <!-- Baked Outfit glyph metrics. Must load before renderer/shared/text.js,
        which measures against them instead of a canvas (INC-9). -->
   <script src="vendor/outfit_metrics.js"></script>
+  <!-- Baked Outfit faces as data: URLs, injected into the stylesheet below.
+       This replaced a <link> to Google Fonts, which was wrong twice over: this
+       page loads over file://, so every render went to the network and nothing
+       waited for it; and `captureSvg` inlines only this page's own <style>, so
+       the export named a font it did not carry and any viewer without Outfit
+       installed substituted a face the geometry was never measured for. -->
+  <script src="vendor/outfit_faces.js"></script>
   <style>
     /* Theme tokens.
      *
@@ -128,11 +132,19 @@
       --shadow: rgba(15, 23, 42, 0.12);
       --shadow-subtle: rgba(15, 23, 42, 0.1);
     }
+    /* The typeface is declared on `:root`, not on `body`, for exactly the reason
+       the canvas ground is a rect: `body` matches nothing in an exported
+       standalone SVG, so every label inherited the viewer's default — serif,
+       usually — no matter which faces the file carried. `:root` is the html
+       element in this page and the svg element in the export, and inheritance
+       reaches foreignObject content in both. */
+    :root {
+      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
     body {
       margin: 0;
       padding: 0;
       background-color: var(--canvas);
-      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       overflow: hidden;
     }
     #diagram-container {
@@ -340,6 +352,20 @@
       text-overflow: ellipsis;
     }
   </style>
+  <!-- The faces go into *this* stylesheet rather than one of their own, because
+       `captureSvg` inlines exactly one element — `head style` — and an export
+       without the faces is the bug this is here to fix. Prepended, so the rules
+       precede every selector that uses them. @font-face carries no
+       `selectorText`, so the export's light-theme scan walks straight past. -->
+  <script>
+    (() => {
+      const sheet = document.querySelector('head style');
+      if (!globalThis.NudgeOutfitFaces) {
+        throw new Error('Outfit faces missing. Run: node scripts/generate_font_faces.js');
+      }
+      sheet.textContent = globalThis.NudgeOutfitFaces + '\n' + sheet.textContent;
+    })();
+  </script>
 </head>
 <body>
   <div id="diagram-container">

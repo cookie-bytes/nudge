@@ -422,6 +422,11 @@ export async function optimizeDiagram({
 
     const templateUrl = new URL('../render.html', import.meta.url).href;
     await page.goto(templateUrl);
+    // The faces are data: URLs, so this resolves without a network round trip —
+    // but it resolves asynchronously all the same, and nothing downstream waited
+    // for it. A screenshot taken while the face was still loading rasterises a
+    // fallback into boxes sized from the Outfit metrics.
+    await page.evaluate(() => document.fonts.ready);
     // Before any render: the intermediate step PNGs should be in the same
     // theme as the final output, not the default one.
     await applyTheme(page, primaryTheme);

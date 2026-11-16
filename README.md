@@ -124,7 +124,8 @@ Each candidate is scored against Element Overlaps, Connection-Line Element Cross
 - 🏷️ **Collision-Aware Label Placement**: Edge labels check four strategies sequentially — straight-middle, target-anchored, source-anchored, and edge-density-aware segment scoring. Each strategy checks for collision against node boxes, already-placed labels, and connection lines, preventing co-terminal labels from stacking and reducing label-edge intersections.
 - 🔌 **Orthogonal Grid Routing**: Connection lines use A* search over a sparse orthogonal visibility graph, keeping track of heading to penalize bends. Multiple slots on faces act as shared port resources. The system runs hardest-first, performs rip-up-and-reroute optimization, and finishes with a channel nudging phase that spreads parallel segments. Legacy candidate routing remains as a fallback for unplaced leaf/cross-hierarchy elements.
 - 🌐 **Connectivity-Based Zone Sorting**: External nodes are auto-sorted to align with the internal layer or column they connect to, reducing edge crossings without LLM intervention.
-- 🏠 **Local-First Runtime**: Rendering runs locally with Playwright and bundled ELKjs. Optional AI polish can use a local OpenAI-compatible backend such as LM Studio.
+- 🏠 **Local-First Runtime**: Rendering runs locally with Playwright, bundled ELKjs and a baked copy of the Outfit webfont — no network call on any render. Optional AI polish can use a local OpenAI-compatible backend such as LM Studio.
+- 🔤 **Self-Contained Exports**: The exported SVG carries its own `@font-face` rules as `data:` URLs, so it renders in the font its geometry was measured against even on a machine that has never seen Outfit. An export fetches nothing and imports nothing.
 
 ---
 
